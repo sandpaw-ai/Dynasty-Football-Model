@@ -1,2 +1,258 @@
-# Dynasty-Football-Model
-Dynasty Football Model
+# Dynasty Football Model
+
+A composite dynasty fantasy football ranking model. Pulls from multiple
+public data sources, weights each source by its historical accuracy, and
+publishes a blended top-300 with **buy / sell signals** based on where the
+model disagrees with the broader fantasy market.
+
+Output is a self-contained `dynasty_rankings.html` you can open in any browser.
+
+---
+
+## Quick start (non-technical users)
+
+1. Install Python 3.12 — https://www.python.org/downloads/ (on Windows,
+   check "Add Python to PATH" during install).
+2. Double-click the script for your OS:
+   - macOS → `RUN_ME_MAC.command`
+   - Windows → `RUN_ME_WINDOWS.bat`
+3. The script sets up everything on first run (~1 min), syncs sources,
+   computes the model, and opens the rankings page in your browser.
+
+To refresh later, just double-click the script again (~10s).
+
+See `READ_ME_FIRST.txt` for security-warning workarounds (macOS Gatekeeper,
+Windows SmartScreen) and troubleshooting.
+
+---
+
+## Quick start (developers)
+
+```bash
+git clone https://github.com/pstiehl/Dynasty-Football-Model
+cd Dynasty-Football-Model
+python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -e .
+
+# One-time DB setup + canonical player map
+python -m dynasty.cli init-db
+python -m dynasty.cli sync-players
+
+# Pull rankings from every source and compute the composite
+python -m dynasty.cli sync-all
+python -m dynasty.cli score --league-format sf_ppr
+python -m dynasty.cli top --n 30 --league-format sf_ppr
+```
+
+Generate the static HTML report:
+
+```bash
+python -m dynasty.launcher_headless        # writes dynasty_rankings.html
+```
+
+---
+
+## Methodology
+
+The model is a **weighted composite** of independent ranking sources. Each
+source's weight is multiplied by a track-record factor derived from backtests
+against real NFL fantasy production.
+
+### 1. Pull from many sources
+
+Each source is an adapter (`src/dynasty/sources/*.py`) that returns
+normalized `RankingRecord`s. Sources are categorized:
+
+| Category     | Meaning                                              | Examples                  |
+|--------------|------------------------------------------------------|---------------------------|
+| `market`     | Reflects real fantasy-manager behavior / trades      | FantasyCalc               |
+| `aggregator` | Blends many experts into a consensus                 | FantasyPros ECR, DynastyProcess |
+| `expert`     | A single analyst's published list                    | Manual CSV imports        |
+| `model`      | Algorithmic prospect / dynasty model                 | Brainy Ballers SPS, PFF   |
+
+The Sleeper player API is used purely for **canonical ID resolution** — every
+player is tied to a `sleeper_id`, which cross-references MFL, ESPN, Yahoo,
+FantasyCalc, etc.
+
+### 2. Normalize each source
+
+For each source we either:
+
+- Convert overall rank to a 0–100 score with linear decay over a depth of
+  300 (rank 1 = 100, rank 300 = 0, rank > 300 = 0), **or**
+- Rescale the source's native `market_value` (e.g. FantasyCalc trade values)
+  to 0–100 against that source's top value.
+
+### 3. Weight by track record
+
+Each source has a `default_weight`. At score time we multiply by a
+**track-record multiplier** derived from backtests against actual NFL
+production:
+
+| Spearman \|ρ\| vs. realized production | Multiplier |
+|-----------------------------------------|-----------:|
+| ≥ 0.70                                  | 1.5        |
+| ≥ 0.50                                  | 1.2        |
+| ≥ 0.30                                  | 1.0        |
+| < 0.30                                  | 0.6        |
+| no backtest yet                         | 1.0        |
+
+This means **the more accurately a source has predicted the future, the more
+the model listens to it**. Sources that have not been backtested yet are
+treated as neutral (multiplier = 1.0).
+
+### 4. Composite
+
+For every player, composite score = weighted average of available per-source
+scores. Players are then ranked overall and per-position.
+
+### 5. Consensus divergence (buy / sell signals)
+
+Separately, the model computes a "market consensus rank" using only the
+`market` and `aggregator` sources — i.e. where the broader fantasy community
+has the player.
+
+```
+rank_divergence = consensus_rank − model_rank
+```
+
+- **Positive divergence** → the model likes the player more than the market →
+  **buy signal**
+- **Negative divergence** → the model lower than the market →
+  **sell signal**
+
+This is the most useful column for actually playing dynasty: it tells you
+where the model thinks the market is wrong.
+
+### 6. Tiers
+
+Composite ranks are bucketed into simple tiers (T1: top 6, T2: 7–12, T3:
+13–24, etc.) for portfolio-level decisions.
+
+---
+
+## Sources currently wired up
+
+| Source              | Type        | Status                                   |
+|---------------------|-------------|------------------------------------------|
+| FantasyCalc         | market      | ✅ free public API, fetched daily         |
+| Sleeper             | aggregator  | ✅ free public API — player ID map        |
+| DynastyProcess      | aggregator  | ✅ free open CSV (FantasyPros consensus)  |
+| Brainy Ballers      | model       | ✅ public Top-500 scrape (rate-limited)   |
+| FantasyPros direct  | aggregator  | 🔒 stub — requires paid API key           |
+| PFF                 | model       | 🔒 stub — requires paid API partnership   |
+| Manual CSV          | expert      | ✅ via `dynasty.manual_import.import_csv` |
+
+> **Note on KeepTradeCut:** KTC's ToS forbids scraping. FantasyCalc is the
+> closest legal substitute — values come from real fantasy-manager trades
+> and update multiple times per day.
+
+Adding a new source: implement `BaseSource` in `src/dynasty/sources/new_source.py`,
+register it in `sources/__init__.py`, and the rest of the pipeline (player
+resolution, time-series storage, composite scoring, backtest weighting)
+picks it up automatically.
+
+---
+
+## Backtesting
+
+Every source's accuracy can be measured against realized NFL fantasy
+production:
+
+```bash
+python -m dynasty.cli backtest fantasycalc --years 2020,2021,2022 --window 3
+```
+
+This writes a `source_track_record` row containing Spearman correlation,
+R², MAE, and top-12 / top-24 hit-rate over an outcome window of `N` seasons.
+The next time you run `score`, that source's weight is automatically
+adjusted by the track-record multiplier table above.
+
+---
+
+## Data model
+
+Five tables (SQLAlchemy 2.0 ORM, SQLite by default — set `DATABASE_URL`
+to use Postgres):
+
+- `players` — canonical entity, keyed by `sleeper_id`; cross-references
+  `mfl_id`, `espn_id`, `yahoo_id`, etc.
+- `sources` — one row per ranking source.
+- `rankings` — **time-series**: every sync appends; never overwrites. This
+  is what powers trend signals and backtests.
+- `production` — actual NFL fantasy production by season / week.
+- `evaluations` — granular per-metric scores (PFF grades, Reception
+  Perception route data, model outputs).
+- `composite_scores` — model output, append-only history with breakdown JSON.
+- `source_track_record` — per-source backtest results that feed the weighting.
+
+See `src/dynasty/db/models.py` for the full schema.
+
+---
+
+## Project layout
+
+```
+src/dynasty/
+  cli.py                # Typer CLI entry point
+  config.py             # env-based settings (pydantic-settings)
+  sync.py               # source → DB sync layer (player resolution)
+  scoring.py            # composite score + divergence math
+  backtest.py           # per-source accuracy calculation
+  manual_import.py      # import expert rankings from CSV
+  scheduler.py          # APScheduler — daily syncs in `run-scheduler`
+  report.py             # HTML report generator
+  launcher.py           # GUI launcher (open browser)
+  launcher_headless.py  # CI / GitHub Pages launcher
+  starter_pack.py       # first-run player seed
+  production_loader.py  # weekly NFL production loader
+  sources/              # one adapter per ranking source
+    base.py             # BaseSource ABC + RankingRecord dataclass
+    fantasycalc.py
+    dynastyprocess.py
+    sleeper.py
+    brainy_ballers.py
+    fantasypros.py      # stub
+    pff.py              # stub
+  db/
+    models.py           # SQLAlchemy schema
+    session.py          # engine + session factory
+tests/
+  smoke_test.py
+```
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env` and edit as needed:
+
+```ini
+DATABASE_URL=sqlite:///dynasty.db
+FANTASYPROS_API_KEY=        # optional, enables fantasypros source
+PFF_API_KEY=                # optional, enables pff source
+REQUEST_TIMEOUT_SECONDS=30
+```
+
+---
+
+## Roadmap
+
+- League roster import (MFL + Sleeper) — KeepTradeCut-style "rate my
+  team / league" view from the user's actual rosters.
+- Additional model-grade prospect sources (Reception Perception, PFF Big
+  Board, Hayden Winks, Dane Brugler "Beast", Matt Harmon Reception
+  Perception, etc.) — manual import for now, paid API where available.
+- Position-specific track records (a source may be great at WR and weak
+  at RB — currently the model uses overall-only multipliers).
+- Trade calculator (sum of values on each side, with positional scarcity
+  adjustment).
+- Mock-draft tool for rookie drafts.
+
+---
+
+## License
+
+Personal project — no license declared. All third-party data is fetched
+from publicly-published endpoints in accordance with each source's
+Terms of Service.

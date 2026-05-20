@@ -1,0 +1,11 @@
+name = "dynasty-model-proxy"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+workers_dev = true
+
+# After `wrangler deploy`, the worker URL will be something like
+#   https://dynasty-model-proxy.<your-cf-subdomain>.workers.dev
+# Copy that URL into the site config (see scripts/cf-worker/README.md).
+
+[observability]
+enabled = true

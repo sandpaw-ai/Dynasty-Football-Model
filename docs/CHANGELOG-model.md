@@ -15,6 +15,67 @@ Format for each entry:
 
 ---
 
+## v0.9.0 — RAS data + retired-player filter + league page on site (PR #9)
+
+**Date:** 2026-05-20
+
+User-feedback iteration after PRs #2–#8 went live. Three fixes.
+
+**1. RAS data populated**
+- `scripts/build_ras_csv.py` (new) generates a computed-RAS CSV from the
+  public nflverse Combine release: position-adjusted z-scores of
+  Combine measurements (40, vertical, broad, shuttle, 3-cone, bench,
+  height, weight) mapped to a 0–10 scale per position cohort.
+- `data/ras/ras_database.csv` committed with 3,131 rows (2000–2026
+  skill-position combine entries).
+- This is **not** Kent Lee Platte's canonical RAS — it's a transparent
+  re-implementation of the idea using only public nflverse data.
+  `data/ras/README.md` lists the differences. If you obtain Kent's
+  actual CSV later, drop it in to replace.
+- Effect on the model: RAS source jumps from 0 → 3,131 rows. Composite
+  scoring uses it at 1.5× weight for WR/TE rookies (per PR #6).
+
+**2. Retired-player filter in scoring**
+- `scoring.py` now skips any player whose ONLY rankings come from
+  rookie-signal sources (`nfl_draft_capital`, `ras`, `cfbd_breakouts`).
+  Rationale: these players (Henry Ruggs, Laviska Shenault Jr., KJ
+  Hamler, etc.) have draft-day rankings on file but no current market
+  / model / consensus read because they're retired or off rosters.
+  They were polluting the top of the composite as "no consensus"
+  outliers.
+- Filter cuts ~380 inactive players from the sf_ppr composite (1,254
+  → 873 in local testing). Top 20 is now exclusively active stars.
+
+**3. Rate-My-League page on the site**
+- New `league.html` page on the published site. Paste a Sleeper league
+  ID, the page fetches the Sleeper API client-side (CORS-friendly),
+  joins to a `assets/model_scores.json` lookup the build pipeline
+  emits, and renders:
+  - Power rankings (teams sorted by total roster value)
+  - Per-team breakdown: total / avg / top-5 assets / weaknesses
+  - vs-league-average divergence per team
+- Nav link added: Overview / Rankings / **Rate My League** / Sources
+- `model_scores.json` uses an UNBOUNDED query (not the top-300 cap)
+  so deep rosters (12-team × 35 = 420+) all resolve.
+- MFL leagues still CLI-only (MFL's API doesn't allow CORS).
+
+**Files touched**
+- `scripts/build_ras_csv.py` (new)
+- `data/ras/ras_database.csv` (new, 3,131 rows)
+- `data/ras/README.md` — documents what's in the CSV
+- `.gitignore` — allow committed RAS CSV
+- `src/dynasty/scoring.py` — corroboration filter for rookie-signal-only
+  players
+- `src/dynasty/report.py` — `_build_league_page`, `model_scores.json`
+  emission, nav link
+
+**Validation**
+- Smoke + all 6 source/league test files still pass.
+- Local end-to-end run: top 20 in sf_ppr is now all active starters
+  (was Ruggs at #2, Shenault at #12 in PR #2's first live build).
+
+---
+
 ## v0.8.0 — League import (Sleeper + MFL) — rate-my-league (PR #7)
 
 **Date:** 2026-05-20

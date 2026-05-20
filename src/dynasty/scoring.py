@@ -34,6 +34,7 @@ from .weights import (
     years_pro_modifier,
     select_track_record_multiplier,
     corr_to_multiplier,
+    ROOKIE_SIGNAL_SOURCES,
 )
 
 
@@ -234,6 +235,17 @@ def compute_composite_scores(
         generated_at = datetime.utcnow()
         results = []
         for pid, items in contribs.items():
+            # Corroboration filter: skip players whose ONLY rankings come
+            # from pre-NFL / rookie-signal sources (nfl_draft_capital, ras,
+            # cfbd_breakouts). These are typically retired or no-longer-on-
+            # roster players who still have draft-day rankings on file but
+            # no current consensus / model / market read. They show up to
+            # users as "no consensus" outliers, polluting the top of the
+            # rankings.
+            slugs_present = {slug for slug, _, _, _, _ in items}
+            if slugs_present and slugs_present.issubset(ROOKIE_SIGNAL_SOURCES):
+                continue
+
             total_w = sum(w for _, _, _, w, _ in items)
             if total_w <= 0:
                 continue

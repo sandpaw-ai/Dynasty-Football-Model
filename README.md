@@ -142,6 +142,7 @@ Composite ranks are bucketed into simple tiers (T1: top 6, T2: 7–12, T3:
 | **NFL Draft capital** | model       | ✅ nflverse public CSV (rookies + recent classes — see `docs/RESEARCH-sources.md` §A1) |
 | **FFC ADP**           | market      | ✅ FantasyFootballCalculator public REST API (PPR, 2QB, Dynasty, Rookie — §A3) |
 | **RAS**               | model       | ✅ Kent Lee Platte's Relative Athletic Score — drop CSV in `data/ras/` (§A2)  |
+| **CFBD breakouts**    | model       | ✅ College Breakout Age + Dominator — drop CSV in `data/cfbd/` (§C1)           |
 | FantasyPros direct    | aggregator  | 🔒 stub — requires paid API key           |
 | PFF                   | model       | 🔒 stub — requires paid API partnership   |
 | Manual CSV            | expert      | ✅ via `dynasty.manual_import.import_csv` |
@@ -218,6 +219,7 @@ src/dynasty/
     nfl_draft_capital.py
     ffc_adp.py
     ras.py
+    cfbd_breakouts.py
     fantasypros.py      # stub
     pff.py              # stub
   db/
@@ -228,8 +230,10 @@ tests/
   test_nfl_draft_capital.py
   test_ffc_adp.py
   test_ras.py
+  test_cfbd_breakouts.py
 data/
   ras/                  # drop Kent Lee Platte's RAS CSV here (gitignored)
+  cfbd/                 # drop college Breakout Age + Dominator CSV here (gitignored)
 docs/
   RESEARCH-sources.md     # 440-line source-landscape writeup w/ citations
   CHANGELOG-model.md      # what each release shifts about score outputs
@@ -263,8 +267,9 @@ Near-term:
   FantasyCalc.~~ (PR #3 — done)
 - ~~**RAS (Relative Athletic Score)** — Kent Lee Platte's free CSV. Best free
   athleticism composite; especially useful as a tail-risk filter.~~ (PR #4 — done)
-- **Breakout Age + College Dominator** — computed from `cfbd-api-py` college
-  stats. Replicates ~80% of PlayerProfiler's "secret sauce" for free. (PR #5)
+- ~~**Breakout Age + College Dominator** — computed from `cfbd-api-py` college
+  stats. Replicates ~80% of PlayerProfiler's "secret sauce" for free.~~
+  (PR #5 — CSV ingestion done; live CFBD API integration is a follow-up.)
 - **Position-specific + years-pro weighting** — the same source should not
   weight the same for a rookie WR and a Year-6 RB. Refactors
   `SourceTrackRecord` lookup to apply position-level multipliers. (PR #6)

@@ -15,6 +15,77 @@ Format for each entry:
 
 ---
 
+## v0.6.0 — College Breakout Age + Dominator source (PR #5)
+
+**Date:** 2026-05-20
+
+**What changed**
+- New ranking source: `cfbd_breakouts` (slug). Reads pre-computed college
+  features from a local CSV at `data/cfbd/breakouts.csv` (overridable via
+  `DYNASTY_CFBD_CSV_PATH`).
+- Two engineered features per prospect:
+  - **Breakout Age** — the season a player first posted college dominator
+    ≥ 20%. Younger = better.
+  - **Best College Dominator** — best-season share of team rec yds + rec
+    TDs (for WR/TE) or all-purpose yds + TDs (for RB).
+- Blended into `composite_college_score = 0.6 * normalized_breakout_age +
+  0.4 * dominator`, exposed as a public helper for downstream use.
+  Breakout-age normalization uses an 18–2 3 floor–ceiling (earliest plausible
+  freshman breakout → latest plausible senior bloomer).
+- Filters to skill positions (QB/RB/WR/TE). Emits per-position-per-draft-
+  class rankings (rank 1 = highest composite score in that year & position),
+  flagged `is_rookie_only`.
+- Only the last 6 draft classes emit rankings; older rows still enrich the
+  Player table.
+- `default_weight = 0.9`, `category = model`.
+- Missing CSV → adapter yields nothing (sync-all still works).
+- Live CFBD API integration is deliberately deferred to a follow-up PR to
+  keep the dependency surface small and review scope tight — the CSV
+  ingestion path is the supported workflow today.
+
+**Why**
+- Research doc §C1: Breakout Age (Pearson r ≈ 0.43 with NFL fantasy points
+  for WRs) and College Dominator are the two highest-leverage college
+  production signals. Together they replicate ~80% of what PlayerProfiler
+  charges for; both are computable from free CFBD data.
+- Engineering as one composite source (rather than two separate sources)
+  keeps the registry clean and lets PR #6's position-aware weighting target
+  a single slug while still leveraging both inputs.
+
+**Expected output shift**
+- Once a CSV is dropped in: rookies with **young breakouts and high
+  dominator** — the prototypical "alpha at his college team" — get a
+  noticeable bump in the composite at WR/TE.
+- Older breakouts who weren't featured in their offense get a drag.
+- For RBs the signal is weaker than for WR/TE (per research) but still
+  positive. PR #6 will let us tune the position-specific weight.
+- QB is included for completeness but should be near-zero-weighted at QB
+  level once PR #6 lands.
+- `rank_divergence` becomes more useful for rookies: a prospect with weak
+  market value but strong college metrics now shows as a divergence buy.
+
+**Validation**
+- Backtest at WR specifically: `backtest_source("cfbd_breakouts",
+  years=[2019..2022], window_years=3)` should report a Spearman correlation
+  in the 0.25–0.45 range. If it's near zero, either the CSV is sparse or
+  the composite weighting needs tuning.
+- Sanity: among recent classes, hand-check that early-breakout high-dominator
+  WRs (the typical "alpha" archetype) rank near the top within their class.
+
+**Files touched**
+- `src/dynasty/sources/cfbd_breakouts.py` (new) — includes
+  `composite_college_score()` as a public helper for downstream reuse
+- `src/dynasty/sources/__init__.py` — registry entry
+- `data/cfbd/README.md` (new) — schema docs + how to drop the CSV in
+- `.gitignore` — ignores `data/cfbd/*.csv|xlsx|tsv`
+- `tests/test_cfbd_breakouts.py` (new) — fixture-driven, no network
+
+**Migration note**
+- No schema changes in this PR. New source registers cleanly on existing
+  databases.
+
+---
+
 ## v0.5.0 — RAS (Relative Athletic Score) source (PR #4)
 
 **Date:** 2026-05-20

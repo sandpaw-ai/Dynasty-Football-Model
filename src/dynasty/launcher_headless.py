@@ -52,7 +52,9 @@ def main():
         # Market + consensus (core composite signal)
         ("fantasycalc", "FantasyCalc"),
         ("dynastyprocess", "DynastyProcess"),
-        ("ffc_adp", "FFC ADP"),
+        # ffc_adp removed v0.10: its top picks consistently disagreed with
+        # dynasty-superflex consensus because FFC's user base skews casual /
+        # redraft. Adapter file kept on disk for future re-enable.
         # Model + analytics overlays
         ("brainy_ballers", "Brainy Ballers"),
         ("nfl_draft_capital", "NFL Draft Capital"),

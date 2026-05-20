@@ -737,19 +737,60 @@ command. Each evaluator below shows a suggested weight based on their documented
 def _build_league_page(latest_ts, league_format: str) -> str:
     title = "Dynasty Model — Rate My League"
     header = _site_header("league", latest_ts, league_format)
-    body = f"""<div class="container narrow">
+    body = """<div class="container narrow">
 <h1>Rate My League</h1>
-<p>Paste a <strong>Sleeper league ID</strong> below and the model will evaluate every team in your league
-against the current composite rankings.</p>
+<p>Paste a <strong>Sleeper league ID</strong>, optionally tune your league settings,
+and the model will evaluate every team against the current composite rankings.</p>
 
-<form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0;display:flex;gap:8px;flex-wrap:wrap">
-  <input id="league-id" type="text" placeholder="e.g. 968712712272838656"
-         style="flex:1;min-width:280px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px"
-         required>
-  <button type="submit"
-          style="padding:10px 18px;background:#1d4ed8;color:white;border:0;border-radius:6px;font-weight:600;font-size:15px;cursor:pointer">
-    Evaluate league
-  </button>
+<form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <input id="league-id" type="text" placeholder="e.g. 968712712272838656"
+           style="flex:1;min-width:280px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px"
+           required>
+    <button type="submit"
+            style="padding:10px 18px;background:#1d4ed8;color:white;border:0;border-radius:6px;font-weight:600;font-size:15px;cursor:pointer">
+      Evaluate league
+    </button>
+  </div>
+
+  <details style="margin:8px 0 0 0;padding:14px;border:1px solid var(--border);border-radius:6px">
+    <summary style="cursor:pointer;font-weight:600">League settings (optional)</summary>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px">
+      <label>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">QB format</div>
+        <select id="qb-format" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px">
+          <option value="auto" selected>Auto-detect from league</option>
+          <option value="1qb">1QB</option>
+          <option value="sf">Superflex (1QB + 1 SF)</option>
+          <option value="2qb">2QB (two QB starting spots)</option>
+        </select>
+      </label>
+      <label>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">TE premium</div>
+        <select id="te-prem" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px">
+          <option value="auto" selected>Auto-detect from league</option>
+          <option value="none">No TE premium (1.0 PPR)</option>
+          <option value="low">Light TE premium (1.25 PPR)</option>
+          <option value="high">Heavy TE premium (1.5 PPR)</option>
+        </select>
+      </label>
+      <label>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Scoring</div>
+        <select id="ppr" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px">
+          <option value="auto" selected>Auto-detect from league</option>
+          <option value="full">Full PPR (1.0)</option>
+          <option value="half">Half PPR (0.5)</option>
+          <option value="standard">Standard / non-PPR</option>
+        </select>
+      </label>
+    </div>
+    <p style="margin:14px 0 0 0;color:var(--muted);font-size:12px">
+      The base model rates players for <strong>Superflex full-PPR</strong>. These settings apply
+      position-value multipliers on top so the team totals and weakness flags match your league's actual
+      scarcity. Auto-detect reads <code>roster_positions</code> and <code>scoring_settings</code> from
+      the Sleeper league response.
+    </p>
+  </details>
 </form>
 
 <div class="callout" style="font-size:13px">
@@ -758,6 +799,7 @@ It's the long number after <code>/leagues/</code> (e.g.
 <code>https://sleeper.com/leagues/<strong>968712712272838656</strong>/team</code>).
 </div>
 
+<div id="detected-settings" style="margin:12px 0;font-size:13px;color:var(--muted)"></div>
 <div id="league-status" style="margin:16px 0;color:var(--muted);font-size:14px"></div>
 <div id="league-results"></div>
 
@@ -772,81 +814,159 @@ const STARTING_POSITIONS = ["QB", "RB", "WR", "TE"];
 const WEAKNESS_TIER_THRESHOLD = 3;
 let MODEL = null;
 
-async function loadModel() {{
+// Position-value multipliers for league-settings adjustments. Applied to each
+// player's base score before computing team totals. These are industry
+// conventions, not backtested — if you want precision, run the CLI which has
+// access to the full composite model + backtest history.
+const QB_MULT  = {"1qb":{"QB":0.65,"RB":1.0,"WR":1.0,"TE":1.0},
+                  "sf": {"QB":1.0, "RB":1.0,"WR":1.0,"TE":1.0},
+                  "2qb":{"QB":1.25,"RB":0.95,"WR":0.95,"TE":0.95}};
+const TE_MULT  = {"none":1.0,"low":1.15,"high":1.25};
+const PPR_MULT = {"full":  {"QB":1.0,"RB":1.0, "WR":1.0, "TE":1.0},
+                  "half":  {"QB":1.0,"RB":0.97,"WR":0.95,"TE":0.92},
+                  "standard":{"QB":1.0,"RB":0.93,"WR":0.88,"TE":0.82}};
+
+async function loadModel() {
   if (MODEL) return MODEL;
   const resp = await fetch("assets/model_scores.json");
   if (!resp.ok) throw new Error("Could not load model scores (assets/model_scores.json)");
   MODEL = await resp.json();
   return MODEL;
-}}
+}
 
-async function evalLeague(ev) {{
+function detectFromLeague(league) {
+  // QB format: count QB-slot starters vs SF slots in roster_positions.
+  const rp = league.roster_positions || [];
+  const qbCount = rp.filter(p => p === "QB").length;
+  const sfCount = rp.filter(p => p === "SUPER_FLEX" || p === "SF").length;
+  let qb;
+  if (qbCount >= 2) qb = "2qb";
+  else if (sfCount >= 1) qb = "sf";
+  else qb = "1qb";
+
+  // TE premium: scoring_settings.bonus_rec_te (extra points-per-reception
+  // for TEs above the base WR rate).
+  const ss = league.scoring_settings || {};
+  const bonusTE = (ss.bonus_rec_te || 0) + 0;
+  let te;
+  if (bonusTE >= 0.5) te = "high";
+  else if (bonusTE >= 0.25) te = "low";
+  else te = "none";
+
+  // PPR: scoring_settings.rec (points per reception).
+  const recPts = (ss.rec || 0) + 0;
+  let ppr;
+  if (recPts >= 0.9) ppr = "full";
+  else if (recPts >= 0.4) ppr = "half";
+  else ppr = "standard";
+
+  return { qb, te, ppr, qbCount, sfCount, bonusTE, recPts };
+}
+
+function effectiveSettings(detected) {
+  const get = (id, fallback) => {
+    const v = document.getElementById(id).value;
+    return v === "auto" ? fallback : v;
+  };
+  return {
+    qb:  get("qb-format", detected.qb),
+    te:  get("te-prem",   detected.te),
+    ppr: get("ppr",       detected.ppr),
+  };
+}
+
+function positionMultiplier(pos, settings) {
+  const p = (pos || "").toUpperCase();
+  const qbm  = (QB_MULT[settings.qb]  || QB_MULT.sf)[p]  || 1.0;
+  const pprm = (PPR_MULT[settings.ppr] || PPR_MULT.full)[p] || 1.0;
+  const tem  = p === "TE" ? (TE_MULT[settings.te] || 1.0) : 1.0;
+  return qbm * pprm * tem;
+}
+
+async function evalLeague(ev) {
   ev.preventDefault();
   const leagueId = document.getElementById("league-id").value.trim();
   const status = document.getElementById("league-status");
+  const detectedDiv = document.getElementById("detected-settings");
   const results = document.getElementById("league-results");
   results.innerHTML = "";
+  detectedDiv.innerHTML = "";
   status.textContent = "Loading model + Sleeper league data...";
 
-  try {{
+  try {
     const [model, leagueResp, usersResp, rostersResp] = await Promise.all([
       loadModel(),
-      fetch(`https://api.sleeper.app/v1/league/${{leagueId}}`),
-      fetch(`https://api.sleeper.app/v1/league/${{leagueId}}/users`),
-      fetch(`https://api.sleeper.app/v1/league/${{leagueId}}/rosters`),
+      fetch(`https://api.sleeper.app/v1/league/${leagueId}`),
+      fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`),
+      fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`),
     ]);
-    if (!leagueResp.ok) {{
-      throw new Error("League not found. Double-check the league ID.");
-    }}
+    if (!leagueResp.ok) throw new Error("League not found. Double-check the league ID.");
+
     const [league, users, rosters] = await Promise.all([
       leagueResp.json(), usersResp.json(), rostersResp.json(),
     ]);
 
-    const userById = {{}};
-    (users || []).forEach(u => {{ userById[u.user_id] = u.display_name || u.username || u.user_id; }});
+    const detected = detectFromLeague(league);
+    const settings = effectiveSettings(detected);
 
-    const teams = (rosters || []).map(r => evaluateTeam(r, userById, model));
+    detectedDiv.innerHTML = renderDetected(detected, settings);
+
+    const userById = {};
+    (users || []).forEach(u => { userById[u.user_id] = u.display_name || u.username || u.user_id; });
+
+    const teams = (rosters || []).map(r => evaluateTeam(r, userById, model, settings));
     const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
-    teams.forEach(t => {{ t.vsAvg = t.total - leagueAvg; }});
+    teams.forEach(t => { t.vsAvg = t.total - leagueAvg; });
 
     const sorted = [...teams].sort((a, b) => b.total - a.total);
-    status.textContent = `${{league.name || "Sleeper league " + leagueId}} — ${{teams.length}} teams — league avg ${{leagueAvg.toFixed(1)}}`;
+    status.textContent = `${league.name || "Sleeper league " + leagueId} — ${teams.length} teams — league avg ${leagueAvg.toFixed(1)} (settings-adjusted)`;
 
     results.innerHTML = renderResults(league.name, sorted);
-  }} catch (err) {{
+  } catch (err) {
     status.textContent = "";
-    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${{err.message}}</div>`;
-  }}
+    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${err.message}</div>`;
+  }
   return false;
-}}
+}
 
-function evaluateTeam(roster, userById, model) {{
+function renderDetected(d, s) {
+  const qbLabel = {"1qb":"1QB","sf":"Superflex","2qb":"2QB"}[s.qb];
+  const teLabel = {"none":"no TE premium","low":"1.25 PPR TE","high":"1.5 PPR TE"}[s.te];
+  const pprLabel = {"full":"full PPR","half":"half PPR","standard":"standard scoring"}[s.ppr];
+  return `<strong>Settings:</strong> ${qbLabel} · ${teLabel} · ${pprLabel} ` +
+         `<span style="color:var(--muted);font-size:12px">(detected from Sleeper: ${d.qbCount}×QB+${d.sfCount}×SF, bonus_rec_te=${d.bonusTE}, rec=${d.recPts})</span>`;
+}
+
+function evaluateTeam(roster, userById, model, settings) {
   const ownerName = userById[roster.owner_id] || ("Team " + roster.roster_id);
   const playerIds = roster.players || [];
   let total = 0;
   let evaluated = 0;
   let unrated = 0;
   const playerRows = [];
-  const bestAtPos = {{}};
-  for (const pid of playerIds) {{
+  const bestAtPos = {};
+  for (const pid of playerIds) {
     const entry = model[String(pid)];
-    if (!entry) {{ unrated++; continue; }}
+    if (!entry) { unrated++; continue; }
     evaluated++;
-    total += entry.score;
-    playerRows.push(entry);
+    const mult = positionMultiplier(entry.position, settings);
+    const adjScore = entry.score * mult;
+    const row = Object.assign({}, entry, { adjScore, mult });
+    total += adjScore;
+    playerRows.push(row);
     const pos = entry.position;
-    if (!bestAtPos[pos] || entry.score > bestAtPos[pos].score) bestAtPos[pos] = entry;
-  }}
-  playerRows.sort((a, b) => b.score - a.score);
+    if (!bestAtPos[pos] || adjScore > bestAtPos[pos].adjScore) bestAtPos[pos] = row;
+  }
+  playerRows.sort((a, b) => b.adjScore - a.adjScore);
   const weaknesses = [];
-  for (const pos of STARTING_POSITIONS) {{
+  for (const pos of STARTING_POSITIONS) {
     const best = bestAtPos[pos];
-    if (!best) weaknesses.push(`no rated ${{pos}} on roster`);
-    else if ((best.tier || 99) > WEAKNESS_TIER_THRESHOLD) {{
-      weaknesses.push(`weak ${{pos}}: best is ${{best.name}} (Tier ${{best.tier}}, rank ${{best.rank}})`);
-    }}
-  }}
-  return {{
+    if (!best) weaknesses.push(`no rated ${pos} on roster`);
+    else if ((best.tier || 99) > WEAKNESS_TIER_THRESHOLD) {
+      weaknesses.push(`weak ${pos}: best is ${best.name} (Tier ${best.tier}, rank ${best.rank})`);
+    }
+  }
+  return {
     teamId: roster.roster_id,
     name: ownerName,
     total,
@@ -855,53 +975,56 @@ function evaluateTeam(roster, userById, model) {{
     unrated,
     topAssets: playerRows.slice(0, 5),
     weaknesses,
-  }};
-}}
+  };
+}
 
-function renderResults(leagueName, sorted) {{
+function renderResults(leagueName, sorted) {
   let html = `<h2 style="margin-top:32px">Power rankings</h2>`;
   html += `<table style="width:100%;border-collapse:collapse">`;
   html += `<thead><tr><th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">#</th>`;
   html += `<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Team</th>`;
   html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">Total</th>`;
   html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">vs Avg</th></tr></thead><tbody>`;
-  sorted.forEach((t, i) => {{
-    const diff = t.vsAvg >= 0 ? `+${{t.vsAvg.toFixed(1)}}` : t.vsAvg.toFixed(1);
+  sorted.forEach((t, i) => {
+    const diff = t.vsAvg >= 0 ? `+${t.vsAvg.toFixed(1)}` : t.vsAvg.toFixed(1);
     const diffColor = t.vsAvg >= 0 ? "#065f46" : "#991b1b";
-    html += `<tr><td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${{i + 1}}</td>`;
-    html += `<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>${{escapeHtml(t.name)}}</strong></td>`;
-    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${{t.total.toFixed(1)}}</td>`;
-    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:${{diffColor}}">${{diff}}</td></tr>`;
-  }});
+    html += `<tr><td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${i + 1}</td>`;
+    html += `<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>${escapeHtml(t.name)}</strong></td>`;
+    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${t.total.toFixed(1)}</td>`;
+    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:${diffColor}">${diff}</td></tr>`;
+  });
   html += `</tbody></table>`;
   html += `<h2 style="margin-top:48px">Team breakdowns</h2>`;
-  sorted.forEach(t => {{
+  sorted.forEach(t => {
     html += `<div style="margin:24px 0;padding:16px;border:1px solid var(--border);border-radius:8px">`;
-    html += `<h3 style="margin:0 0 8px 0">${{escapeHtml(t.name)}}</h3>`;
-    html += `<div style="color:var(--muted);font-size:14px;margin-bottom:12px">total=${{t.total.toFixed(1)}} avg=${{t.avg.toFixed(1)}} rated=${{t.evaluated}} unrated=${{t.unrated}}</div>`;
-    if (t.topAssets.length) {{
-      html += `<div style="font-weight:600;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Top 5 assets</div>`;
+    html += `<h3 style="margin:0 0 8px 0">${escapeHtml(t.name)}</h3>`;
+    html += `<div style="color:var(--muted);font-size:14px;margin-bottom:12px">total=${t.total.toFixed(1)} avg=${t.avg.toFixed(1)} rated=${t.evaluated} unrated=${t.unrated}</div>`;
+    if (t.topAssets.length) {
+      html += `<div style="font-weight:600;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Top 5 assets (settings-adjusted)</div>`;
       html += `<ul style="margin:0 0 12px 0;padding-left:20px">`;
-      t.topAssets.forEach(a => {{
-        html += `<li>${{escapeHtml(a.name)}} <span style="color:var(--muted)">(${{a.position}}, rank ${{a.rank}}, Tier ${{a.tier}}) score ${{a.score.toFixed(1)}}</span></li>`;
-      }});
+      t.topAssets.forEach(a => {
+        const adj = a.adjScore.toFixed(1);
+        const base = a.score.toFixed(1);
+        const multNote = a.mult === 1.0 ? "" : ` <span style="color:var(--muted);font-size:12px">(×${a.mult.toFixed(2)})</span>`;
+        html += `<li>${escapeHtml(a.name)} <span style="color:var(--muted)">(${a.position}, rank ${a.rank}, Tier ${a.tier}) base ${base} → ${adj}${multNote}</span></li>`;
+      });
       html += `</ul>`;
-    }}
-    if (t.weaknesses.length) {{
+    }
+    if (t.weaknesses.length) {
       html += `<div style="font-weight:600;font-size:13px;color:#92400e;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Weaknesses</div>`;
       html += `<ul style="margin:0;padding-left:20px;color:#92400e">`;
-      t.weaknesses.forEach(w => {{ html += `<li>${{escapeHtml(w)}}</li>`; }});
+      t.weaknesses.forEach(w => { html += `<li>${escapeHtml(w)}</li>`; });
       html += `</ul>`;
-    }}
+    }
     html += `</div>`;
-  }});
+  });
   return html;
-}}
+}
 
-function escapeHtml(s) {{
+function escapeHtml(s) {
   if (s == null) return "";
-  return String(s).replace(/[&<>"']/g, c => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}})[c]);
-}}
+  return String(s).replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 </script>"""
     return _page(title, header, body)
 

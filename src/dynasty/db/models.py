@@ -40,6 +40,9 @@ class Player(Base):
     gsis_id: Mapped[Optional[str]] = mapped_column(String(32), index=True)  # nflverse / NFL GSIS id, e.g. "00-0033280"
 
     full_name: Mapped[str] = mapped_column(String(128))
+    # Suffix-stripped lowercase form for duplicate detection: "odell beckham"
+    # matches "Odell Beckham", "Odell Beckham Jr.", and "Odell Beckham, Jr.".
+    normalized_name: Mapped[Optional[str]] = mapped_column(String(128), index=True)
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     position: Mapped[Optional[str]] = mapped_column(String(8))

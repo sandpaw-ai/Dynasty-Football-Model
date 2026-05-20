@@ -15,6 +15,107 @@ Format for each entry:
 
 ---
 
+## v0.10.0 — deterministic weights, league settings, name dedup (PR #10)
+
+**Date:** 2026-05-20
+
+Four user-feedback fixes from Phil after v0.9.0 went live.
+
+**1. FantasyFootballCalculator ADP removed from active sync**
+- Phil reported FFC ADP "often wrong or perhaps not using dynasty
+  superflex rankings." Confirmed: FFC's user base skews casual /
+  redraft, which made its top picks consistently diverge from
+  dynasty-superflex consensus.
+- Removed from `launcher_headless.py` and `launcher.py` sync lists.
+- Adapter file (`src/dynasty/sources/ffc_adp.py`) and tests are
+  retained so re-enabling is one line.
+- Active sync list is now: FantasyCalc, DynastyProcess, Brainy Ballers,
+  NFL Draft Capital, RAS, CFBD Breakouts (still empty).
+
+**2. Deterministic per-source weights**
+- *Phil's request: "create a new weighting system that assigns model
+  weight to correlation of source data to actual NFL statistical
+  player performance and keep it consistent across all players."*
+- Removed v0.7's per-player weight modulation:
+  - `position_modifier(slug, pos)` — hand-coded per-(source, position)
+    overrides (RAS=1.5× at WR, etc.) deleted.
+  - `years_pro_modifier(slug, years_pro)` — rookie-signal linear decay
+    and market-source inverse curve deleted.
+- New effective-weight formula (per-source, deterministic):
+    ```
+    effective_weight = default_weight × track_record_multiplier
+    ```
+- The track-record multiplier is read from `SourceTrackRecord` rows,
+  produced by the existing `backtest_source()` pipeline against
+  realized NFL fantasy production. When a position-specific row
+  exists, it wins over the overall (`position=None`) row. This is
+  the ONLY allowed per-player variation — and it's data-driven, not
+  hand-coded.
+- Until backtests populate `SourceTrackRecord`, all multipliers
+  default to 1.0 and the composite is driven by `default_weight`
+  alone. Production loading + automated backtest pass at score time
+  is a follow-up.
+- Verified: every source now displays the same `weight` value in the
+  breakdown JSON across all players. e.g. RAS = 0.8 for Chase (WR),
+  Robinson (RB), Thomas (WR rookie), every WR vet.
+
+**3. Jr./Sr./III duplicate-name dedup**
+- Phil noticed duplicates: "Marvin Harrison" + "Marvin Harrison Jr.",
+  "Kenneth Walker" + "Kenneth Walker III", "Odell Beckham" +
+  "Odell Beckham Jr." + "Odell Beckham, Jr.".
+- New `src/dynasty/names.py` with `normalize(name)`: strips generational
+  suffixes (Jr / Sr / II-V), folds diacritics, drops periods, lowercases.
+- New `Player.normalized_name` column with index; populated on insert
+  + Sleeper-sync upsert. Lightweight migration in `db/session.py`.
+- Resolver order is now:
+    sleeper_id → gsis_id → mfl_id → exact full_name+position →
+    normalized_name+position
+- Confirmed: "Marvin Harrison Jr.", "Kenneth Walker III", "Travis
+  Etienne Jr." no longer create duplicate Player rows on fresh sync.
+  (Note: Sleeper itself stores names without suffixes, so the display
+  name shows "Marvin Harrison" — the rookie is correctly resolved.)
+
+**4. League settings on the Rate-My-League page**
+- The page now offers a collapsible "League settings" section with:
+  - QB format: 1QB / Superflex / 2QB (or auto-detect from league)
+  - TE premium: none / 1.25 / 1.5 PPR (or auto)
+  - Scoring: full PPR / half PPR / standard (or auto)
+- Auto-detect reads Sleeper's `roster_positions` (QB count + SUPER_FLEX
+  count) and `scoring_settings` (`bonus_rec_te`, `rec`).
+- Per-position multipliers applied client-side to each player's base
+  composite score before computing team totals + power rankings.
+- Team breakdowns now show base score → adjusted score per player with
+  the applied multiplier. Settings line surfaces the detected values
+  from Sleeper so the user can verify.
+- For 2QB leagues: QBs ×1.25, other positions ×0.95 — reflects the
+  scarcity hit at non-QB positions when two QB spots are required.
+  These are industry conventions, not backtested.
+
+**Tests**
+- `tests/test_names.py` (new) — 6 cases covering suffix stripping,
+  diacritics, apostrophes, no false positives, idempotency, empty.
+- `tests/test_weights.py` rewritten for the v0.10 contract:
+  - `ROOKIE_SIGNAL_SOURCES` still present
+  - `corr_to_multiplier` + `select_track_record_multiplier` kept
+  - new test: same source → identical weight across players
+  - new test: position-specific track record overrides overall
+- All 8 test files green: smoke, draft, ffc, ras, cfbd, weights,
+  league, names.
+
+**Files touched**
+- `src/dynasty/scoring.py` — effective_weight collapsed to 2-term formula
+- `src/dynasty/weights.py` — trimmed to only the track-record bits
+- `src/dynasty/names.py` (new) — normalization helper
+- `src/dynasty/sync.py` — normalized-name resolution + populate on create
+- `src/dynasty/db/models.py` — `Player.normalized_name` column
+- `src/dynasty/db/session.py` — migration adds the column on existing DBs
+- `src/dynasty/launcher_headless.py` + `launcher.py` — ffc_adp removed
+- `src/dynasty/report.py` — league page redesign with settings + auto-detect
+- `tests/test_weights.py` — rewritten
+- `tests/test_names.py` (new)
+
+---
+
 ## v0.9.0 — RAS data + retired-player filter + league page on site (PR #9)
 
 **Date:** 2026-05-20

@@ -33,6 +33,13 @@ def _migrate() -> None:
         if "rank_divergence" not in cols:
             conn.execute(text("ALTER TABLE composite_scores ADD COLUMN rank_divergence INTEGER"))
 
+    # players.normalized_name added in v0.10 for suffix-aware dedup.
+    player_cols = {c["name"] for c in inspector.get_columns("players")}
+    with engine.begin() as conn:
+        if "normalized_name" not in player_cols:
+            conn.execute(text("ALTER TABLE players ADD COLUMN normalized_name VARCHAR(128)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_players_normalized_name ON players(normalized_name)"))
+
 
 @contextmanager
 def get_session() -> Session:

@@ -86,7 +86,8 @@ def main():
         # Core market + consensus
         ("fantasycalc", "FantasyCalc (market)"),
         ("dynastyprocess", "DynastyProcess (consensus)"),
-        ("ffc_adp", "FantasyFootballCalculator ADP (market)"),
+        # ffc_adp removed v0.10 — casual/redraft user base diverges from
+        # dynasty-superflex consensus. Adapter file kept for re-enable later.
         # Model / analytics overlays
         ("brainy_ballers", "Brainy Ballers SPS (model)"),
         ("nfl_draft_capital", "NFL Draft capital (nflverse)"),

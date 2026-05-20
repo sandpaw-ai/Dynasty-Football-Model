@@ -30,8 +30,6 @@ from sqlalchemy.orm import Session
 from .db.session import get_session
 from .db.models import Source, Player, Ranking, CompositeScore, SourceTrackRecord
 from .weights import (
-    position_modifier,
-    years_pro_modifier,
     select_track_record_multiplier,
     corr_to_multiplier,
     ROOKIE_SIGNAL_SOURCES,
@@ -130,13 +128,6 @@ def _value_to_score(value: float | None, max_value: float) -> float | None:
     return max(0.0, min(100.0, 100.0 * value / max_value))
 
 
-def _years_pro_for(player: Player | None, score_year: int) -> Optional[int]:
-    """How many NFL seasons since the player's draft year (None if unknown)."""
-    if player is None or player.draft_year is None:
-        return None
-    return max(0, int(score_year) - int(player.draft_year))
-
-
 def compute_composite_scores(
     league_format: str = "sf_ppr",
     depth: int = DEFAULT_NORMALIZATION_DEPTH,
@@ -181,6 +172,33 @@ def compute_composite_scores(
 
         effective_score_year = score_year or datetime.utcnow().year
 
+        # v0.10 weighting model (deterministic, per-source):
+        #   effective_weight = default_weight * track_record_multiplier
+        # The track-record multiplier is derived from the backtested
+        # Spearman correlation between this source's rankings and realized
+        # NFL fantasy production. When a position-specific track-record row
+        # exists for (source, position) it wins over the overall row; this
+        # is the *only* per-player variation, and it's driven by data, not
+        # hand-coded constants.
+        #
+        # Removed in v0.10 (Phil request 2026-05-20):
+        #   * position_modifier() — hand-coded per-(source, position) overrides
+        #   * years_pro_modifier() — linear decay for rookie-signal sources +
+        #     inverse curve for market sources
+        # Those caused the same source to display different weight values for
+        # different players in the breakdown JSON, which read as inconsistent.
+        # See docs/CHANGELOG-model.md § v0.10.0 for the rationale.
+        #
+        # Pre-compute effective weights per (source, position). For sources
+        # with no position-specific track record, this collapses to a single
+        # value per source.
+        def _weight_for(sid: int, pos: Optional[str]) -> float:
+            src = sources[sid]
+            tr_mult = select_track_record_multiplier(
+                multipliers_by_pos.get(sid, {}), pos
+            )
+            return src.default_weight * tr_mult
+
         # Aggregate per-player contributions
         contribs: dict[int, list[tuple[str, str, float, float, int | None]]] = defaultdict(list)
         # contribs[player_id] = [(source_slug, category, score, weight, raw_rank), ...]
@@ -192,25 +210,12 @@ def compute_composite_scores(
             src = sources.get(sid)
             if src is None:
                 continue
-            source_tr_by_pos = multipliers_by_pos.get(sid, {})
 
             for pid, ranking in plr_rankings.items():
                 player = players_by_id.get(pid)
                 pos = player.position if player else None
 
-                # 1. Backtested track-record multiplier, preferring position-
-                #    specific over overall.
-                tr_mult = select_track_record_multiplier(source_tr_by_pos, pos)
-
-                # 2. Position modifier (per (slug, pos)).
-                pos_mod = position_modifier(src.slug, pos)
-
-                # 3. Years-pro decay (rookie signals decay, market signals
-                #    inverse-decay for rookies).
-                yrs_pro = _years_pro_for(player, effective_score_year)
-                yp_mod = years_pro_modifier(src.slug, yrs_pro)
-
-                weight = src.default_weight * tr_mult * pos_mod * yp_mod
+                weight = _weight_for(sid, pos)
 
                 score = None
                 if ranking.market_value is not None and sid in source_max_value:

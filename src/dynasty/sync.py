@@ -12,6 +12,7 @@ from .db.models import Source, Player, Ranking
 from .sources import REGISTRY
 from .sources.base import BaseSource, RankingRecord
 from .sources.sleeper import SleeperPlayers
+from .names import normalize as _normalize_name
 
 
 def _ensure_source_row(session, adapter: BaseSource) -> Source:
@@ -46,12 +47,25 @@ def _resolve_player(session, rec: RankingRecord) -> Player | None:
         if p:
             return _enrich_player(p, rec)
     if rec.full_name:
+        # Exact match first — cheapest.
         q = select(Player).where(Player.full_name == rec.full_name)
         if rec.position:
             q = q.where(Player.position == rec.position)
         p = session.execute(q).scalars().first()
         if p:
             return _enrich_player(p, rec)
+
+        # Normalized-name match — catches "Odell Beckham" vs "Odell Beckham Jr."
+        # and similar suffix mismatches across sources.
+        norm = _normalize_name(rec.full_name)
+        if norm:
+            q = select(Player).where(Player.normalized_name == norm)
+            if rec.position:
+                q = q.where(Player.position == rec.position)
+            p = session.execute(q).scalars().first()
+            if p:
+                return _enrich_player(p, rec)
+
     # Auto-create minimal record
     p = Player(
         sleeper_id=rec.sleeper_id,
@@ -59,6 +73,7 @@ def _resolve_player(session, rec: RankingRecord) -> Player | None:
         gsis_id=rec.gsis_id,
         pfr_id=rec.pfr_id,
         full_name=rec.full_name or "(unknown)",
+        normalized_name=_normalize_name(rec.full_name),
         position=rec.position,
         nfl_team=rec.nfl_team,
         draft_year=rec.draft_year,
@@ -171,6 +186,7 @@ def sync_sleeper_players() -> int:
 
             if existing:
                 existing.full_name = full_name or existing.full_name
+                existing.normalized_name = _normalize_name(existing.full_name)
                 existing.first_name = p.get("first_name") or existing.first_name
                 existing.last_name = p.get("last_name") or existing.last_name
                 existing.position = p.get("position") or existing.position
@@ -186,6 +202,7 @@ def sync_sleeper_players() -> int:
                 session.add(Player(
                     sleeper_id=sleeper_id,
                     full_name=full_name,
+                    normalized_name=_normalize_name(full_name),
                     first_name=p.get("first_name"),
                     last_name=p.get("last_name"),
                     position=p.get("position"),

@@ -211,6 +211,66 @@ def cli_inspect(name: str):
                 )
 
 
+@app.command("league")
+def cli_league(
+    platform: str = typer.Argument(..., help="sleeper | mfl"),
+    league_id: str = typer.Argument(..., help="Sleeper league_id or MFL league_id"),
+    league_format: str = typer.Option("sf_ppr", "--league-format", "-f"),
+    year: int = typer.Option(None, "--year", help="MFL year (defaults to current)"),
+    as_json: bool = typer.Option(False, "--json", help="Emit full JSON report"),
+):
+    """Pull a league from Sleeper or MFL and rate every team against the model.
+
+    Examples:
+        python -m dynasty.cli league sleeper 968712712272838656
+        python -m dynasty.cli league mfl 12345 --year 2026 --json
+
+    Requires the latest composite scores to have been computed for the
+    given league_format (run `score -f sf_ppr` first).
+    """
+    from .league import evaluate_sleeper_league, evaluate_mfl_league
+
+    if platform.lower() == "sleeper":
+        report = evaluate_sleeper_league(league_id, league_format=league_format)
+    elif platform.lower() == "mfl":
+        report = evaluate_mfl_league(league_id, year=year, league_format=league_format)
+    else:
+        console.print(f"[red]Unknown platform:[/red] {platform!r}. Use 'sleeper' or 'mfl'.")
+        raise typer.Exit(1)
+
+    if as_json:
+        console.print_json(json.dumps(report.to_dict(), default=str))
+        return
+
+    console.print(f"\n[bold cyan]{report.name}[/bold cyan]  ({report.platform} {report.league_id}, {report.league_format})")
+    console.print(f"League avg roster value: [bold]{report.league_avg_score:.1f}[/bold]\n")
+
+    rank_table = Table(title="Power rankings (by total roster value)")
+    rank_table.add_column("#", justify="right")
+    rank_table.add_column("Team")
+    rank_table.add_column("Total", justify="right")
+    rank_table.add_column("vs Avg", justify="right")
+    for row in report.power_rankings:
+        diff = row["vs_league_avg"]
+        diff_str = f"+{diff}" if diff >= 0 else f"{diff}"
+        rank_table.add_row(
+            str(row["rank"]), row["display_name"],
+            f"{row['total_score']:.1f}", diff_str,
+        )
+    console.print(rank_table)
+
+    for t in report.teams:
+        console.print(f"\n[bold]{t.display_name}[/bold]  total={t.total_score:.1f}  avg={t.avg_score:.1f}  rated={t.players_evaluated}  unrated={t.players_unrated}")
+        if t.top_assets:
+            console.print("  top 5 assets:")
+            for a in t.top_assets:
+                console.print(f"    • {a['name']:<24} {a['position']:>3}  rank={a['rank']:>3}  tier=T{a['tier']}  score={a['score']:.1f}")
+        if t.weaknesses:
+            console.print("  [yellow]weaknesses:[/yellow]")
+            for w in t.weaknesses:
+                console.print(f"    - {w}")
+
+
 @app.command("run-scheduler")
 def cli_run_scheduler():
     """Run the daily/weekly scheduler in the foreground."""

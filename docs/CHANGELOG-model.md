@@ -15,6 +15,64 @@ Format for each entry:
 
 ---
 
+## v0.8.0 — League import (Sleeper + MFL) — rate-my-league (PR #7)
+
+**Date:** 2026-05-20
+
+A *feature* rather than a model-output change — this one doesn't shift
+any composite scores. It applies the existing latest composite snapshot
+to the user's actual rosters and surfaces team-level evaluations.
+
+**What changed**
+- New module `src/dynasty/league.py` with two entry points:
+  - `evaluate_sleeper_league(league_id, league_format="sf_ppr")`
+  - `evaluate_mfl_league(league_id, year=None, league_format="sf_ppr")`
+  Both return a `LeagueReport` dataclass (with `.to_dict()` for JSON).
+- New CLI command:
+    `python -m dynasty.cli league sleeper <league_id>`
+    `python -m dynasty.cli league mfl <league_id> --year 2026`
+    Prints power rankings, per-team total / avg value, top-5 assets,
+    flagged weaknesses (no rated player at a starting position, or best
+    player at a position is Tier > 3).
+- Player resolution uses canonical `sleeper_id` / `mfl_id` joins, both
+  of which the existing `sync-players` upserts populate (PR #2 also added
+  the `gsis_id` and `pfr_id` cross-references, so the joins are already
+  primed).
+- Unrated players (roster slots that don't resolve to a model-scored
+  player) are counted separately rather than penalizing the team —
+  useful for incoming rookies, recently-cut players, etc.
+
+**Why**
+- This is the user-facing feature that turns the composite model into
+  something *actionable*: it answers "which team in my league should I
+  trade with?" and "where's my weakest starting spot?". This is the
+  KTC equivalent that originally motivated this whole project, now
+  computed off our composite model.
+- Importing rosters is also the foundation for future trade-calculator
+  and mock-draft features (per the roadmap).
+
+**Expected output shift**
+- No change to composite scores or rankings.
+- New per-team and per-league outputs available via the CLI and the
+  `evaluate_*_league()` API.
+
+**Validation**
+- `tests/test_league.py` (4 cases):
+  - Sleeper league w/ 2 teams, 4 players each, exercises power rankings,
+    top assets, weakness flagging.
+  - Unrated-player counting on Sleeper.
+  - MFL league w/ equivalent roster mirror.
+  - No-composite-scores case (everyone unrated, no crash).
+- All non-DB calls run through an injectable httpx-style client, so the
+  tests are network-free.
+
+**Files touched**
+- `src/dynasty/league.py` (new) — fetchers + report builder
+- `src/dynasty/cli.py` — `league` command (text + `--json` output modes)
+- `tests/test_league.py` (new)
+
+---
+
 ## v0.7.0 — Position-specific + years-pro weighting refactor (PR #6)
 
 **Date:** 2026-05-20

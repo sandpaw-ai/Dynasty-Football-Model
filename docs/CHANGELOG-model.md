@@ -15,6 +15,75 @@ Format for each entry:
 
 ---
 
+## v0.13.0 — Shirts and Skins league live + MFL player-id crosswalk (PR #13)
+
+**Date:** 2026-05-20
+
+Added Phil's MFL league (Shirts and Skins, ID 62557) to `leagues.json`
+and discovered the join was broken — every team scored zero because
+our DB only had MFL ids for 70 of 15,777 players.
+
+**MFL player-id crosswalk**
+- New `sync_mfl_players(year)` in `src/dynasty/sync.py`. Pulls MFL's
+  full `TYPE=players` export (~2,569 active NFL players) and backfills
+  `Player.mfl_id` on existing rows.
+- Match order: (norm_name, position, nfl_team) → (norm_name, position)
+  → (norm_name). The first-most-specific match wins.
+- Free-agent teams ("FA" in MFL) normalize to NULL on the join key so
+  they line up with Sleeper's free-agent rows.
+- Only skill positions (QB/RB/WR/TE). MFL's IDP / kicker / team rows
+  skipped.
+- Wired into `launcher_headless` step 2/6, right after
+  `sync_sleeper_players`. Reports `matched / already_set / ambiguous`.
+- Local end-to-end: matched **890** MFL players, only 2 ambiguous,
+  zero conflicts.
+
+**Result on Shirts and Skins**
+```
+Team               total     vs avg
+#1  Cajun Crusaders  1520.0   +175.7
+#2  Ceedee's TDs     1462.8   +118.6
+...
+#10 Zack Attack       979.6   -364.7
+```
+All 10 teams resolve, all 50 draft picks scored, all 10 trades
+valued. Manager rankings sane: The Jimbronis #1 (positive draft +
+trade), DC Commies #10 (negative on both).
+
+**Cajun Crusaders sample roster:**
+- Josh Allen (rank 2, T1, 99.6)
+- Ja'Marr Chase (rank 3, T1, 93.6)
+- Jonathan Taylor (rank 29, T4, 72.1)
+- James Cook (rank 36, T4, 69.6)
+- Rome Odunze (rank 40, T5, 69.0)
+32 of 33 players resolved.
+
+**leagues.json**
+```json
+{
+  "leagues": [
+    {"platform": "mfl", "league_id": "62557", "year": 2026, "league_format": "sf_ppr"}
+  ]
+}
+```
+
+**Files**
+- `leagues.json` — added the Shirts and Skins entry
+- `src/dynasty/sync.py` — new `sync_mfl_players()` function
+- `src/dynasty/launcher_headless.py` — calls MFL crosswalk after Sleeper sync
+
+**Tests**
+- All 10 test files still green. The crosswalk is exercised by the
+  end-to-end build that ships the prefetch — dedicated unit tests are
+  a follow-up.
+
+**Carry-over from PR #12**
+- Live MFL form on the page still requires the CF Worker proxy to be
+  deployed + `PROXY_URL` env wired into the workflow. For now the
+  pre-fetched path is the proven one.
+
+---
+
 ## v0.12.0 — MFL form + live manager rankings + CF Worker proxy (PR #12)
 
 **Date:** 2026-05-20

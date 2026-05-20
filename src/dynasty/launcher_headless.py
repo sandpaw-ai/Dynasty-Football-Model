@@ -33,10 +33,26 @@ def main():
     try:
         from dynasty.sync import sync_sleeper_players
         n = sync_sleeper_players()
-        print(f"  OK ({n:,} players)")
+        print(f"  OK ({n:,} players from Sleeper)")
     except Exception as e:
         print(f"  WARN: {e}")
         print("  Continuing without Sleeper player map.")
+
+    # Crosswalk MFL player ids onto our Sleeper-keyed Player rows so MFL
+    # leagues in leagues.json can resolve to model scores. Without this, the
+    # MFL pre-fetcher succeeds but every team scores 0.
+    try:
+        from dynasty.sync import sync_mfl_players
+        mfl_summary = sync_mfl_players()
+        print(
+            f"  MFL crosswalk: matched={mfl_summary['matched']:,} "
+            f"already_set={mfl_summary['already_set']:,} "
+            f"ambiguous={mfl_summary['ambiguous']:,} "
+            f"(of {mfl_summary['total_mfl_players']:,} MFL players)"
+        )
+    except Exception as e:
+        print(f"  MFL crosswalk WARN: {e}")
+        print("  Continuing without MFL ids. MFL leagues will score 0.")
 
     # Step 3: Sync data sources
     print("\n[3/6] Syncing data sources...")

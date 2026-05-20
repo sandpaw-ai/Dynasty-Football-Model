@@ -15,6 +15,119 @@ Format for each entry:
 
 ---
 
+## v0.7.0 — Position-specific + years-pro weighting refactor (PR #6)
+
+**Date:** 2026-05-20
+
+The structural change that finally activates the new sources (PRs #2–#5)
+at their *intended* per-position and per-experience weights. This is the
+biggest behavior change in the model since the v0.2.0 backtest-weighting
+introduction.
+
+**What changed**
+- New module `src/dynasty/weights.py` centralizing three policy hooks:
+  1. `position_modifier(slug, position)` — per-(source, position) override.
+     Default 1.0 when not specified.
+  2. `years_pro_modifier(slug, years_pro)` — rookie-signal sources
+     (`nfl_draft_capital`, `ras`, `cfbd_breakouts`) decay linearly with
+     years pro (1.0 → 0.3 floor). Market-source signals (`fantasycalc`,
+     `ffc_adp`, `dynastyprocess`) get an *inverse* curve (0.6 at year 0,
+     0.8 at year 1, 1.0 at year 2+).
+  3. `select_track_record_multiplier(by_pos, position)` — prefers a
+     position-specific `SourceTrackRecord` over the overall (position-None)
+     row.
+  4. `corr_to_multiplier(corr)` — tightened cutoffs per research §4:
+     |ρ| ≤ 0.15 → 0.5×; 0.15–0.25 → 1.0×; 0.25–0.35 → 1.3×; ≥ 0.35 → 1.6×.
+     Replaces v0.2's looser tiers (0.6 / 1.0 / 1.2 / 1.5).
+- Scoring pipeline (`scoring.py::compute_composite_scores`) refactored:
+  - Effective per-row weight is now
+    `default_weight × track_record × position_mod × years_pro_mod`
+    instead of just `default_weight × track_record`.
+  - `_track_record_multipliers` now returns
+    `{source_id: {position_or_None: multiplier}}` and the lookup at scoring
+    time picks the position-specific entry first.
+  - `compute_composite_scores` accepts an optional `score_year` arg
+    (defaults to the current year) so backtests can replay weighting as
+    of a historical year.
+  - Model version bumped to `0.3.0` for output rows.
+  - Player lookups pre-loaded once per score run (was a per-player DB hit
+    in the rank-assignment loop).
+
+**Position modifier table (initial values per research §4)**
+- `ras`: WR/TE 1.5×, RB 1.2×, QB 0.3×
+- `cfbd_breakouts`: WR 1.5×, TE 1.3×, RB 1.0×, QB 0.4×
+- `nfl_draft_capital`: QB 1.2×, RB 1.1×, WR/TE 1.0×
+- Market sources (`fantasycalc`, `ffc_adp`, `dynastyprocess`): no position
+  tilt; their per-source aggregation already pools across positions.
+
+**Why**
+- Research §4 explicitly recommends position-specific weights: athleticism
+  (RAS) matters far more at WR/TE than QB, and the predictive value of any
+  source for QBs is dominated by draft capital + opportunity rather than
+  athleticism. A single overall weight was flattening real position-level
+  signal differences.
+- Crowdsourced market values are *trailing* indicators for rookies (they
+  reflect post-draft consensus, not independent signal). The years-pro
+  inverse curve discounts them for the rookie cohort, where draft capital
+  + college metrics should carry the load.
+- Conversely, athleticism / draft capital / college breakouts are
+  fundamentally pre-NFL signals; their predictive value decays as players
+  accumulate actual NFL production. The linear decay makes the *vet* side
+  of the model dominated by real production data once it's available.
+
+**Expected output shift (where to look)**
+- **Top of the rookie composite at WR**: high-RAS, early-breakout rookies
+  with first-round draft capital should rise sharply — all three of those
+  signals now get amplified for them. The biggest movers will be WRs in
+  the last 2 draft classes.
+- **QB rookies**: less athleticism-driven movement. NFL Draft capital
+  gets its 1.2× QB boost; RAS gets cancelled (0.3×). The position-aware
+  weighting should produce more "draft-capital-first" QB rankings,
+  which is closer to how the analyst community treats them anyway.
+- **2nd- and 3rd-year veterans**: market sources gradually regain full
+  weight while RAS / college metrics fade. By Year 4+, the composite is
+  driven almost entirely by FantasyCalc + FFC + ECR + (when available)
+  PFF and Brainy Ballers.
+- **Aging RBs**: largest "corrective" drops vs. v0.6. Their FantasyCalc
+  value already reflects age decline, but the previous model gave RAS /
+  draft-capital from years ago full weight. Now those signals are at
+  0.3×–0.5×, letting market data tell the truth.
+- `rank_divergence` becomes more interpretable: it now compares the
+  weighted model output against the same market consensus as before, but
+  the model side is no longer naively averaging stale rookie signals
+  against live market values. Buy/sell signals should be sharper.
+
+**Validation**
+- Smoke test (`tests/smoke_test.py`) still passes — the refactor is
+  backward-compatible for the no-position-modifier, no-rookie-flag case.
+- New `tests/test_weights.py` covers:
+  - `position_modifier` lookups for all configured (slug, pos) pairs
+  - years-pro decay for rookie-signal sources
+  - years-pro inverse curve for market sources
+  - neutral fallback for unknown sources
+  - position-specific vs. overall track-record selector
+  - integration: same RAS rank+score → higher composite for WR rookie
+    than QB rookie
+  - integration: position-specific track-record row beats overall row
+- For empirical validation post-merge, run `score` against a recent draft
+  class and inspect the breakdown JSON — the per-source `weight` values
+  should reflect the new modifiers (look for `ras` at 1.5× for WRs,
+  near-zero for QBs).
+
+**Files touched**
+- `src/dynasty/weights.py` (new) — policy module
+- `src/dynasty/scoring.py` — refactored to use the new hooks
+- `tests/test_weights.py` (new) — 8 unit + integration tests
+
+**Migration note**
+- No schema changes. Existing databases work as-is.
+- Composite scores generated under v0.3.0 are *not directly comparable*
+  to v0.2 outputs at the per-player score level (weight semantics
+  changed). Ranks and tiers move where expected per the "Expected output
+  shift" section.
+
+---
+
 ## v0.6.0 — College Breakout Age + Dominator source (PR #5)
 
 **Date:** 2026-05-20

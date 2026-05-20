@@ -83,23 +83,45 @@ For each source we either:
 - Rescale the source's native `market_value` (e.g. FantasyCalc trade values)
   to 0–100 against that source's top value.
 
-### 3. Weight by track record
+### 3. Weight by track record, position, and years pro
 
-Each source has a `default_weight`. At score time we multiply by a
-**track-record multiplier** derived from backtests against actual NFL
-production:
+Each source has a `default_weight`. At score time, the effective weight per
+ranking row is:
+
+```
+effective_weight = default_weight
+                 × track_record_multiplier(source, position)
+                 × position_modifier(source, position)
+                 × years_pro_modifier(source, years_pro)
+```
+
+**Track-record multiplier** — derived from backtests against realized NFL
+production. Prefer the position-specific `source_track_record` row when one
+exists; fall back to the overall (position-None) row otherwise.
 
 | Spearman \|ρ\| vs. realized production | Multiplier |
 |-----------------------------------------|-----------:|
-| ≥ 0.70                                  | 1.5        |
-| ≥ 0.50                                  | 1.2        |
-| ≥ 0.30                                  | 1.0        |
-| < 0.30                                  | 0.6        |
+| ≥ 0.35                                  | 1.6        |
+| ≥ 0.25                                  | 1.3        |
+| ≥ 0.15                                  | 1.0        |
+| < 0.15                                  | 0.5        |
 | no backtest yet                         | 1.0        |
 
-This means **the more accurately a source has predicted the future, the more
-the model listens to it**. Sources that have not been backtested yet are
-treated as neutral (multiplier = 1.0).
+**Position modifier** — source-specific override per (slug, position).
+Example: RAS is 1.5× at WR/TE, 1.2× at RB, 0.3× at QB. CFBD breakouts are
+1.5× at WR, 1.3× at TE, 0.4× at QB. See `src/dynasty/weights.py` for the
+full table.
+
+**Years-pro modifier** — rookie-signal sources (`nfl_draft_capital`, `ras`,
+`cfbd_breakouts`) decay linearly from 1.0 in the rookie year to a 0.3 floor.
+Market-source signals (`fantasycalc`, `ffc_adp`, `dynastyprocess`) get an
+inverse curve: 0.6 at year 0 → 0.8 at year 1 → 1.0 at year 2+. Rationale:
+market values are *trailing* indicators for rookies, but reliable for vets;
+athleticism and draft capital are pre-NFL signals that lose relevance once
+real production exists.
+
+All three knobs live in `src/dynasty/weights.py` and the policy is editable
+in one place. Sources with no backtest yet are treated as neutral (1.0).
 
 ### 4. Composite
 
@@ -202,6 +224,7 @@ src/dynasty/
   config.py             # env-based settings (pydantic-settings)
   sync.py               # source → DB sync layer (player resolution)
   scoring.py            # composite score + divergence math
+  weights.py            # position-/years-pro-aware weight modifiers
   backtest.py           # per-source accuracy calculation
   manual_import.py      # import expert rankings from CSV
   scheduler.py          # APScheduler — daily syncs in `run-scheduler`
@@ -231,6 +254,7 @@ tests/
   test_ffc_adp.py
   test_ras.py
   test_cfbd_breakouts.py
+  test_weights.py
 data/
   ras/                  # drop Kent Lee Platte's RAS CSV here (gitignored)
   cfbd/                 # drop college Breakout Age + Dominator CSV here (gitignored)
@@ -270,9 +294,9 @@ Near-term:
 - ~~**Breakout Age + College Dominator** — computed from `cfbd-api-py` college
   stats. Replicates ~80% of PlayerProfiler's "secret sauce" for free.~~
   (PR #5 — CSV ingestion done; live CFBD API integration is a follow-up.)
-- **Position-specific + years-pro weighting** — the same source should not
+- ~~**Position-specific + years-pro weighting** — the same source should not
   weight the same for a rookie WR and a Year-6 RB. Refactors
-  `SourceTrackRecord` lookup to apply position-level multipliers. (PR #6)
+  `SourceTrackRecord` lookup to apply position-level multipliers.~~ (PR #6 — done)
 - **League roster import (MFL + Sleeper)** — KeepTradeCut-style "rate my
   team / league" view from the user's actual rosters. (PR #7)
 

@@ -739,8 +739,16 @@ def _build_league_page(latest_ts, league_format: str) -> str:
     header = _site_header("league", latest_ts, league_format)
     body = """<div class="container narrow">
 <h1>Rate My League</h1>
-<p>Paste a <strong>Sleeper league ID</strong>, optionally tune your league settings,
-and the model will evaluate every team against the current composite rankings.</p>
+<p>Two ways in:</p>
+<ul style="margin:0 0 24px 0;padding-left:24px">
+  <li><strong>Pre-fetched leagues</strong> below (Sleeper + MFL) — includes manager skill rankings from draft + trade history.</li>
+  <li><strong>Any Sleeper league</strong> by ID using the form below the pre-fetched section (live, team rankings only).</li>
+</ul>
+
+<div id="prefetched-section" style="margin:24px 0"></div>
+
+<h2 style="margin-top:48px">Evaluate any Sleeper league</h2>
+<p style="color:var(--muted);font-size:14px">For MFL or for manager-skill rankings on an arbitrary league, list the league in <code>leagues.json</code> and it'll appear in the pre-fetched section after the next daily build.</p>
 
 <form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0">
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
@@ -804,8 +812,9 @@ It's the long number after <code>/leagues/</code> (e.g.
 <div id="league-results"></div>
 
 <p style="margin-top:40px;color:var(--muted);font-size:13px">
-For MFL leagues, the static site can't query MFL's API directly (no CORS). Use the CLI instead:
-<code>python -m dynasty.cli league mfl &lt;league_id&gt; --year &lt;year&gt;</code>.
+For MFL leagues, the live API has no CORS so the browser can't reach it directly. Add the league to
+<code>leagues.json</code> in the repo and it'll appear in the pre-fetched section after the next
+daily build.
 </p>
 </div>
 
@@ -1025,6 +1034,124 @@ function escapeHtml(s) {
   if (s == null) return "";
   return String(s).replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
+
+// ---------------------------------------------------------------------------
+// Pre-fetched leagues (Sleeper + MFL pre-baked into the site at build time).
+// ---------------------------------------------------------------------------
+
+async function loadPrefetchedIndex() {
+  const section = document.getElementById("prefetched-section");
+  try {
+    const resp = await fetch("leagues/index.json");
+    if (!resp.ok) throw new Error("no index");
+    const idx = await resp.json();
+    const leagues = idx.leagues || [];
+    if (!leagues.length) {
+      section.innerHTML = `<div class="callout" style="font-size:13px">No leagues are pre-fetched yet. Add entries to <code>leagues.json</code> in the repo to populate this section. MFL leagues must be listed here — their API has no CORS.</div>`;
+      return;
+    }
+    let html = `<h2 style="margin-top:0">Pre-fetched leagues</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">`;
+    leagues.forEach(L => {
+      const yearTag = L.year ? ` ${L.year}` : "";
+      html += `<button class="prefetched-card" onclick="loadPrefetched('${L.slug}')" style="text-align:left;padding:14px 16px;border:1px solid var(--border);border-radius:6px;background:white;cursor:pointer">`;
+      html += `<div style="font-weight:600;font-size:15px">${escapeHtml(L.name)}</div>`;
+      html += `<div style="font-size:12px;color:var(--muted);margin-top:4px">${escapeHtml(L.platform.toUpperCase())}${yearTag} · ${L.n_teams} teams · ${L.n_managers} managers</div>`;
+      html += `</button>`;
+    });
+    html += `</div>`;
+    section.innerHTML = html;
+  } catch (err) {
+    section.innerHTML = `<div style="font-size:13px;color:var(--muted)">(No pre-fetched leagues available.)</div>`;
+  }
+}
+
+async function loadPrefetched(slug) {
+  const status = document.getElementById("league-status");
+  const results = document.getElementById("league-results");
+  status.textContent = `Loading ${slug}...`;
+  results.innerHTML = "";
+  try {
+    const resp = await fetch(`leagues/${slug}.json`);
+    if (!resp.ok) throw new Error("could not load " + slug);
+    const payload = await resp.json();
+    const team = payload.team_report || {};
+    const mgr = payload.manager_report || {};
+    status.textContent = `${team.name || slug} — pre-fetched ${payload.fetched_at || ""} · ${(team.teams || []).length} teams`;
+    results.innerHTML = renderPrefetchedReport(team, mgr);
+  } catch (err) {
+    status.textContent = "";
+    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${err.message}</div>`;
+  }
+}
+
+function renderPrefetchedReport(team, mgr) {
+  let html = renderTeamReport(team);
+  html += renderManagerReport(mgr);
+  return html;
+}
+
+function renderTeamReport(team) {
+  const power = team.power_rankings || [];
+  const teams = team.teams || [];
+  if (!teams.length) return "<p>No team data in pre-fetched report.</p>";
+  let html = `<h2 style="margin-top:32px">Power rankings <span style="color:var(--muted);font-size:13px;font-weight:normal">(pre-fetched, base scores)</span></h2>`;
+  html += `<table style="width:100%;border-collapse:collapse">`;
+  html += `<thead><tr><th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">#</th>`;
+  html += `<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Team</th>`;
+  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">Total</th>`;
+  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">vs Avg</th></tr></thead><tbody>`;
+  power.forEach((row, i) => {
+    const diff = row.vs_league_avg >= 0 ? `+${row.vs_league_avg.toFixed(1)}` : row.vs_league_avg.toFixed(1);
+    const diffColor = row.vs_league_avg >= 0 ? "#065f46" : "#991b1b";
+    html += `<tr><td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${row.rank}</td>`;
+    html += `<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>${escapeHtml(row.display_name)}</strong></td>`;
+    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${row.total_score.toFixed(1)}</td>`;
+    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:${diffColor}">${diff}</td></tr>`;
+  });
+  html += `</tbody></table>`;
+  return html;
+}
+
+function renderManagerReport(mgr) {
+  const managers = mgr.managers || [];
+  if (!managers.length) return "";
+  let html = `<h2 style="margin-top:48px">Manager skill rankings</h2>`;
+  html += `<p style="color:var(--muted);font-size:13px">Per-manager skill score (z-score blend of draft delta + trade delta). `;
+  html += `Picks=${mgr.n_picks||0}, trades=${mgr.n_trades||0}. Uses current composite values — rewards picks that aged well.</p>`;
+  html += `<table style="width:100%;border-collapse:collapse;font-size:14px">`;
+  html += `<thead><tr>`;
+  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">#</th>`;
+  html += `<th style="text-align:left;padding:6px;border-bottom:2px solid var(--border)">Manager</th>`;
+  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Skill</th>`;
+  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Picks</th>`;
+  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Draft Δ</th>`;
+  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Trades</th>`;
+  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Trade Δ</th>`;
+  html += `<th style="text-align:left;padding:6px;border-bottom:2px solid var(--border)">Notes</th>`;
+  html += `</tr></thead><tbody>`;
+  managers.forEach(m => {
+    const skill = m.skill_score >= 0 ? `+${m.skill_score.toFixed(2)}` : m.skill_score.toFixed(2);
+    const skillColor = m.skill_score >= 0 ? "#065f46" : "#991b1b";
+    const dDelta = m.n_picks ? (m.draft_delta_avg >= 0 ? `+${m.draft_delta_avg.toFixed(1)}` : m.draft_delta_avg.toFixed(1)) : "—";
+    const tDelta = m.n_trades ? (m.trade_delta_total >= 0 ? `+${m.trade_delta_total.toFixed(1)}` : m.trade_delta_total.toFixed(1)) : "—";
+    const notes = (m.notes || []).join(", ");
+    html += `<tr>`;
+    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${m.skill_rank}</td>`;
+    html += `<td style="padding:6px;border-bottom:1px solid var(--border)"><strong>${escapeHtml(m.display_name)}</strong></td>`;
+    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:${skillColor};font-weight:600">${skill}</td>`;
+    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${m.n_picks}</td>`;
+    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${dDelta}</td>`;
+    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${m.n_trades}</td>`;
+    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${tDelta}</td>`;
+    html += `<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px">${escapeHtml(notes)}</td>`;
+    html += `</tr>`;
+  });
+  html += `</tbody></table>`;
+  return html;
+}
+
+// Auto-load the prefetched index on page load.
+loadPrefetchedIndex();
 </script>"""
     return _page(title, header, body)
 

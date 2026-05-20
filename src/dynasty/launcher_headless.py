@@ -17,7 +17,7 @@ def main():
     print("=" * 60)
 
     # Step 1: init DB
-    print("\n[1/5] Initializing database...")
+    print("\n[1/6] Initializing database...")
     try:
         from dynasty.db.session import init_db, get_session
         from dynasty.db.models import Player
@@ -29,7 +29,7 @@ def main():
         sys.exit(1)
 
     # Step 2: Sleeper players
-    print("\n[2/5] Loading player metadata from Sleeper...")
+    print("\n[2/6] Loading player metadata from Sleeper...")
     try:
         from dynasty.sync import sync_sleeper_players
         n = sync_sleeper_players()
@@ -39,7 +39,7 @@ def main():
         print("  Continuing without Sleeper player map.")
 
     # Step 3: Sync data sources
-    print("\n[3/5] Syncing data sources...")
+    print("\n[3/6] Syncing data sources...")
     from dynasty.sync import sync_source
 
     synced_any = False
@@ -47,7 +47,7 @@ def main():
     # table (draft capital, RAS, CFBD) are best run AFTER the market/aggregator
     # sources so that name-based player resolution finds the existing rows
     # rather than auto-creating duplicates. The Sleeper player upsert runs in
-    # step [2/5] above, which is the most important canonicalization step.
+    # step [2/6] above, which is the most important canonicalization step.
     sources_to_sync = [
         # Market + consensus (core composite signal)
         ("fantasycalc", "FantasyCalc"),
@@ -88,7 +88,7 @@ def main():
         sys.exit(1)
 
     # Step 4: Score
-    print("\n[4/5] Computing composite scores...")
+    print("\n[4/6] Computing composite scores...")
     try:
         from dynasty.scoring import compute_composite_scores
         for fmt in ["sf_ppr", "1qb_ppr"]:
@@ -99,7 +99,7 @@ def main():
         sys.exit(1)
 
     # Step 5: Build site
-    print("\n[5/5] Building site...")
+    print("\n[5/6] Building site...")
     try:
         from dynasty.report import generate_site
         out = generate_site(output_dir="dynasty_site", league_format="sf_ppr", limit=300)
@@ -107,6 +107,28 @@ def main():
     except Exception as e:
         print(f"  FAIL: {e}")
         sys.exit(1)
+
+    # Step 6: Pre-fetch any leagues listed in leagues.json.
+    # This is how MFL leagues reach the site (no CORS on api.myfantasyleague.com).
+    # Sleeper leagues listed here also get their manager-rankings pre-computed.
+    print("\n[6/6] Pre-fetching listed leagues...")
+    try:
+        # Run the script as a module so it shares the same Python path as the
+        # rest of the launcher (avoids re-import overhead).
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parent.parent.parent / "scripts"))
+        import prefetch_leagues
+        summary = prefetch_leagues.prefetch_all()
+        ok_count = len(summary.get("leagues", []))
+        err_count = len(summary.get("errors", []))
+        print(f"  Pre-fetched {ok_count} leagues, {err_count} errors")
+        for L in summary.get("leagues", []):
+            print(f"    {L['slug']:>40}  teams={L['n_teams']:>2}  managers={L['n_managers']:>2}  ({L['name']})")
+        for err in summary.get("errors", []):
+            print(f"    [error] {err['entry']}: {err['error']}")
+    except Exception as e:
+        print(f"  WARN: pre-fetch step failed: {e}")
+        print("  (Site still builds without pre-fetched leagues.)")
 
     print("\nDone.")
 

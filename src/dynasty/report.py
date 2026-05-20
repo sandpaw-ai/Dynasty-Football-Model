@@ -401,6 +401,7 @@ def _site_header(active: str, latest_ts: datetime | None, league_format: str) ->
     <nav>
       {link("index.html", "Overview", "index")}
       {link("rankings.html", "Rankings", "rankings")}
+      {link("league.html", "Rate My League", "league")}
       {link("sources.html", "Sources & Methodology", "sources")}
     </nav>
   </div>
@@ -730,6 +731,182 @@ command. Each evaluator below shows a suggested weight based on their documented
 
 
 # --------------------------------------------------------------------------
+# Page: league.html — client-side Sleeper league evaluator
+# --------------------------------------------------------------------------
+
+def _build_league_page(latest_ts, league_format: str) -> str:
+    title = "Dynasty Model — Rate My League"
+    header = _site_header("league", latest_ts, league_format)
+    body = f"""<div class="container narrow">
+<h1>Rate My League</h1>
+<p>Paste a <strong>Sleeper league ID</strong> below and the model will evaluate every team in your league
+against the current composite rankings.</p>
+
+<form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0;display:flex;gap:8px;flex-wrap:wrap">
+  <input id="league-id" type="text" placeholder="e.g. 968712712272838656"
+         style="flex:1;min-width:280px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px"
+         required>
+  <button type="submit"
+          style="padding:10px 18px;background:#1d4ed8;color:white;border:0;border-radius:6px;font-weight:600;font-size:15px;cursor:pointer">
+    Evaluate league
+  </button>
+</form>
+
+<div class="callout" style="font-size:13px">
+<strong>Where to find your league ID:</strong> on Sleeper, open your league → look at the URL.
+It's the long number after <code>/leagues/</code> (e.g.
+<code>https://sleeper.com/leagues/<strong>968712712272838656</strong>/team</code>).
+</div>
+
+<div id="league-status" style="margin:16px 0;color:var(--muted);font-size:14px"></div>
+<div id="league-results"></div>
+
+<p style="margin-top:40px;color:var(--muted);font-size:13px">
+For MFL leagues, the static site can't query MFL's API directly (no CORS). Use the CLI instead:
+<code>python -m dynasty.cli league mfl &lt;league_id&gt; --year &lt;year&gt;</code>.
+</p>
+</div>
+
+<script>
+const STARTING_POSITIONS = ["QB", "RB", "WR", "TE"];
+const WEAKNESS_TIER_THRESHOLD = 3;
+let MODEL = null;
+
+async function loadModel() {{
+  if (MODEL) return MODEL;
+  const resp = await fetch("assets/model_scores.json");
+  if (!resp.ok) throw new Error("Could not load model scores (assets/model_scores.json)");
+  MODEL = await resp.json();
+  return MODEL;
+}}
+
+async function evalLeague(ev) {{
+  ev.preventDefault();
+  const leagueId = document.getElementById("league-id").value.trim();
+  const status = document.getElementById("league-status");
+  const results = document.getElementById("league-results");
+  results.innerHTML = "";
+  status.textContent = "Loading model + Sleeper league data...";
+
+  try {{
+    const [model, leagueResp, usersResp, rostersResp] = await Promise.all([
+      loadModel(),
+      fetch(`https://api.sleeper.app/v1/league/${{leagueId}}`),
+      fetch(`https://api.sleeper.app/v1/league/${{leagueId}}/users`),
+      fetch(`https://api.sleeper.app/v1/league/${{leagueId}}/rosters`),
+    ]);
+    if (!leagueResp.ok) {{
+      throw new Error("League not found. Double-check the league ID.");
+    }}
+    const [league, users, rosters] = await Promise.all([
+      leagueResp.json(), usersResp.json(), rostersResp.json(),
+    ]);
+
+    const userById = {{}};
+    (users || []).forEach(u => {{ userById[u.user_id] = u.display_name || u.username || u.user_id; }});
+
+    const teams = (rosters || []).map(r => evaluateTeam(r, userById, model));
+    const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
+    teams.forEach(t => {{ t.vsAvg = t.total - leagueAvg; }});
+
+    const sorted = [...teams].sort((a, b) => b.total - a.total);
+    status.textContent = `${{league.name || "Sleeper league " + leagueId}} — ${{teams.length}} teams — league avg ${{leagueAvg.toFixed(1)}}`;
+
+    results.innerHTML = renderResults(league.name, sorted);
+  }} catch (err) {{
+    status.textContent = "";
+    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${{err.message}}</div>`;
+  }}
+  return false;
+}}
+
+function evaluateTeam(roster, userById, model) {{
+  const ownerName = userById[roster.owner_id] || ("Team " + roster.roster_id);
+  const playerIds = roster.players || [];
+  let total = 0;
+  let evaluated = 0;
+  let unrated = 0;
+  const playerRows = [];
+  const bestAtPos = {{}};
+  for (const pid of playerIds) {{
+    const entry = model[String(pid)];
+    if (!entry) {{ unrated++; continue; }}
+    evaluated++;
+    total += entry.score;
+    playerRows.push(entry);
+    const pos = entry.position;
+    if (!bestAtPos[pos] || entry.score > bestAtPos[pos].score) bestAtPos[pos] = entry;
+  }}
+  playerRows.sort((a, b) => b.score - a.score);
+  const weaknesses = [];
+  for (const pos of STARTING_POSITIONS) {{
+    const best = bestAtPos[pos];
+    if (!best) weaknesses.push(`no rated ${{pos}} on roster`);
+    else if ((best.tier || 99) > WEAKNESS_TIER_THRESHOLD) {{
+      weaknesses.push(`weak ${{pos}}: best is ${{best.name}} (Tier ${{best.tier}}, rank ${{best.rank}})`);
+    }}
+  }}
+  return {{
+    teamId: roster.roster_id,
+    name: ownerName,
+    total,
+    avg: evaluated ? total / evaluated : 0,
+    evaluated,
+    unrated,
+    topAssets: playerRows.slice(0, 5),
+    weaknesses,
+  }};
+}}
+
+function renderResults(leagueName, sorted) {{
+  let html = `<h2 style="margin-top:32px">Power rankings</h2>`;
+  html += `<table style="width:100%;border-collapse:collapse">`;
+  html += `<thead><tr><th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">#</th>`;
+  html += `<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Team</th>`;
+  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">Total</th>`;
+  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">vs Avg</th></tr></thead><tbody>`;
+  sorted.forEach((t, i) => {{
+    const diff = t.vsAvg >= 0 ? `+${{t.vsAvg.toFixed(1)}}` : t.vsAvg.toFixed(1);
+    const diffColor = t.vsAvg >= 0 ? "#065f46" : "#991b1b";
+    html += `<tr><td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${{i + 1}}</td>`;
+    html += `<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>${{escapeHtml(t.name)}}</strong></td>`;
+    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${{t.total.toFixed(1)}}</td>`;
+    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:${{diffColor}}">${{diff}}</td></tr>`;
+  }});
+  html += `</tbody></table>`;
+  html += `<h2 style="margin-top:48px">Team breakdowns</h2>`;
+  sorted.forEach(t => {{
+    html += `<div style="margin:24px 0;padding:16px;border:1px solid var(--border);border-radius:8px">`;
+    html += `<h3 style="margin:0 0 8px 0">${{escapeHtml(t.name)}}</h3>`;
+    html += `<div style="color:var(--muted);font-size:14px;margin-bottom:12px">total=${{t.total.toFixed(1)}} avg=${{t.avg.toFixed(1)}} rated=${{t.evaluated}} unrated=${{t.unrated}}</div>`;
+    if (t.topAssets.length) {{
+      html += `<div style="font-weight:600;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Top 5 assets</div>`;
+      html += `<ul style="margin:0 0 12px 0;padding-left:20px">`;
+      t.topAssets.forEach(a => {{
+        html += `<li>${{escapeHtml(a.name)}} <span style="color:var(--muted)">(${{a.position}}, rank ${{a.rank}}, Tier ${{a.tier}}) score ${{a.score.toFixed(1)}}</span></li>`;
+      }});
+      html += `</ul>`;
+    }}
+    if (t.weaknesses.length) {{
+      html += `<div style="font-weight:600;font-size:13px;color:#92400e;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Weaknesses</div>`;
+      html += `<ul style="margin:0;padding-left:20px;color:#92400e">`;
+      t.weaknesses.forEach(w => {{ html += `<li>${{escapeHtml(w)}}</li>`; }});
+      html += `</ul>`;
+    }}
+    html += `</div>`;
+  }});
+  return html;
+}}
+
+function escapeHtml(s) {{
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, c => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}})[c]);
+}}
+</script>"""
+    return _page(title, header, body)
+
+
+# --------------------------------------------------------------------------
 # Page: players/<slug>.html — individual player detail
 # --------------------------------------------------------------------------
 
@@ -896,6 +1073,38 @@ Run the launcher again — make sure the sync step completes successfully.</div>
         # Sources & methodology
         (out_root / "sources.html").write_text(
             _build_sources_page(sources, latest_ts, league_format), encoding="utf-8"
+        )
+
+        # Rate-My-League page + the model-scores JSON that powers it
+        # client-side. Keyed by sleeper_id so the Sleeper league API joins
+        # without any server-side work. Use an UNBOUNDED query so deep
+        # rosters (12 teams x ~35 = 420) all resolve, not just the top-300
+        # we render on rankings.html.
+        all_rows_for_json = session.execute(
+            select(CompositeScore, Player)
+            .join(Player, CompositeScore.player_id == Player.id)
+            .where(CompositeScore.league_format == league_format)
+            .where(CompositeScore.generated_at == latest_ts)
+            .order_by(CompositeScore.overall_rank)
+        ).all()
+        scores_lookup: dict[str, dict] = {}
+        for cs, p in all_rows_for_json:
+            if not p.sleeper_id:
+                continue
+            scores_lookup[str(p.sleeper_id)] = {
+                "name": p.full_name,
+                "position": p.position,
+                "team": p.nfl_team,
+                "score": round(cs.score, 2),
+                "rank": cs.overall_rank,
+                "tier": cs.tier,
+                "position_rank": cs.position_rank,
+            }
+        (out_root / "assets" / "model_scores.json").write_text(
+            json.dumps(scores_lookup, separators=(",", ":")), encoding="utf-8"
+        )
+        (out_root / "league.html").write_text(
+            _build_league_page(latest_ts, league_format), encoding="utf-8"
         )
 
         # Per-player pages

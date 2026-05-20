@@ -37,6 +37,7 @@ class Player(Base):
     espn_id: Mapped[Optional[str]] = mapped_column(String(32))
     yahoo_id: Mapped[Optional[str]] = mapped_column(String(32))
     pfr_id: Mapped[Optional[str]] = mapped_column(String(32))  # pro-football-reference
+    gsis_id: Mapped[Optional[str]] = mapped_column(String(32), index=True)  # nflverse / NFL GSIS id, e.g. "00-0033280"
 
     full_name: Mapped[str] = mapped_column(String(128))
     first_name: Mapped[Optional[str]] = mapped_column(String(64))

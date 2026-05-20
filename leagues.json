@@ -1,0 +1,4 @@
+{
+  "_comment": "Leagues to pre-fetch and bake into the published site. Each entry produces dynasty_site/leagues/<platform>-<id>.json which the league.html page can load directly. Sleeper leagues work live from the site (CORS-friendly) so they don't need to be listed here — but listing one will also pre-fetch its manager rankings (drafts + trades). MFL leagues MUST be listed here to appear on the site (MFL API has no CORS).",
+  "leagues": []
+}

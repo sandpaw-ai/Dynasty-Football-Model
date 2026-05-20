@@ -15,6 +15,110 @@ Format for each entry:
 
 ---
 
+## v0.11.0 — MFL on site + manager skill rankings (PR #11)
+
+**Date:** 2026-05-20
+
+Two asks from Phil:
+1. MFL leagues should work on the site (KTC can do it).
+2. Manager skill rankings from draft + trade history.
+
+**MFL approach: pre-fetch into static JSON**
+- The MFL API (`api.myfantasyleague.com`) only sends
+  `Access-Control-Allow-Origin: https://www<N>.myfantasyleague.com`,
+  which means browsers blocked from `pstiehl.github.io` can't query it
+  directly. KTC works around this with a server proxy.
+- Rather than introduce a separate proxy service, we **pre-fetch** any
+  leagues listed in `leagues.json` at build time (daily CI runs the
+  fetch in step 6/6 of `launcher_headless`).
+- Output: `dynasty_site/leagues/<platform>-<league_id>.json` per league
+  + `dynasty_site/leagues/index.json` manifest the page reads.
+- New top-level config file `leagues.json` (initially empty). Phil adds
+  entries like `{platform: "mfl", league_id: "12345", year: 2026}` and
+  the next daily build bakes them in.
+- Sleeper leagues can still be queried live from the form (CORS-friendly).
+  But if a Sleeper league is in `leagues.json`, its manager rankings are
+  also pre-computed (the manager pipeline needs to walk drafts +
+  transactions, which is too slow / heavy for live client-side).
+
+**Manager skill rankings**
+- New `src/dynasty/manager.py` module:
+  - `manager_report_sleeper(league_id)`
+  - `manager_report_mfl(league_id, year)`
+- For each manager, computes:
+  - **Draft delta**: for every pick they made, `current_composite_score
+    - expected_score_at_pick(overall_pick)`. Positive = picked up more
+    value than the slot warranted.
+  - **Trade delta**: for each completed trade, sum of
+    `composite_received - composite_given`.
+  - **Skill score**: equal-weight z-score blend of the two deltas,
+    normalized within the league.
+  - **Skill rank**: managers sorted by skill_score within the league.
+- Picks for unrated players (deep drafts, IDP, late dart throws) are
+  skipped from the draft-delta calculation, not counted as zero. Same
+  for trade assets that aren't in our composite snapshot.
+- Caveats surfaced as `notes` on each manager: "no trades on record",
+  "only N rated draft picks (low sample)".
+- Uses *current* composite values, not contemporaneous — rewards picks
+  that aged well, not what looked smart on draft night. Transparent
+  about this in the page UI.
+
+**Site UI**
+- `league.html` rewritten into two sections:
+  1. **Pre-fetched leagues** — grid of cards, one per league in
+     `leagues/index.json`. Click loads the full per-league JSON,
+     renders team power rankings AND manager skill rankings.
+  2. **Live Sleeper form** — unchanged behavior for arbitrary Sleeper
+     league IDs. Team rankings only (manager rankings require pre-fetch).
+- New manager-rankings table per league:
+  rank / manager / skill / picks / draft Δ / trades / trade Δ / notes
+  with color-coded skill scores.
+
+**CLI**
+- `python -m dynasty.cli managers <platform> <league_id> [--year Y]`
+  prints a manager-rankings table to the terminal.
+- `python -m dynasty.cli prefetch-leagues` runs the pre-fetcher
+  one-off (useful when iterating on `leagues.json` without a full
+  site rebuild).
+
+**Tests**
+- `tests/test_manager.py` (new) — 5 cases:
+  - `expected_score_at_pick` anchors
+  - `_compute_manager_table` arithmetic (draft deltas)
+  - Trade value zero-sum within a 2-team trade
+  - Sleeper end-to-end with fixture HTTP client
+  - MFL end-to-end with fixture HTTP client (verifies draft-pick
+    tokens like `DP_02_05` are filtered out as non-player assets)
+- `tests/test_prefetch_leagues.py` (new) — 4 cases:
+  - Empty config still writes index.json
+  - Unknown platform captured as error
+  - Missing league_id captured as error
+  - Sleeper prefetch writes per-league + manifest files
+
+**Files touched**
+- `src/dynasty/manager.py` (new)
+- `src/dynasty/cli.py` — `managers` + `prefetch-leagues` commands
+- `src/dynasty/launcher_headless.py` — step 6/6 pre-fetch
+- `src/dynasty/report.py` — league.html rewritten with prefetched section
+  + manager-rankings rendering
+- `scripts/prefetch_leagues.py` (new)
+- `leagues.json` (new, empty stub)
+- `tests/test_manager.py` (new)
+- `tests/test_prefetch_leagues.py` (new)
+- `docs/CHANGELOG-model.md` § v0.11.0
+
+**Caveats / future work**
+- Pre-fetched leagues require a daily CI rebuild before changes show up.
+  Trade-heavy weeks may want hourly. Easy to bump the cron in
+  `daily-refresh.yml` if needed.
+- Manager rankings use *current* composite values, which rewards picks
+  that aged well. A future v2 could backfill contemporaneous values
+  (composite at the time of the draft / trade).
+- No FAAB / waiver scoring yet.
+- Picks for unrated players are skipped (not penalized as zero).
+
+---
+
 ## v0.10.0 — deterministic weights, league settings, name dedup (PR #10)
 
 **Date:** 2026-05-20

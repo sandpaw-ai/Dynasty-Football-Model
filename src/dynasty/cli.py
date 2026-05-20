@@ -271,6 +271,78 @@ def cli_league(
                 console.print(f"    - {w}")
 
 
+@app.command("managers")
+def cli_managers(
+    platform: str = typer.Argument(..., help="sleeper | mfl"),
+    league_id: str = typer.Argument(...),
+    year: int = typer.Option(None, "--year", help="MFL year (defaults to current)"),
+    as_json: bool = typer.Option(False, "--json", help="Emit full JSON report"),
+):
+    """Manager skill rankings from draft + trade history.
+
+    Examples:
+        python -m dynasty.cli managers sleeper 968712712272838656
+        python -m dynasty.cli managers mfl 12345 --year 2026
+    """
+    from .manager import manager_report_sleeper, manager_report_mfl
+    from datetime import datetime as _dt
+
+    plat = platform.lower()
+    if plat == "sleeper":
+        report = manager_report_sleeper(league_id)
+    elif plat == "mfl":
+        report = manager_report_mfl(league_id, year=year or _dt.utcnow().year)
+    else:
+        console.print(f"[red]Unknown platform:[/red] {platform!r}. Use 'sleeper' or 'mfl'.")
+        raise typer.Exit(1)
+
+    if as_json:
+        console.print_json(json.dumps(report, default=str))
+        return
+
+    console.print(
+        f"\n[bold cyan]Manager rankings[/bold cyan]  ({plat} {league_id})  "
+        f"picks={report['n_picks']}  trades={report['n_trades']}\n"
+    )
+
+    table = Table(title="Manager skill rankings")
+    table.add_column("#", justify="right")
+    table.add_column("Manager")
+    table.add_column("Skill", justify="right")
+    table.add_column("Picks", justify="right")
+    table.add_column("Draft Δ (avg)", justify="right")
+    table.add_column("z_draft", justify="right")
+    table.add_column("Trades", justify="right")
+    table.add_column("Trade Δ (total)", justify="right")
+    table.add_column("z_trade", justify="right")
+    table.add_column("Notes")
+    for m in report["managers"]:
+        table.add_row(
+            str(m["skill_rank"]),
+            m["display_name"],
+            f"{m['skill_score']:+.2f}",
+            str(m["n_picks"]),
+            f"{m['draft_delta_avg']:+.1f}" if m["n_picks"] else "-",
+            f"{m['z_draft']:+.2f}" if m["n_picks"] else "-",
+            str(m["n_trades"]),
+            f"{m['trade_delta_total']:+.1f}" if m["n_trades"] else "-",
+            f"{m['z_trade']:+.2f}" if m["n_trades"] else "-",
+            ", ".join(m["notes"]) or "",
+        )
+    console.print(table)
+
+
+@app.command("prefetch-leagues")
+def cli_prefetch_leagues():
+    """Run the leagues.json pre-fetcher and write JSON into dynasty_site/leagues/."""
+    from pathlib import Path as _P
+    import sys as _sys
+    _sys.path.insert(0, str(_P(__file__).resolve().parent.parent.parent / "scripts"))
+    import prefetch_leagues
+    summary = prefetch_leagues.prefetch_all()
+    console.print_json(json.dumps(summary, default=str))
+
+
 @app.command("run-scheduler")
 def cli_run_scheduler():
     """Run the daily/weekly scheduler in the foreground."""

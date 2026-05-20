@@ -123,6 +123,73 @@ SOURCE_DESCRIPTIONS = {
             "actually get drafted."
         ),
     },
+    "nfl_draft_capital": {
+        "blurb": "Every NFL draft pick since 1980 from the public nflverse CSV. Treated as an objective evaluator opinion.",
+        "type": "Analytics model (draft signal)",
+        "strength": (
+            "NFL draft capital is the single strongest predictor of rookie fantasy production "
+            "(r ≈ 0.4–0.6 vs. 3-year fantasy points). Implicitly captures medicals, character, and "
+            "private scouting that NFL teams paid for. Free, ToS-clean, no scraping."
+        ),
+        "weakness": (
+            "Static between drafts — doesn't update mid-season. Less useful for veterans whose "
+            "NFL production has already overwritten the draft-day signal (PR #6 — v0.7 weighting refactor — "
+            "decays this signal as years-pro increases)."
+        ),
+        "weight_justification": (
+            "Default weight 1.5 (highest in the registry). At QB, position modifier of 1.2x boosts "
+            "it further because team draft-capital commitment correlates with opportunity. Years-pro "
+            "decay floors it at 0.3x for Year-5+ veterans."
+        ),
+    },
+    "ffc_adp": {
+        "blurb": "FantasyFootballCalculator ADP across PPR / 2QB / Dynasty / Rookie formats. Live from real mock drafts.",
+        "type": "Market signal (secondary)",
+        "strength": (
+            "Second market signal alongside FantasyCalc, deliberately uncorrelated: FFC's user base "
+            "skews casual and redraft, so it catches sentiment the dynasty-trader crowd lags. Rookie "
+            "ADP especially valuable — it moves within hours of draft night."
+        ),
+        "weakness": "Casual user base means more noise and higher variance than FantasyCalc.",
+        "weight_justification": (
+            "Default weight 0.7 — lower than FantasyCalc because the underlying drafters are less serious. "
+            "Treated as 'consensus' for the divergence calculation."
+        ),
+    },
+    "ras": {
+        "blurb": "Relative Athletic Score (Kent Lee Platte). Position-adjusted composite of Combine/Pro Day testing.",
+        "type": "Analytics model (athleticism)",
+        "strength": (
+            "Best free single-number athleticism composite. Most useful as a *bust filter*: prospects "
+            "with RAS < 5 in positions that demand athleticism (WR/TE) substantially underperform "
+            "their draft capital."
+        ),
+        "weakness": (
+            "Modest standalone signal at WR (r ≈ 0.10–0.15). Near-zero predictive value for QB. "
+            "Requires a local CSV file at data/ras/ras_database.csv — yields zero rows when missing."
+        ),
+        "weight_justification": (
+            "Default weight 0.8. Position modifier amplifies to 1.5x for WR/TE, 1.2x for RB, drops to "
+            "0.3x at QB. Years-pro decay treats RAS strictly as a pre-NFL signal that fades for vets."
+        ),
+    },
+    "cfbd_breakouts": {
+        "blurb": "Engineered college signals: Breakout Age + Best College Dominator Rating.",
+        "type": "Analytics model (college production)",
+        "strength": (
+            "The two highest-signal college production metrics in the public literature. Breakout Age "
+            "shows r ≈ 0.43 with NFL fantasy points at WR; College Dominator captures 'was this guy his "
+            "college team's go-to player?'. Together they replicate ~80% of PlayerProfiler's paid signal."
+        ),
+        "weakness": (
+            "Requires a local CSV at data/cfbd/breakouts.csv with pre-computed features. Live CFBD API "
+            "integration is a planned follow-up."
+        ),
+        "weight_justification": (
+            "Default weight 0.9. Position modifier 1.5x at WR, 1.3x at TE, 1.0x at RB, 0.4x at QB. "
+            "Like RAS, decays with years-pro because actual NFL production should dominate vets."
+        ),
+    },
 }
 
 # Categories of evaluators you should add via CSV import (paywalled sources)

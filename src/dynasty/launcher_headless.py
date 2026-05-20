@@ -43,10 +43,24 @@ def main():
     from dynasty.sync import sync_source
 
     synced_any = False
+    # Order matters slightly: the sources that *enrich* the canonical Player
+    # table (draft capital, RAS, CFBD) are best run AFTER the market/aggregator
+    # sources so that name-based player resolution finds the existing rows
+    # rather than auto-creating duplicates. The Sleeper player upsert runs in
+    # step [2/5] above, which is the most important canonicalization step.
     sources_to_sync = [
+        # Market + consensus (core composite signal)
         ("fantasycalc", "FantasyCalc"),
         ("dynastyprocess", "DynastyProcess"),
+        ("ffc_adp", "FFC ADP"),
+        # Model + analytics overlays
         ("brainy_ballers", "Brainy Ballers"),
+        ("nfl_draft_capital", "NFL Draft Capital"),
+        # Local-CSV sources — will sync zero rows until the data file is
+        # dropped into the corresponding data/ directory, but they register
+        # cleanly either way.
+        ("ras", "RAS (Relative Athletic Score)"),
+        ("cfbd_breakouts", "CFBD Breakouts (Breakout Age + Dominator)"),
     ]
     for slug, label in sources_to_sync:
         try:

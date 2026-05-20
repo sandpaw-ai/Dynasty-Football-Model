@@ -1,0 +1,30 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Local database (regenerated daily by GitHub Actions)
+*.db
+*.db-journal
+
+# Generated site (built by GitHub Actions, served from there)
+dynasty_site/
+
+# Local environment file (don't commit secrets)
+.env
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

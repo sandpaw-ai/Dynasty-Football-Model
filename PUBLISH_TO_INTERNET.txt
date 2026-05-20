@@ -1,0 +1,224 @@
+==============================================================
+HOW TO PUT THIS ON THE INTERNET (step-by-step, no jargon)
+==============================================================
+
+You've already got a GitHub repository created here:
+  https://github.com/pstiehl/Dynasty-Football-Model
+
+We need to do three things:
+
+  1. Upload these project files to that repository
+  2. Turn on a setting called "GitHub Pages" so the public can see the site
+  3. Watch GitHub run the model automatically and publish the result
+
+The whole process takes about 15 minutes. Then you never have to touch it
+again — the site refreshes daily on its own.
+
+
+==============================================================
+STEP 1 — INSTALL GITHUB DESKTOP
+==============================================================
+
+GitHub Desktop is a free app that uploads files to GitHub without using
+the command line.
+
+  1. Go to:  https://desktop.github.com/
+  2. Click "Download for [Mac/Windows]"
+  3. Open the installer and follow the prompts
+  4. When it asks you to sign in, sign in with the same account you use
+     for github.com
+
+
+==============================================================
+STEP 2 — CLONE YOUR REPOSITORY
+==============================================================
+
+"Clone" is git-speak for "make a local copy of your GitHub repository
+on your computer". We need this so we can put our files into the local
+copy and have GitHub Desktop upload them.
+
+  1. Open GitHub Desktop
+  2. From the top menu: File → Clone Repository
+  3. Click the "URL" tab
+  4. Paste this URL:
+        https://github.com/pstiehl/Dynasty-Football-Model
+  5. For "Local Path" choose somewhere easy to find, like:
+        Mac:      /Users/yourname/Documents/GitHub
+        Windows:  C:\Users\yourname\Documents\GitHub
+  6. Click "Clone"
+
+GitHub Desktop will create an empty folder named "Dynasty-Football-Model"
+in the location you chose. (It's empty because your GitHub repo doesn't
+have any files in it yet.)
+
+
+==============================================================
+STEP 3 — COPY THE PROJECT FILES INTO IT
+==============================================================
+
+Now we'll copy our project files into that newly-cloned folder.
+
+  1. Open the folder where you extracted the dynasty-model project earlier
+     (the one with RUN_ME_MAC.command / RUN_ME_WINDOWS.bat inside).
+
+  2. Select ALL the files and folders inside it. NOT the dynasty-model
+     folder itself — the contents:
+       - README.md
+       - READ_ME_FIRST.txt
+       - RUN_ME_MAC.command
+       - RUN_ME_WINDOWS.bat
+       - pyproject.toml
+       - requirements.txt
+       - src/
+       - tests/
+       - .github/        ← important! make sure this hidden folder copies too
+       - .gitignore      ← also important
+       - .env.example
+
+     Mac tip: To see hidden files (.github, .gitignore), press Cmd+Shift+.
+     in Finder.
+
+     Windows tip: To see hidden files, in File Explorer go to View →
+     check "Hidden items".
+
+  3. Copy them (Cmd+C on Mac, Ctrl+C on Windows)
+
+  4. Open the empty Dynasty-Football-Model folder GitHub Desktop created
+     (the one in your Documents/GitHub area)
+
+  5. Paste them in (Cmd+V on Mac, Ctrl+V on Windows)
+
+When done, the Dynasty-Football-Model folder should look exactly like
+the project folder you started with.
+
+
+==============================================================
+STEP 4 — UPLOAD TO GITHUB (this is the magic step)
+==============================================================
+
+  1. Switch back to GitHub Desktop
+
+  2. You should now see a big list of files in the left sidebar — every
+     one of them with a green plus icon. That means GitHub Desktop noticed
+     you added new files and is ready to upload them.
+
+  3. At the BOTTOM-LEFT of the window:
+       - In the "Summary" box type:  Initial upload of dynasty model
+       - Leave the "Description" box empty
+       - Click the blue "Commit to main" button
+
+  4. At the TOP of the window you'll now see a button that says
+     "Push origin" (or possibly "Publish branch" the very first time).
+     Click it.
+
+  5. Wait 30 seconds. The progress bar will finish.
+
+  6. Open your browser and go to:
+        https://github.com/pstiehl/Dynasty-Football-Model
+
+     You should now see all your files listed there.
+
+
+==============================================================
+STEP 5 — TURN ON GITHUB PAGES (so the public can see the site)
+==============================================================
+
+GitHub Pages is the free service that publishes the HTML site at a
+public URL. Turning it on takes 30 seconds.
+
+  1. In your browser, go to:
+        https://github.com/pstiehl/Dynasty-Football-Model/settings/pages
+
+     (Or: from your repo page, click "Settings" in the top tab bar,
+      then "Pages" in the left sidebar.)
+
+  2. Under "Source", click the dropdown that says "Deploy from a branch"
+     and change it to:
+        GitHub Actions
+
+  3. That's it. There is no "save" button — selecting that option saves
+     automatically.
+
+
+==============================================================
+STEP 6 — WAIT FOR THE FIRST RUN
+==============================================================
+
+The moment you uploaded your files in Step 4, GitHub started running
+your model in the cloud. It usually takes 2-3 minutes the first time.
+
+  1. In your browser, go to:
+        https://github.com/pstiehl/Dynasty-Football-Model/actions
+
+  2. You should see "Daily refresh and publish" listed. Click on it.
+
+  3. If you see a yellow circle, it's still running. If green checkmark,
+     it's done. If red X, something went wrong (let me know what it says
+     and I'll help).
+
+  4. Once it's green, your site is LIVE. Go to:
+
+        https://pstiehl.github.io/Dynasty-Football-Model/
+
+     Bookmark this URL — this is your public dynasty rankings site.
+
+
+==============================================================
+STEP 7 — LINK FROM YOUR DAD'S CLOUDFLARE SITE
+==============================================================
+
+On your dad's Cloudflare-hosted website, just add a link or button
+pointing to:
+
+        https://pstiehl.github.io/Dynasty-Football-Model/
+
+That's it. The site there will always show the latest rankings because
+GitHub Actions refreshes them every morning at 6 AM Central.
+
+
+==============================================================
+WHAT HAPPENS FROM NOW ON
+==============================================================
+
+Every day at 11:00 AM UTC (6 AM Central / 4 AM Pacific):
+
+  1. GitHub spins up a fresh computer
+  2. It downloads your code
+  3. It runs the Python model — pulling from FantasyCalc, DynastyProcess,
+     Brainy Ballers, etc.
+  4. It generates fresh HTML files
+  5. It publishes them to your GitHub Pages URL
+
+Nobody has to be at a computer for this to happen. It just runs.
+
+You can also trigger it manually any time:
+  https://github.com/pstiehl/Dynasty-Football-Model/actions
+  → click "Daily refresh and publish"
+  → click "Run workflow" → "Run workflow"
+
+The next run will start within a minute.
+
+
+==============================================================
+IF SOMETHING DOESN'T WORK
+==============================================================
+
+99% of issues fall into one of these categories. If you hit one,
+copy/paste the error message you see and I'll help.
+
+  - "I don't see the .github folder in my project"
+       → On Mac, press Cmd+Shift+. in Finder to show hidden files.
+       → On Windows, in File Explorer: View → check "Hidden items".
+
+  - "The workflow ran but the red X says it failed"
+       → Click into the run, click the failed step, copy/paste the
+         red error text to me.
+
+  - "The site URL shows a 404"
+       → Wait 5 minutes after the first successful run. GitHub Pages
+         takes a few minutes to start serving new sites.
+
+  - "I want to make a change to the code later"
+       → Edit the files in your local Dynasty-Football-Model folder.
+         GitHub Desktop will show the changes. Type a summary, click
+         Commit, then click Push. Within 2-3 minutes, the site updates.

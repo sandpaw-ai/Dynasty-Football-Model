@@ -83,9 +83,16 @@ def main():
 
     synced_any = False
     sources_to_sync = [
+        # Core market + consensus
         ("fantasycalc", "FantasyCalc (market)"),
         ("dynastyprocess", "DynastyProcess (consensus)"),
+        ("ffc_adp", "FantasyFootballCalculator ADP (market)"),
+        # Model / analytics overlays
         ("brainy_ballers", "Brainy Ballers SPS (model)"),
+        ("nfl_draft_capital", "NFL Draft capital (nflverse)"),
+        # Local-CSV adapters — zero rows until the data file is dropped in.
+        ("ras", "RAS / athleticism (Kent Lee Platte)"),
+        ("cfbd_breakouts", "College Breakout Age + Dominator"),
     ]
     for slug, label in sources_to_sync:
         try:

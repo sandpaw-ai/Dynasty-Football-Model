@@ -37,6 +37,10 @@ def _resolve_player(session, rec: RankingRecord) -> Player | None:
         p = session.execute(select(Player).where(Player.sleeper_id == rec.sleeper_id)).scalar_one_or_none()
         if p:
             return _enrich_player(p, rec)
+    if rec.gsis_id:
+        p = session.execute(select(Player).where(Player.gsis_id == rec.gsis_id)).scalar_one_or_none()
+        if p:
+            return _enrich_player(p, rec)
     if rec.mfl_id:
         p = session.execute(select(Player).where(Player.mfl_id == rec.mfl_id)).scalar_one_or_none()
         if p:
@@ -52,10 +56,16 @@ def _resolve_player(session, rec: RankingRecord) -> Player | None:
     p = Player(
         sleeper_id=rec.sleeper_id,
         mfl_id=rec.mfl_id,
+        gsis_id=rec.gsis_id,
+        pfr_id=rec.pfr_id,
         full_name=rec.full_name or "(unknown)",
         position=rec.position,
         nfl_team=rec.nfl_team,
         draft_year=rec.draft_year,
+        draft_round=rec.draft_round,
+        draft_pick_overall=rec.draft_pick_overall,
+        draft_team=rec.draft_team,
+        college=rec.college,
     )
     session.add(p)
     session.flush()
@@ -63,9 +73,26 @@ def _resolve_player(session, rec: RankingRecord) -> Player | None:
 
 
 def _enrich_player(p: Player, rec: RankingRecord) -> Player:
-    """Fill in missing fields on an existing Player from a RankingRecord."""
+    """Fill in missing fields on an existing Player from a RankingRecord.
+
+    Conservative: only writes a field if it's currently NULL/empty. The one
+    exception is `nfl_team` for an active player, where the most-recent ranking
+    record's team value tends to be more current than what's stored.
+    """
     if rec.draft_year and not p.draft_year:
         p.draft_year = rec.draft_year
+    if rec.draft_round and not p.draft_round:
+        p.draft_round = rec.draft_round
+    if rec.draft_pick_overall and not p.draft_pick_overall:
+        p.draft_pick_overall = rec.draft_pick_overall
+    if rec.draft_team and not p.draft_team:
+        p.draft_team = rec.draft_team
+    if rec.gsis_id and not p.gsis_id:
+        p.gsis_id = rec.gsis_id
+    if rec.pfr_id and not p.pfr_id:
+        p.pfr_id = rec.pfr_id
+    if rec.college and not p.college:
+        p.college = rec.college
     if rec.nfl_team and not p.nfl_team:
         p.nfl_team = rec.nfl_team
     if rec.position and not p.position:
@@ -151,6 +178,8 @@ def sync_sleeper_players() -> int:
                 existing.mfl_id = _str("mfl_id") or existing.mfl_id
                 existing.espn_id = _str("espn_id") or existing.espn_id
                 existing.yahoo_id = _str("yahoo_id") or existing.yahoo_id
+                existing.gsis_id = _str("gsis_id") or existing.gsis_id
+                existing.pfr_id = _str("pfr_id") or existing.pfr_id
                 existing.college = p.get("college") or existing.college
                 existing.is_active = p.get("active", existing.is_active)
             else:
@@ -164,6 +193,8 @@ def sync_sleeper_players() -> int:
                     mfl_id=_str("mfl_id"),
                     espn_id=_str("espn_id"),
                     yahoo_id=_str("yahoo_id"),
+                    gsis_id=_str("gsis_id"),
+                    pfr_id=_str("pfr_id"),
                     college=p.get("college"),
                     is_active=p.get("active", True),
                 ))

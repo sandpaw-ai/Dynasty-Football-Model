@@ -32,6 +32,12 @@ class RankingRecord:
     # Optional player enrichment — sync.py will set these on the resolved Player.
     nfl_team: Optional[str] = None
     draft_year: Optional[int] = None
+    draft_round: Optional[int] = None
+    draft_pick_overall: Optional[int] = None
+    draft_team: Optional[str] = None
+    gsis_id: Optional[str] = None
+    pfr_id: Optional[str] = None
+    college: Optional[str] = None
     age: Optional[float] = None
 
 

@@ -133,15 +133,16 @@ Composite ranks are bucketed into simple tiers (T1: top 6, T2: 7–12, T3:
 
 ## Sources currently wired up
 
-| Source              | Type        | Status                                   |
-|---------------------|-------------|------------------------------------------|
-| FantasyCalc         | market      | ✅ free public API, fetched daily         |
-| Sleeper             | aggregator  | ✅ free public API — player ID map        |
-| DynastyProcess      | aggregator  | ✅ free open CSV (FantasyPros consensus)  |
-| Brainy Ballers      | model       | ✅ public Top-500 scrape (rate-limited)   |
-| FantasyPros direct  | aggregator  | 🔒 stub — requires paid API key           |
-| PFF                 | model       | 🔒 stub — requires paid API partnership   |
-| Manual CSV          | expert      | ✅ via `dynasty.manual_import.import_csv` |
+| Source                | Type        | Status                                   |
+|-----------------------|-------------|------------------------------------------|
+| FantasyCalc           | market      | ✅ free public API, fetched daily         |
+| Sleeper               | aggregator  | ✅ free public API — player ID map        |
+| DynastyProcess        | aggregator  | ✅ free open CSV (FantasyPros consensus)  |
+| Brainy Ballers        | model       | ✅ public Top-500 scrape (rate-limited)   |
+| **NFL Draft capital** | model       | ✅ nflverse public CSV (rookies + recent classes — see `docs/RESEARCH-sources.md` §A1) |
+| FantasyPros direct    | aggregator  | 🔒 stub — requires paid API key           |
+| PFF                   | model       | 🔒 stub — requires paid API partnership   |
+| Manual CSV            | expert      | ✅ via `dynasty.manual_import.import_csv` |
 
 > **Note on KeepTradeCut:** KTC's ToS forbids scraping. FantasyCalc is the
 > closest legal substitute — values come from real fantasy-manager trades
@@ -212,6 +213,7 @@ src/dynasty/
     dynastyprocess.py
     sleeper.py
     brainy_ballers.py
+    nfl_draft_capital.py
     fantasypros.py      # stub
     pff.py              # stub
   db/
@@ -219,6 +221,10 @@ src/dynasty/
     session.py          # engine + session factory
 tests/
   smoke_test.py
+  test_nfl_draft_capital.py
+docs/
+  RESEARCH-sources.md     # 440-line source-landscape writeup w/ citations
+  CHANGELOG-model.md      # what each release shifts about score outputs
 ```
 
 ---
@@ -238,13 +244,29 @@ REQUEST_TIMEOUT_SECONDS=30
 
 ## Roadmap
 
-- League roster import (MFL + Sleeper) — KeepTradeCut-style "rate my
-  team / league" view from the user's actual rosters.
-- Additional model-grade prospect sources (Reception Perception, PFF Big
-  Board, Hayden Winks, Dane Brugler "Beast", Matt Harmon Reception
-  Perception, etc.) — manual import for now, paid API where available.
-- Position-specific track records (a source may be great at WR and weak
-  at RB — currently the model uses overall-only multipliers).
+Research foundation: see `docs/RESEARCH-sources.md` (440-line writeup of the
+source landscape with statistical evidence and per-source weighting
+recommendations) and `docs/CHANGELOG-model.md` (running log of what each
+release changes about the score outputs and why).
+
+Near-term:
+
+- **FantasyFootballCalculator ADP** — second free market signal, complements
+  FantasyCalc. (PR #3)
+- **RAS (Relative Athletic Score)** — Kent Lee Platte's free CSV. Best free
+  athleticism composite; especially useful as a tail-risk filter. (PR #4)
+- **Breakout Age + College Dominator** — computed from `cfbd-api-py` college
+  stats. Replicates ~80% of PlayerProfiler's "secret sauce" for free. (PR #5)
+- **Position-specific + years-pro weighting** — the same source should not
+  weight the same for a rookie WR and a Year-6 RB. Refactors
+  `SourceTrackRecord` lookup to apply position-level multipliers. (PR #6)
+- **League roster import (MFL + Sleeper)** — KeepTradeCut-style "rate my
+  team / league" view from the user's actual rosters. (PR #7)
+
+Later:
+
+- Additional model-grade prospect sources via manual CSV (Reception Perception,
+  PFF Big Board, Matt Waldman RSP, Dane Brugler "Beast", Hayden Winks).
 - Trade calculator (sum of values on each side, with positional scarcity
   adjustment).
 - Mock-draft tool for rookie drafts.

@@ -23,11 +23,18 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from collections import defaultdict
+from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from .db.session import get_session
 from .db.models import Source, Player, Ranking, CompositeScore, SourceTrackRecord
+from .weights import (
+    position_modifier,
+    years_pro_modifier,
+    select_track_record_multiplier,
+    corr_to_multiplier,
+)
 
 
 # How many players to consider "in range" for normalization. Above this rank,
@@ -75,43 +82,35 @@ def _latest_rankings_by_source(
     return out
 
 
-def _track_record_multipliers(session: Session) -> dict[int, float]:
-    """Convert backtest results into per-source weight multipliers.
+def _track_record_multipliers(
+    session: Session,
+) -> dict[int, dict[Optional[str], float]]:
+    """Convert backtest results into per-(source, position) weight multipliers.
 
-    We use |spearman_corr| (a strong negative correlation is just as informative
-    as a strong positive one), aggregated across the source's most recent
-    overall-position track record row. Sources without a record get 1.0.
+    Returns ``{source_id: {position_or_None: multiplier}}``. The position-aware
+    selector in ``weights.select_track_record_multiplier`` prefers the
+    position-specific entry and falls back to the position-None overall row.
 
-    Multiplier mapping:
-        |corr| >= 0.7  →  1.5
-        |corr| >= 0.5  →  1.2
-        |corr| >= 0.3  →  1.0
-        |corr| <  0.3  →  0.6
-        unknown        →  1.0  (neutral)
+    We use |spearman_corr| (strong negative correlation is just as
+    informative as strong positive). When multiple records exist for the
+    same (source, position) tuple we take the most-recently-calculated one.
+
+    Multiplier mapping is defined in ``weights.corr_to_multiplier``
+    (tuned per research §4; tighter than the v0.2 cutoffs).
     """
     rows = session.execute(
         select(SourceTrackRecord)
-        .where(SourceTrackRecord.position.is_(None))
         .where(SourceTrackRecord.cohort_year.is_(None))
         .order_by(SourceTrackRecord.calculated_at.desc())
     ).scalars().all()
 
-    seen: dict[int, float] = {}
+    out: dict[int, dict[Optional[str], float]] = defaultdict(dict)
     for r in rows:
-        if r.source_id in seen:
-            continue  # we already took the most recent
-        corr = abs(r.spearman_corr) if r.spearman_corr is not None else None
-        if corr is None:
-            seen[r.source_id] = 1.0
-        elif corr >= 0.7:
-            seen[r.source_id] = 1.5
-        elif corr >= 0.5:
-            seen[r.source_id] = 1.2
-        elif corr >= 0.3:
-            seen[r.source_id] = 1.0
-        else:
-            seen[r.source_id] = 0.6
-    return seen
+        pos = (r.position.upper() if r.position else None)
+        if pos in out[r.source_id]:
+            continue  # already took the most-recent for this (source, position)
+        out[r.source_id][pos] = corr_to_multiplier(r.spearman_corr)
+    return out
 
 
 def _rank_to_score(rank: int | None, depth: int) -> float | None:
@@ -130,10 +129,18 @@ def _value_to_score(value: float | None, max_value: float) -> float | None:
     return max(0.0, min(100.0, 100.0 * value / max_value))
 
 
+def _years_pro_for(player: Player | None, score_year: int) -> Optional[int]:
+    """How many NFL seasons since the player's draft year (None if unknown)."""
+    if player is None or player.draft_year is None:
+        return None
+    return max(0, int(score_year) - int(player.draft_year))
+
+
 def compute_composite_scores(
     league_format: str = "sf_ppr",
     depth: int = DEFAULT_NORMALIZATION_DEPTH,
-    model_version: str = "0.2.0",
+    model_version: str = "0.3.0",
+    score_year: int | None = None,
 ) -> int:
     """Run the scoring pipeline. Returns number of CompositeScore rows written."""
     with get_session() as session:
@@ -144,7 +151,7 @@ def compute_composite_scores(
         sources = {
             s.id: s for s in session.execute(select(Source)).scalars().all()
         }
-        multipliers = _track_record_multipliers(session)
+        multipliers_by_pos = _track_record_multipliers(session)
 
         # Identify which sources are "consensus" (market/aggregator) for the
         # consensus-rank calculation.
@@ -159,6 +166,20 @@ def compute_composite_scores(
             if vals:
                 source_max_value[sid] = max(vals)
 
+        # Pre-load all players we'll need so each weighting lookup is one
+        # dict access rather than a per-row SQL roundtrip.
+        all_pids = set()
+        for plr_rankings in per_source.values():
+            all_pids.update(plr_rankings.keys())
+        players_by_id: dict[int, Player] = {
+            p.id: p
+            for p in session.execute(
+                select(Player).where(Player.id.in_(all_pids))
+            ).scalars().all()
+        }
+
+        effective_score_year = score_year or datetime.utcnow().year
+
         # Aggregate per-player contributions
         contribs: dict[int, list[tuple[str, str, float, float, int | None]]] = defaultdict(list)
         # contribs[player_id] = [(source_slug, category, score, weight, raw_rank), ...]
@@ -170,9 +191,26 @@ def compute_composite_scores(
             src = sources.get(sid)
             if src is None:
                 continue
-            weight = src.default_weight * multipliers.get(sid, 1.0)
+            source_tr_by_pos = multipliers_by_pos.get(sid, {})
 
             for pid, ranking in plr_rankings.items():
+                player = players_by_id.get(pid)
+                pos = player.position if player else None
+
+                # 1. Backtested track-record multiplier, preferring position-
+                #    specific over overall.
+                tr_mult = select_track_record_multiplier(source_tr_by_pos, pos)
+
+                # 2. Position modifier (per (slug, pos)).
+                pos_mod = position_modifier(src.slug, pos)
+
+                # 3. Years-pro decay (rookie signals decay, market signals
+                #    inverse-decay for rookies).
+                yrs_pro = _years_pro_for(player, effective_score_year)
+                yp_mod = years_pro_modifier(src.slug, yrs_pro)
+
+                weight = src.default_weight * tr_mult * pos_mod * yp_mod
+
                 score = None
                 if ranking.market_value is not None and sid in source_max_value:
                     score = _value_to_score(ranking.market_value, source_max_value[sid])
@@ -216,13 +254,6 @@ def compute_composite_scores(
         # Sort and assign model ranks
         results.sort(key=lambda x: x[1], reverse=True)
 
-        # Look up player positions for position-rank computation
-        players_by_id = {
-            p.id: p
-            for p in session.execute(
-                select(Player).where(Player.id.in_([pid for pid, _, _ in results]))
-            ).scalars().all()
-        }
         position_counters: dict[str, int] = defaultdict(int)
 
         count = 0

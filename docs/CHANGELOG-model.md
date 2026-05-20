@@ -15,6 +15,65 @@ Format for each entry:
 
 ---
 
+## v0.4.0 — FantasyFootballCalculator ADP source (PR #3)
+
+**Date:** 2026-05-20
+
+**What changed**
+- New ranking source: `ffc_adp` (slug). Pulls FantasyFootballCalculator's free
+  public ADP REST API across four formats: PPR redraft, 2QB (Superflex),
+  Dynasty, and Rookie.
+- `category = market`. This is now our second market signal alongside
+  FantasyCalc.
+- `default_weight = 0.7` (per research §A3, lower than FantasyCalc).
+- Filters to QB/RB/WR/TE (K and DEF are dropped). Synthesizes a 0..300
+  `market_value` from inverse-ADP so the value-normalization branch in
+  `scoring.py` can use either rank- or value-based normalization.
+- Graceful handling of pre-season 404s for niche formats: skip rather than
+  fail the whole sync.
+
+**Why**
+- Research doc §A3: FFC's user base skews casual / redraft, which makes it a
+  *noise-uncorrelated* second market signal to FantasyCalc (dynasty-leaning
+  revealed-preference from real Sleeper trades). Two market sources with
+  uncorrelated user populations average to a steadier consensus, and
+  divergence between them is its own buy/sell signal, especially for rookies
+  where FantasyCalc lags post-draft sentiment.
+- ToS-clean: FFC explicitly invites third-party use of the REST API.
+
+**Expected output shift**
+- Rookie composite rankings get a fresher market read: FFC's rookie-only
+  endpoint reacts within hours of draft night, while FantasyCalc rookie
+  values can lag several days.
+- Players who are *consensus market favorites* (high agreement between
+  FantasyCalc and FFC) get reinforced in the composite — their consensus
+  rank becomes more stable.
+- Players FFC's casual users overrate but FantasyCalc's traders don't
+  (typical case: a flashy WR/RB rookie with low draft capital but a hype
+  cycle) will get a small upward bump in the composite. That's the *casual*
+  signal coming through, deliberately. The position-specific weighting in
+  PR #6 will let us cap this if needed.
+- `rank_divergence` (model vs. market) becomes a richer signal because the
+  consensus side now blends two independent crowds.
+
+**Validation**
+- After several syncs, `SELECT slug, COUNT(*) FROM sources s JOIN rankings r
+  ON r.source_id = s.id WHERE r.league_format = 'sf_ppr' GROUP BY 1` should
+  show `ffc_adp` accumulating rows daily.
+- Backtest comparison: `backtest_source("ffc_adp", years=[2022,2023],
+  window_years=3)` Spearman correlation should be *positive* but *lower
+  than FantasyCalc's* (casual ADP is noisier than revealed-preference trade
+  data). If it comes in higher, that's a surprising and worth-investigating
+  result.
+
+**Files touched**
+- `src/dynasty/sources/ffc_adp.py` (new)
+- `src/dynasty/sources/__init__.py` — registry entry
+- `tests/test_ffc_adp.py` (new) — fixture-driven, no network
+- `docs/CHANGELOG-model.md` (this entry)
+
+---
+
 ## v0.3.0 — NFL Draft Capital source + research doc commit (PR #2)
 
 **Date:** 2026-05-20
@@ -99,7 +158,5 @@ syncing this source. The largest absolute rank moves will be:
   ix_players_gsis_id ON players(gsis_id);`
 - Production databases get an Alembic migration when we add Alembic (not in
   this PR — kept scope tight).
-
----
 
 <!-- Future entries below. Newest first. -->

@@ -22,6 +22,11 @@ dynasty_site/
 # Local environment file (don't commit secrets)
 .env
 
+# Manual data drops (per-source CSV mirrors). Keep README.md committed.
+data/ras/*.csv
+data/ras/*.xlsx
+data/ras/*.tsv
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

@@ -15,6 +15,71 @@ Format for each entry:
 
 ---
 
+## v0.5.0 — RAS (Relative Athletic Score) source (PR #4)
+
+**Date:** 2026-05-20
+
+**What changed**
+- New ranking source: `ras` (slug). Reads Kent Lee Platte's RAS database
+  from a local CSV at `data/ras/ras_database.csv` (overridable via
+  `DYNASTY_RAS_CSV_PATH` env var). Adapter is forgiving on column casing
+  and accepts the most common aliases for `name`, `pos`, `college`, `year`,
+  `RAS`.
+- Filters to skill positions (QB/RB/WR/TE; FB folded into RB). Computes
+  *per-position-per-draft-class* ranks: within a draft year, the WR with
+  the highest RAS gets rank 1, second-highest rank 2, etc.
+- Only the last 6 draft classes emit ranking rows (older RAS rows still
+  enrich the Player table). All emitted rows are flagged `is_rookie_only`
+  because RAS is fundamentally a pre-draft / draft-class signal — vets'
+  rankings should come from production, not their Combine 7 years ago.
+- Stores the raw 0–10 score in `market_value` so the value-based
+  normalization branch in `scoring.py` can use it directly (RAS 10 → 100
+  composite contribution from this source; RAS 1 → 10).
+- `default_weight = 0.8`, `category = model`. The position-aware weighting
+  in PR #6 will boost this to ~1.5× for WR/TE/RB and zero it for QB.
+- If the CSV file is missing the adapter yields nothing rather than
+  raising, so `sync-all` keeps working out of the box.
+
+**Why**
+- Research doc §A2: RAS shows a small but positive correlation with NFL
+  fantasy production at WR/TE/RB. More importantly, low RAS is a strong
+  *bust filter* — prospects with RAS < 5 substantially underperform their
+  draft capital. RAS is best deployed as a tail-risk dampener on the
+  composite, not as a primary signal.
+- ToS-clean: Kent Lee Platte explicitly encourages redistribution with
+  attribution. We picked the local-CSV approach because Kent doesn't host
+  a stable public download URL; the file goes in `data/ras/` (gitignored).
+
+**Expected output shift**
+- Once the CSV is dropped in: rookies with high RAS (≥9) get a small
+  upward bump in the composite — not enough to override draft capital or
+  market value, but enough to break ties.
+- Rookies with RAS ≤ 4 in a position where athleticism matters (WR/TE)
+  get a small downward drag.
+- For QBs, the effect should be near-zero (RAS rank emits but is one of
+  many signals); PR #6 will explicitly zero out the position weight for
+  QBs anyway.
+- Veterans are unaffected (emit-window cutoff + rookie-only flag).
+
+**Validation**
+- Backtest at WR specifically: `backtest_source("ras", years=[2020..2023],
+  window_years=3)` filtered to WR should show a small positive Spearman
+  correlation (~0.10–0.20 in published studies). If it's flat or
+  negative, the position-by-position weighting in PR #6 will adjust.
+- Bust-filter validation: for the rookie cohort, look at the bottom RAS
+  quartile and confirm their realized Year-1 PPR points are below their
+  draft-capital expectation.
+
+**Files touched**
+- `src/dynasty/sources/ras.py` (new)
+- `src/dynasty/sources/__init__.py` — registry entry
+- `data/ras/README.md` (new) — how to drop the CSV in
+- `.gitignore` — ignores `data/ras/*.csv|xlsx|tsv` so the data file isn't
+  accidentally committed
+- `tests/test_ras.py` (new) — fixture-driven, no network
+
+---
+
 ## v0.4.0 — FantasyFootballCalculator ADP source (PR #3)
 
 **Date:** 2026-05-20

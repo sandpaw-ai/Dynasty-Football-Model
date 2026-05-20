@@ -735,8 +735,20 @@ command. Each evaluator below shows a suggested weight based on their documented
 # --------------------------------------------------------------------------
 
 def _build_league_page(latest_ts, league_format: str) -> str:
+    import os
     title = "Dynasty Model — Rate My League"
     header = _site_header("league", latest_ts, league_format)
+    # PROXY_URL is the deployed Cloudflare Worker URL (see
+    # scripts/cf-worker/README.md). When set at build time, the MFL form
+    # on the page actually works against the user's league. When unset,
+    # the form switches to "add to leagues.json" guidance.
+    raw_proxy = os.environ.get("PROXY_URL", "").rstrip("/")
+    # Defensive sanitization: only pass through a simple https URL.
+    import re as _re
+    if _re.match(r"^https?://[A-Za-z0-9.\-_/]+$", raw_proxy):
+        proxy_url = raw_proxy
+    else:
+        proxy_url = ""
     body = """<div class="container narrow">
 <h1>Rate My League</h1>
 <p>Two ways in:</p>
@@ -747,19 +759,30 @@ def _build_league_page(latest_ts, league_format: str) -> str:
 
 <div id="prefetched-section" style="margin:24px 0"></div>
 
-<h2 style="margin-top:48px">Evaluate any Sleeper league</h2>
-<p style="color:var(--muted);font-size:14px">For MFL or for manager-skill rankings on an arbitrary league, list the league in <code>leagues.json</code> and it'll appear in the pre-fetched section after the next daily build.</p>
+<h2 style="margin-top:48px">Evaluate any league</h2>
 
-<form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0">
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+<form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0" data-proxy-url="__PROXY_URL__">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:stretch">
+    <select id="platform" onchange="onPlatformChange()"
+            style="padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px;background:white">
+      <option value="sleeper">Sleeper</option>
+      <option value="mfl">MyFantasyLeague</option>
+    </select>
     <input id="league-id" type="text" placeholder="e.g. 968712712272838656"
-           style="flex:1;min-width:280px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px"
+           style="flex:1;min-width:240px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px"
            required>
+    <input id="mfl-year" type="number" placeholder="Year" min="2000" max="2099"
+           style="width:90px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px;display:none">
     <button type="submit"
             style="padding:10px 18px;background:#1d4ed8;color:white;border:0;border-radius:6px;font-weight:600;font-size:15px;cursor:pointer">
       Evaluate league
     </button>
   </div>
+  <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted);margin-bottom:16px">
+    <input id="include-managers" type="checkbox" checked>
+    <span>Also compute manager skill rankings from draft + trade history (slower — ~20 API calls)</span>
+  </label>
+  <div id="mfl-proxy-warning" style="display:none;font-size:13px;padding:12px;border-radius:6px;background:#fef3c7;border:1px solid #fde68a;color:#92400e;margin-bottom:16px"></div>
 
   <details style="margin:8px 0 0 0;padding:14px;border:1px solid var(--border);border-radius:6px">
     <summary style="cursor:pointer;font-weight:600">League settings (optional)</summary>
@@ -802,9 +825,13 @@ def _build_league_page(latest_ts, league_format: str) -> str:
 </form>
 
 <div class="callout" style="font-size:13px">
-<strong>Where to find your league ID:</strong> on Sleeper, open your league → look at the URL.
-It's the long number after <code>/leagues/</code> (e.g.
-<code>https://sleeper.com/leagues/<strong>968712712272838656</strong>/team</code>).
+<strong>Where to find your league ID:</strong>
+<ul style="margin:6px 0 0 0;padding-left:20px">
+  <li><strong>Sleeper:</strong> open your league → the long number after <code>/leagues/</code> in the URL
+      (e.g. <code>sleeper.com/leagues/<strong>968712712272838656</strong>/team</code>).</li>
+  <li><strong>MFL:</strong> the 5-digit number in the URL after <code>/YYYY/home/</code>
+      (e.g. <code>www48.myfantasyleague.com/2026/home/<strong>12345</strong></code>).</li>
+</ul>
 </div>
 
 <div id="detected-settings" style="margin:12px 0;font-size:13px;color:var(--muted)"></div>
@@ -892,50 +919,388 @@ function positionMultiplier(pos, settings) {
   return qbm * pprm * tem;
 }
 
+function getProxyUrl() {
+  const form = document.getElementById("league-form");
+  const u = (form && form.dataset.proxyUrl) || "";
+  return u && u !== "__PROXY_URL__" ? u.replace(/\/$/, "") : "";
+}
+
+function onPlatformChange() {
+  const plat = document.getElementById("platform").value;
+  const yearInput = document.getElementById("mfl-year");
+  const warning = document.getElementById("mfl-proxy-warning");
+  const idInput = document.getElementById("league-id");
+  if (plat === "mfl") {
+    yearInput.style.display = "";
+    yearInput.value = yearInput.value || String(new Date().getFullYear());
+    idInput.placeholder = "e.g. 12345";
+    const proxy = getProxyUrl();
+    if (!proxy) {
+      warning.style.display = "";
+      warning.innerHTML = `
+        <strong>MFL leagues require a proxy worker.</strong>
+        MFL's API doesn't allow direct fetches from <code>github.io</code>.
+        Deploy the proxy (see <code>scripts/cf-worker/README.md</code>) and set
+        <code>PROXY_URL</code> in the build environment.
+        <br><br>
+        In the meantime, add your MFL league to <code>leagues.json</code> and it'll appear
+        in the pre-fetched section after the next daily build.
+      `;
+    } else {
+      warning.style.display = "none";
+    }
+  } else {
+    yearInput.style.display = "none";
+    warning.style.display = "none";
+    idInput.placeholder = "e.g. 968712712272838656";
+  }
+}
+
+// Routed fetcher: routes Sleeper directly (CORS-friendly) and MFL through
+// the configured proxy worker (required because MFL's CORS blocks GH Pages).
+async function platformFetch(platform, path, params) {
+  const proxy = getProxyUrl();
+  if (platform === "sleeper") {
+    // Always direct for Sleeper. Proxy is only useful for edge caching.
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return fetch(`https://api.sleeper.app${path}${qs}`);
+  }
+  if (platform === "mfl") {
+    if (!proxy) throw new Error("MFL proxy not configured. See scripts/cf-worker/README.md.");
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return fetch(`${proxy}${path}${qs}`);
+  }
+  throw new Error("unknown platform: " + platform);
+}
+
 async function evalLeague(ev) {
   ev.preventDefault();
+  const platform = document.getElementById("platform").value;
   const leagueId = document.getElementById("league-id").value.trim();
+  const year = (document.getElementById("mfl-year").value || new Date().getFullYear()).toString();
+  const includeManagers = document.getElementById("include-managers").checked;
   const status = document.getElementById("league-status");
   const detectedDiv = document.getElementById("detected-settings");
   const results = document.getElementById("league-results");
   results.innerHTML = "";
   detectedDiv.innerHTML = "";
-  status.textContent = "Loading model + Sleeper league data...";
+  status.textContent = `Loading model + ${platform.toUpperCase()} league data...`;
 
   try {
-    const [model, leagueResp, usersResp, rostersResp] = await Promise.all([
-      loadModel(),
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}`),
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`),
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`),
-    ]);
-    if (!leagueResp.ok) throw new Error("League not found. Double-check the league ID.");
-
-    const [league, users, rosters] = await Promise.all([
-      leagueResp.json(), usersResp.json(), rostersResp.json(),
-    ]);
-
-    const detected = detectFromLeague(league);
-    const settings = effectiveSettings(detected);
-
-    detectedDiv.innerHTML = renderDetected(detected, settings);
-
-    const userById = {};
-    (users || []).forEach(u => { userById[u.user_id] = u.display_name || u.username || u.user_id; });
-
-    const teams = (rosters || []).map(r => evaluateTeam(r, userById, model, settings));
-    const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
-    teams.forEach(t => { t.vsAvg = t.total - leagueAvg; });
-
-    const sorted = [...teams].sort((a, b) => b.total - a.total);
-    status.textContent = `${league.name || "Sleeper league " + leagueId} — ${teams.length} teams — league avg ${leagueAvg.toFixed(1)} (settings-adjusted)`;
-
-    results.innerHTML = renderResults(league.name, sorted);
+    if (platform === "sleeper") {
+      await evalSleeperLeague(leagueId, includeManagers, { status, detectedDiv, results });
+    } else if (platform === "mfl") {
+      await evalMflLeague(leagueId, year, includeManagers, { status, detectedDiv, results });
+    } else {
+      throw new Error("unknown platform: " + platform);
+    }
   } catch (err) {
     status.textContent = "";
-    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${err.message}</div>`;
+    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${escapeHtml(err.message)}</div>`;
   }
   return false;
+}
+
+async function evalSleeperLeague(leagueId, includeManagers, { status, detectedDiv, results }) {
+  const [model, leagueResp, usersResp, rostersResp] = await Promise.all([
+    loadModel(),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}`),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`),
+  ]);
+  if (!leagueResp.ok) throw new Error("Sleeper league not found. Double-check the league ID.");
+  const [league, users, rosters] = await Promise.all([
+    leagueResp.json(), usersResp.json(), rostersResp.json(),
+  ]);
+
+  const detected = detectFromLeague(league);
+  const settings = effectiveSettings(detected);
+  detectedDiv.innerHTML = renderDetected(detected, settings);
+
+  const userById = {};
+  (users || []).forEach(u => { userById[u.user_id] = u.display_name || u.username || u.user_id; });
+  const franchiseNames = {};
+  (rosters || []).forEach(r => {
+    franchiseNames[String(r.roster_id)] = userById[r.owner_id] || ("Team " + r.roster_id);
+  });
+
+  const teams = (rosters || []).map(r => evaluateTeam(r, userById, model, settings));
+  const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
+  teams.forEach(t => { t.vsAvg = t.total - leagueAvg; });
+  const sorted = [...teams].sort((a, b) => b.total - a.total);
+  status.textContent = `${league.name || "Sleeper league " + leagueId} — ${teams.length} teams — league avg ${leagueAvg.toFixed(1)} (settings-adjusted)`;
+  results.innerHTML = renderResults(league.name, sorted);
+
+  if (includeManagers) {
+    status.textContent = status.textContent + " — fetching draft + trade history...";
+    const mgr = await computeSleeperManagerReport(leagueId, franchiseNames, model);
+    results.innerHTML += renderManagerReport(mgr);
+    status.textContent = `${league.name || "Sleeper league " + leagueId} — ${teams.length} teams — ${mgr.managers.length} managers ranked`;
+  }
+}
+
+async function evalMflLeague(leagueId, year, includeManagers, { status, detectedDiv, results }) {
+  const proxy = getProxyUrl();
+  if (!proxy) {
+    throw new Error("MFL leagues require a proxy worker. See scripts/cf-worker/README.md, or add the league to leagues.json for the next daily build.");
+  }
+  const model = await loadModel();
+  const leagueResp = await fetch(`${proxy}/mfl/${year}/export?TYPE=league&L=${leagueId}&JSON=1`);
+  if (!leagueResp.ok) throw new Error("MFL league not found. Check league ID + year.");
+  const leaguePayload = await leagueResp.json();
+  const league = (leaguePayload && leaguePayload.league) || {};
+  const franchisesMeta = ((league.franchises || {}).franchise) || [];
+  const franchiseArr = Array.isArray(franchisesMeta) ? franchisesMeta : [franchisesMeta];
+  const franchiseNames = {};
+  franchiseArr.forEach(f => { franchiseNames[String(f.id)] = f.name || String(f.id); });
+
+  const rostersResp = await fetch(`${proxy}/mfl/${year}/export?TYPE=rosters&L=${leagueId}&JSON=1`);
+  const rostersPayload = await rostersResp.json();
+  const franchisesEntry = ((rostersPayload.rosters || {}).franchise) || [];
+  const franchisesList = Array.isArray(franchisesEntry) ? franchisesEntry : [franchisesEntry];
+
+  // Build pseudo-Sleeper-shaped rosters so we can reuse evaluateTeam().
+  const fakeRosters = franchisesList.map(f => {
+    let playerEntry = f.player || [];
+    if (!Array.isArray(playerEntry)) playerEntry = [playerEntry];
+    return {
+      roster_id: f.id,
+      owner_id: f.id,
+      players: playerEntry.map(p => String(p.id)).filter(Boolean),
+    };
+  });
+
+  // MFL rosters use mfl_id which our model_scores.json doesn't index. We need
+  // an mfl_id -> entry lookup. Since our pre-built model JSON is keyed by
+  // sleeper_id, MFL evaluations only work for players who happen to ALSO have
+  // a sleeper_id match. To avoid an extra build artifact for now, we attempt
+  // a Sleeper crosswalk: walk the model and build {mfl_id_normalized: entry}.
+  // The mfl_id correspondence isn't trivially available client-side, so the
+  // first cut here matches by NAME+POSITION (which the pre-fetcher path
+  // already does server-side via Player.mfl_id). It's a known limitation;
+  // surfaced in the status text below.
+  // TODO(v2): emit a separate assets/mfl_scores.json keyed by mfl_id.
+  const nameLookup = {};
+  Object.values(model).forEach(p => {
+    const key = (p.name || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+    if (key) nameLookup[key] = p;
+  });
+
+  // For each MFL player_id in rosters, attempt to look up the player's name
+  // via MFL's player export (one shot for the whole league).
+  const playersResp = await fetch(`${proxy}/mfl/${year}/export?TYPE=players&L=${leagueId}&JSON=1`);
+  const playersPayload = await playersResp.json();
+  let mflPlayers = ((playersPayload.players || {}).player) || [];
+  if (!Array.isArray(mflPlayers)) mflPlayers = [mflPlayers];
+  const mflIdToEntry = {};
+  let matched = 0;
+  mflPlayers.forEach(mp => {
+    if (!mp.id) return;
+    // MFL name format: "Last, First". Flip it to match our "First Last".
+    let n = mp.name || "";
+    if (n.includes(",")) {
+      const [last, first] = n.split(",").map(s => s.trim());
+      n = `${first} ${last}`;
+    }
+    const key = n.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+    const hit = nameLookup[key];
+    if (hit) { mflIdToEntry[String(mp.id)] = hit; matched++; }
+  });
+  status.textContent = `${league.name || "MFL league " + leagueId} (\u00a7${year}) — ${fakeRosters.length} teams — ${matched} of ${mflPlayers.length} MFL players matched to model`;
+
+  // Now evaluate each franchise using mflIdToEntry as the model lookup.
+  const detected = { qb: "sf", te: "none", ppr: "full", qbCount: 0, sfCount: 0, bonusTE: 0, recPts: 1 };
+  const settings = effectiveSettings(detected);
+  detectedDiv.innerHTML = `<em>Settings auto-detect not yet wired for MFL — using Superflex / full PPR / no TE premium defaults. Use the dropdowns above to override.</em>`;
+
+  const teams = fakeRosters.map(r => evaluateTeam(r, franchiseNames, mflIdToEntry, settings));
+  const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
+  teams.forEach(t => { t.vsAvg = t.total - leagueAvg; });
+  const sorted = [...teams].sort((a, b) => b.total - a.total);
+  results.innerHTML = renderResults(league.name, sorted);
+
+  if (includeManagers) {
+    status.textContent += " — fetching draft + trade history...";
+    const mgr = await computeMflManagerReport(leagueId, year, franchiseNames, mflIdToEntry, proxy);
+    results.innerHTML += renderManagerReport(mgr);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Client-side manager-rankings port. Mirrors src/dynasty/manager.py.
+// ---------------------------------------------------------------------------
+
+function expectedScoreAtPick(pick) {
+  if (pick <= 0) return 100.0;
+  if (pick > 250) return 0.0;
+  return Math.max(0.0, 100.0 * (1.0 - (pick - 1) / 250.0));
+}
+
+function zscore(value, pool) {
+  if (!pool || pool.length < 2) return 0.0;
+  const mu = pool.reduce((a, b) => a + b, 0) / pool.length;
+  const variance = pool.reduce((a, b) => a + (b - mu) * (b - mu), 0) / pool.length;
+  const sd = Math.sqrt(variance) || 1.0;
+  return (value - mu) / sd;
+}
+
+function computeManagerTable(franchiseNames, picks, trades, scoreLookup) {
+  const byId = {};
+  function ensure(fid) {
+    if (!byId[fid]) {
+      byId[fid] = {
+        franchise_id: fid,
+        display_name: franchiseNames[fid] || `Franchise ${fid}`,
+        n_picks: 0, draft_delta_total: 0, draft_delta_avg: 0,
+        n_trades: 0, trade_delta_total: 0,
+        z_draft: 0, z_trade: 0, skill_score: 0, skill_rank: 0,
+        notes: [],
+      };
+    }
+    return byId[fid];
+  }
+  // Pre-populate so every franchise appears even with zero activity.
+  Object.keys(franchiseNames).forEach(fid => ensure(fid));
+
+  picks.forEach(p => {
+    const info = scoreLookup[p.player_ext_id];
+    if (!info) return;
+    if (!p.franchise_id || p.franchise_id === "?") return;
+    const m = ensure(p.franchise_id);
+    const expected = expectedScoreAtPick(p.pick_no);
+    m.n_picks++;
+    m.draft_delta_total += (info.score - expected);
+  });
+  Object.values(byId).forEach(m => {
+    m.draft_delta_avg = m.n_picks ? (m.draft_delta_total / m.n_picks) : 0;
+  });
+
+  trades.forEach(tx => {
+    const sideValues = {};
+    Object.keys(tx.sides).forEach(fid => {
+      sideValues[fid] = tx.sides[fid].reduce((a, pid) => a + (scoreLookup[pid] ? scoreLookup[pid].score : 0), 0);
+    });
+    Object.keys(tx.sides).forEach(fid => {
+      const received = sideValues[fid] || 0;
+      const given = Object.keys(sideValues).filter(o => o !== fid).reduce((a, o) => a + sideValues[o], 0);
+      const m = ensure(fid);
+      m.n_trades++;
+      m.trade_delta_total += (received - given);
+    });
+  });
+
+  const draftPool = Object.values(byId).filter(m => m.n_picks).map(m => m.draft_delta_avg);
+  const tradePool = Object.values(byId).filter(m => m.n_trades).map(m => m.trade_delta_total);
+
+  Object.values(byId).forEach(m => {
+    m.z_draft = m.n_picks ? zscore(m.draft_delta_avg, draftPool) : 0;
+    m.z_trade = m.n_trades ? zscore(m.trade_delta_total, tradePool) : 0;
+    m.skill_score = (m.z_draft + m.z_trade) / 2.0;
+    if (!m.n_trades) m.notes.push("no trades on record");
+    if (m.n_picks > 0 && m.n_picks < 5) m.notes.push(`only ${m.n_picks} rated draft picks (low sample)`);
+    else if (m.n_picks === 0) m.notes.push("no rated draft picks");
+  });
+
+  const ranked = Object.values(byId).sort((a, b) => b.skill_score - a.skill_score);
+  ranked.forEach((m, i) => { m.skill_rank = i + 1; });
+  return { n_picks: picks.length, n_trades: trades.length, managers: ranked };
+}
+
+async function computeSleeperManagerReport(leagueId, franchiseNames, model) {
+  // Drafts -> picks.
+  const draftsResp = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+  const drafts = (await draftsResp.json()) || [];
+  const allPicks = [];
+  for (const d of drafts) {
+    const did = d.draft_id || d.id;
+    if (!did) continue;
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/draft/${did}/picks`);
+      const rows = (await r.json()) || [];
+      rows.forEach(row => {
+        allPicks.push({
+          pick_no: Number(row.pick_no) || 0,
+          round_no: Number(row.round) || 0,
+          franchise_id: String(row.roster_id || row.picked_by || "?"),
+          player_ext_id: String(row.player_id || ""),
+        });
+      });
+    } catch (e) { /* skip */ }
+  }
+
+  // Transactions per week (0..18).
+  const allTrades = [];
+  const weekFetches = [];
+  for (let w = 0; w <= 18; w++) {
+    weekFetches.push(
+      fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => [])
+    );
+  }
+  const weekResults = await Promise.all(weekFetches);
+  weekResults.forEach(rows => {
+    (rows || []).forEach(tx => {
+      if (tx.type !== "trade" || tx.status !== "complete") return;
+      const adds = tx.adds || {};
+      const sides = {};
+      Object.keys(adds).forEach(pid => {
+        const fid = String(adds[pid]);
+        if (!sides[fid]) sides[fid] = [];
+        sides[fid].push(String(pid));
+      });
+      if (!Object.keys(sides).length) return;
+      allTrades.push({ transaction_id: String(tx.transaction_id || tx.id || ""), sides });
+    });
+  });
+
+  return computeManagerTable(franchiseNames, allPicks, allTrades, model);
+}
+
+async function computeMflManagerReport(leagueId, year, franchiseNames, mflIdLookup, proxy) {
+  // Drafts.
+  const allPicks = [];
+  try {
+    const r = await fetch(`${proxy}/mfl/${year}/export?TYPE=draftResults&L=${leagueId}&JSON=1`);
+    const payload = await r.json();
+    let units = ((payload.draftResults || {}).draftUnit) || [];
+    if (!Array.isArray(units)) units = [units];
+    units.forEach(unit => {
+      let picks = unit.draftPick || [];
+      if (!Array.isArray(picks)) picks = [picks];
+      picks.forEach(p => {
+        allPicks.push({
+          pick_no: (Number(p.pick) || 0) + 1,
+          round_no: (Number(p.round) || 0) + 1,
+          franchise_id: String(p.franchise || ""),
+          player_ext_id: String(p.player || ""),
+        });
+      });
+    });
+  } catch (e) { /* skip */ }
+
+  // Trades.
+  const allTrades = [];
+  try {
+    const r = await fetch(`${proxy}/mfl/${year}/export?TYPE=transactions&L=${leagueId}&JSON=1&TRANS_TYPE=TRADE`);
+    const payload = await r.json();
+    let txs = ((payload.transactions || {}).transaction) || [];
+    if (!Array.isArray(txs)) txs = [txs];
+    txs.forEach(tx => {
+      if (tx.type !== "TRADE") return;
+      const f1 = tx.franchise || tx.franchise1;
+      const f2 = tx.franchise2;
+      const split = blob => (blob || "").split(",").map(s => s.trim()).filter(s => s && !s.startsWith("DP_") && !s.startsWith("FP_") && !s.startsWith("BB_"));
+      const side1 = split(tx.franchise1_gave_up);
+      const side2 = split(tx.franchise2_gave_up);
+      const sides = {};
+      if (f1) sides[String(f1)] = side2;
+      if (f2) sides[String(f2)] = side1;
+      if (Object.keys(sides).length) allTrades.push({ transaction_id: String(tx.transaction_id || tx.timestamp || ""), sides });
+    });
+  } catch (e) { /* skip */ }
+
+  return computeManagerTable(franchiseNames, allPicks, allTrades, mflIdLookup);
 }
 
 function renderDetected(d, s) {
@@ -1047,7 +1412,7 @@ async function loadPrefetchedIndex() {
     const idx = await resp.json();
     const leagues = idx.leagues || [];
     if (!leagues.length) {
-      section.innerHTML = `<div class="callout" style="font-size:13px">No leagues are pre-fetched yet. Add entries to <code>leagues.json</code> in the repo to populate this section. MFL leagues must be listed here — their API has no CORS.</div>`;
+      section.innerHTML = `<div class="callout" style="font-size:13px">No leagues are pre-fetched yet. Use the form below to evaluate any Sleeper league live (with manager rankings if the checkbox is on). MFL leagues need either a proxy worker (see <code>scripts/cf-worker/README.md</code>) or an entry in <code>leagues.json</code> for the next daily build.</div>`;
       return;
     }
     let html = `<h2 style="margin-top:0">Pre-fetched leagues</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">`;
@@ -1152,7 +1517,10 @@ function renderManagerReport(mgr) {
 
 // Auto-load the prefetched index on page load.
 loadPrefetchedIndex();
+// Initial UI sync for platform selector visibility.
+onPlatformChange();
 </script>"""
+    body = body.replace("__PROXY_URL__", proxy_url)
     return _page(title, header, body)
 
 

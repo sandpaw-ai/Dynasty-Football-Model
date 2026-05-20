@@ -15,6 +15,97 @@ Format for each entry:
 
 ---
 
+## v0.12.0 — MFL form + live manager rankings + CF Worker proxy (PR #12)
+
+**Date:** 2026-05-20
+
+Phil reported the site didn't show manager rankings (because `leagues.json`
+is empty) and asked for an MFL form he could actually use. Both addressed.
+
+**Site UX**
+- League page form rewritten with a **platform selector**: Sleeper | MFL.
+  - Sleeper: live fetch using the existing CORS-friendly endpoints.
+  - MFL: live fetch via the proxy worker when configured; otherwise
+    inline help directing the user to add the league to `leagues.json`.
+- New **"Also compute manager skill rankings" checkbox** (default on).
+  When checked, the page walks drafts + transactions client-side and
+  renders the manager-rankings table inline. ~20 API calls for a typical
+  dynasty league with one prior draft.
+- Year input appears when MFL is selected.
+- Empty-state copy on the prefetched section now points users to the
+  live form below for Sleeper, or to the worker / leagues.json options
+  for MFL.
+
+**Cloudflare Worker proxy** (`scripts/cf-worker/`)
+- New worker (`worker.js`) that proxies `api.myfantasyleague.com` so MFL
+  data can be fetched from `pstiehl.github.io` in the browser. Also
+  proxies `api.sleeper.app` (Sleeper is already CORS-friendly, but
+  routing through the worker adds edge caching for the slow
+  `transactions/<week>` endpoint).
+- Includes `wrangler.toml` and a README with deploy instructions.
+- Free tier (100k req/day) is more than enough for personal use.
+- Worker URL is plumbed into the site via the `PROXY_URL` env var,
+  consumed by `_build_league_page` and baked as `data-proxy-url` on
+  the form element. Sanitized to allow only `https?://[A-Za-z0-9.\-_/]+`
+  patterns.
+- The CF worker README documents how to wire `PROXY_URL` into the
+  GitHub Actions workflow (one-line edit to `daily-refresh.yml` plus
+  a repo Variable). Not done in this PR because PR-author tokens
+  can't modify workflow files; needs a manual edit from a repo
+  owner with the `workflow` scope.
+
+**Client-side manager-rankings port**
+- `expectedScoreAtPick(pick)`, `zscore(value, pool)`, and
+  `computeManagerTable(franchiseNames, picks, trades, lookup)` ported
+  from `src/dynasty/manager.py` to JS for live use on the page.
+- `computeSleeperManagerReport` walks `/drafts`, `/draft/<id>/picks`,
+  and `/transactions/<week>` for weeks 0..18 in parallel.
+- `computeMflManagerReport` mirrors the Python `_fetch_mfl_*` parsers,
+  including draft-pick token filtering (`DP_xx_yy`, `FP_xxx_yyyy`).
+
+**MFL player ID limitation (acknowledged)**
+- Our `assets/model_scores.json` is keyed by `sleeper_id`. To resolve
+  MFL player IDs to model scores client-side, the page fetches MFL's
+  `TYPE=players` endpoint (via the proxy) and matches by NAME+POSITION.
+  Surfaced in the status text: "N of M MFL players matched to model".
+- A future v2 should emit a separate `assets/mfl_scores.json` keyed by
+  `mfl_id` so the join is exact. The pre-fetcher path already does this
+  server-side via `Player.mfl_id`, so pre-fetched MFL leagues don't
+  have this issue.
+
+**Tests**
+- All 10 test files still pass (no test changes needed; new JS code
+  has no Python-side equivalent to break).
+
+**Files**
+- `scripts/cf-worker/worker.js` (new)
+- `scripts/cf-worker/wrangler.toml` (new)
+- `scripts/cf-worker/README.md` (new) — includes the workflow edit Phil
+  needs to make manually
+- `src/dynasty/report.py` — league page form rewrite + JS port
+
+**Operator action items for Phil (one-time)**
+1. Deploy the worker:
+   ```bash
+   cd scripts/cf-worker
+   export CLOUDFLARE_API_TOKEN=<token-with-Workers-Scripts:Edit>
+   npx wrangler@latest deploy
+   ```
+2. Set `PROXY_URL` as a repository variable (Settings → Secrets and
+   variables → Actions → Variables tab → New repository variable).
+   Value: the worker URL Wrangler printed.
+3. Edit `.github/workflows/daily-refresh.yml` to pass that variable
+   through to the build (one-line `env:` block — instructions in
+   `scripts/cf-worker/README.md`).
+4. Push. MFL form on `/league.html` activates after the next workflow
+   run.
+
+Alternatively, skip steps 1–3 and just add MFL leagues to
+`leagues.json` — the daily prefetcher bakes them in without needing
+the worker.
+
+---
+
 ## v0.11.0 — MFL on site + manager skill rankings (PR #11)
 
 **Date:** 2026-05-20

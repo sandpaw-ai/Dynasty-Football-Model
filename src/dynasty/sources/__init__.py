@@ -8,6 +8,7 @@ from .pff import PFF
 from .fantasypros import FantasyPros
 from .brainy_ballers import BrainyBallers
 from .nfl_draft_capital import NFLDraftCapital
+from .ffc_adp import FFCAdp
 
 REGISTRY: dict[str, Type[BaseSource]] = {
     cls.slug: cls
@@ -19,11 +20,12 @@ REGISTRY: dict[str, Type[BaseSource]] = {
         FantasyPros,
         BrainyBallers,
         NFLDraftCapital,
+        FFCAdp,
     ]
 }
 
 __all__ = [
     "REGISTRY", "BaseSource", "RankingRecord",
     "FantasyCalc", "DynastyProcessValues", "SleeperPlayers",
-    "PFF", "FantasyPros", "BrainyBallers", "NFLDraftCapital",
+    "PFF", "FantasyPros", "BrainyBallers", "NFLDraftCapital", "FFCAdp",
 ]

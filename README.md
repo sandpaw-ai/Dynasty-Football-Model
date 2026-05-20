@@ -140,6 +140,7 @@ Composite ranks are bucketed into simple tiers (T1: top 6, T2: 7–12, T3:
 | DynastyProcess        | aggregator  | ✅ free open CSV (FantasyPros consensus)  |
 | Brainy Ballers        | model       | ✅ public Top-500 scrape (rate-limited)   |
 | **NFL Draft capital** | model       | ✅ nflverse public CSV (rookies + recent classes — see `docs/RESEARCH-sources.md` §A1) |
+| **FFC ADP**           | market      | ✅ FantasyFootballCalculator public REST API (PPR, 2QB, Dynasty, Rookie — §A3) |
 | FantasyPros direct    | aggregator  | 🔒 stub — requires paid API key           |
 | PFF                   | model       | 🔒 stub — requires paid API partnership   |
 | Manual CSV            | expert      | ✅ via `dynasty.manual_import.import_csv` |
@@ -214,6 +215,7 @@ src/dynasty/
     sleeper.py
     brainy_ballers.py
     nfl_draft_capital.py
+    ffc_adp.py
     fantasypros.py      # stub
     pff.py              # stub
   db/
@@ -222,6 +224,7 @@ src/dynasty/
 tests/
   smoke_test.py
   test_nfl_draft_capital.py
+  test_ffc_adp.py
 docs/
   RESEARCH-sources.md     # 440-line source-landscape writeup w/ citations
   CHANGELOG-model.md      # what each release shifts about score outputs
@@ -251,8 +254,8 @@ release changes about the score outputs and why).
 
 Near-term:
 
-- **FantasyFootballCalculator ADP** — second free market signal, complements
-  FantasyCalc. (PR #3)
+- ~~**FantasyFootballCalculator ADP** — second free market signal, complements
+  FantasyCalc.~~ (PR #3 — done)
 - **RAS (Relative Athletic Score)** — Kent Lee Platte's free CSV. Best free
   athleticism composite; especially useful as a tail-risk filter. (PR #4)
 - **Breakout Age + College Dominator** — computed from `cfbd-api-py` college

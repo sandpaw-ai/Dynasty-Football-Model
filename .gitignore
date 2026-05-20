@@ -26,6 +26,9 @@ dynasty_site/
 data/ras/*.csv
 data/ras/*.xlsx
 data/ras/*.tsv
+data/cfbd/*.csv
+data/cfbd/*.xlsx
+data/cfbd/*.tsv
 
 # OS / editor cruft
 .DS_Store

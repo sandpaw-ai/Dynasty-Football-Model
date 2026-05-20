@@ -297,8 +297,9 @@ Near-term:
 - ~~**Position-specific + years-pro weighting** — the same source should not
   weight the same for a rookie WR and a Year-6 RB. Refactors
   `SourceTrackRecord` lookup to apply position-level multipliers.~~ (PR #6 — done)
-- **League roster import (MFL + Sleeper)** — KeepTradeCut-style "rate my
-  team / league" view from the user's actual rosters. (PR #7)
+- ~~**League roster import (MFL + Sleeper)** — KeepTradeCut-style "rate my
+  team / league" view from the user's actual rosters.~~ (PR #7 — done. Try
+  `python -m dynasty.cli league sleeper <league_id>` after `score`.)
 
 Later:
 

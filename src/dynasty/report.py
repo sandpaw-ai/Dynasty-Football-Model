@@ -161,12 +161,12 @@ def _site_header(active: str, latest_ts: Optional[datetime], league_label: str) 
     return f"""<header class="site">
   <div class="row">
     <div>
-      <h1><a href="rankings.html">Dynasty Football <span class="accent">Model</span></a></h1>
-      <div class="meta">Similarity-driven dynasty rankings · Updated {_esc(ts)} · Default format: {_esc(league_label)}</div>
+      <h1><a href="rankings.html">Kings of <span class="accent">Dynasty</span></a></h1>
+      <div class="meta">Fantasy Football · Updated {_esc(ts)} · Default format: {_esc(league_label)}</div>
     </div>
     <nav>
-      {link("rankings.html", "Rankings", "rankings")}
-      {link("league.html", "League Overlay", "league")}
+      {link("rankings.html", "Similarity Scores", "rankings")}
+      {link("league.html", "Dynasty Rankings", "league")}
       {link("methodology.html", "Methodology", "methodology")}
       {link("sources.html", "Sources", "sources")}
       {link("prospects.html", "Prospects", "prospects")}
@@ -178,7 +178,7 @@ def _site_header(active: str, latest_ts: Optional[datetime], league_label: str) 
 def _footer() -> str:
     return (
         '<footer>'
-        'Dynasty Football Model · open source on '
+        'Kings of Dynasty · Fantasy Football · open source on '
         '<a href="https://github.com/pstiehl/Dynasty-Football-Model">GitHub</a> · '
         'Stats: <a href="https://github.com/nflverse/nflverse-data">nflverse</a> + Pro-Football-Reference'
         '</footer>'
@@ -236,7 +236,7 @@ def _build_rankings(engine: EngineResult, latest_ts: datetime, league_label: str
 
     body = f"""<div class="container">
 
-<h2>Dynasty Football <span class="accent">Rankings</span></h2>
+<h2>Similarity <span class="accent">Scores</span></h2>
 <p class="lede">Players ranked by projected lifetime fantasy points,
 comped to historical players with similar <strong>fantasy production curves</strong>
 under modern scoring. Each active player's fp/g arc is matched against the
@@ -302,7 +302,7 @@ q.addEventListener('input', update); pos.addEventListener('change', update); upd
 </div>"""
 
     return _page(
-        "Dynasty Football Model — Rankings",
+        "Kings of Dynasty — Similarity Scores",
         _site_header("rankings", latest_ts, league_label),
         body,
     )
@@ -314,9 +314,16 @@ q.addEventListener('input', update); pos.addEventListener('change', update); upd
 
 def _build_league(overlays: Dict[str, OverlayResult], latest_ts: datetime,
                   league_label: str, team_lookup: Dict[str, str]) -> str:
-    # Precompute overlay data for every preset, embed as JSON.
+    # v2.2 preset cleanup — KEEP only Superflex PPR and 2QB PPR (the two
+    # formats Phil's leagues use). Drop 1QB PPR / SF TE Premium /
+    # Half PPR / Standard from the preset row.
+    DYNASTY_RANKINGS_PRESETS = ("sf_ppr", "2qb_ppr")
+    # Precompute overlay data for every kept preset, embed as JSON.
     overlay_payload = {}
-    for fmt, ov in overlays.items():
+    for fmt in DYNASTY_RANKINGS_PRESETS:
+        ov = overlays.get(fmt)
+        if ov is None:
+            continue
         overlay_payload[fmt] = {
             "label": ov.label,
             "rankings": [
@@ -327,6 +334,7 @@ def _build_league(overlays: Dict[str, OverlayResult], latest_ts: datetime,
                     "team": team_lookup.get(r["player_id"], "—"),
                     "value": r["league_value"],
                     "delta": r["vs_default_delta"],
+                    "slug": _slug(r["name"], r["player_id"]),
                 }
                 for r in ov.rankings[:300]
             ],
@@ -335,12 +343,12 @@ def _build_league(overlays: Dict[str, OverlayResult], latest_ts: datetime,
 
     preset_buttons = "".join(
         f'<button onclick="setFormat(\'{fmt}\')" id="btn-{fmt}">{_esc(PRESETS[fmt]["label"])}</button> '
-        for fmt in PRESETS
+        for fmt in DYNASTY_RANKINGS_PRESETS if fmt in PRESETS
     )
 
     body = f"""<div class="container">
 
-<h2>League <span class="accent">Format Overlay</span></h2>
+<h2>Dynasty <span class="accent">Rankings</span></h2>
 <p class="lede">Re-rank the engine's projections under your league's exact
 scoring + roster rules. Switching format does NOT change which retired comps
 each active player has — it just re-scores those comps' careers under your
@@ -383,7 +391,7 @@ function setFormat(fmt) {{
   const data = OVERLAY[fmt];
   const body = document.getElementById('ov-body');
   body.innerHTML = data.rankings.map((r, i) =>
-    '<tr class="player-row"><td class="rank">'+(i+1)+'</td>'+
+    '<tr class="player-row" onclick="location=\'players/'+r.slug+'.html\'"><td class="rank">'+(i+1)+'</td>'+
     '<td class="name">'+r.name+'</td>'+
     '<td>'+posBadge(r.pos)+'</td>'+
     '<td class="team">'+r.team+'</td>'+
@@ -403,7 +411,7 @@ setFormat('sf_ppr');
 </div>"""
 
     return _page(
-        "Dynasty Football Model — League Overlay",
+        "Kings of Dynasty — Dynasty Rankings",
         _site_header("league", latest_ts, league_label),
         body,
     )
@@ -430,7 +438,7 @@ def _build_methodology(engine: EngineResult, latest_ts: datetime,
 
     body = f"""<div class="container narrow">
 
-<h2>v2.0 <span class="accent">Methodology — Fantasy-Point Arc</span></h2>
+<h2>v2.2 <span class="accent">Methodology — Fantasy-Point Arc + Penalty Stack</span></h2>
 
 <p class="lede">v1.x ranked players by per-stat z-score shape — "who do their
 counting stats look like?" That structurally buried elite dual-threats like
@@ -507,7 +515,52 @@ how they earned those points.</p>
       years remaining matches v1.1 at up to 1.50× for display).</li>
 </ol>
 
-<h3>6 · Why this is dynasty-appropriate</h3>
+<h3>6 · v2.2 penalty stack — survival, confidence, late breakout</h3>
+<p>v2.0/v2.1 projected forward by similarity-weighting comps' realised
+post-snapshot fantasy points. That left three known overrates: small-sample
+players got full credit for limited NFL data, players with bust-prone comp
+pools got no penalty for the pool's collapse rate, and late-breakout QBs
+were rewarded for "years remaining" the empirical record says they
+rarely cash in.</p>
+<p>v2.2 composes three multiplicative penalties on top of the v2.0/v2.1
+raw projection:</p>
+<ol>
+  <li><strong>Survival multiplier.</strong> For each player's top-20
+      comp pool, compute <code>bust_rate</code> (fraction of comps who
+      retired by age 30 with &lt;8 NFL seasons) and
+      <code>short_career_rate</code> (≤5 NFL seasons). Multiplier =
+      <code>(1 - bust)×0.20 + (1 - short)×0.10 + 0.70</code>, floored
+      at 0.65 and capped at 1.0. Clean comp pools (Allen, Mahomes,
+      Hurts, Lamar) score 1.0; bust-heavy pools (Anthony Richardson)
+      score 0.78–0.92.</li>
+  <li><strong>Confidence shrinkage.</strong> Career NFL starts /32 caps
+      at 1.0 (≈2 full seasons = full confidence). QBs under 16 career
+      starts are additionally capped at 0.5. Above-baseline
+      projections are pulled toward the position-tier median; below-
+      baseline projections are straight-multiplied by confidence (no
+      artificial lift). Sample-of-15 starts (Anthony Richardson) =
+      confidence 0.47.</li>
+  <li><strong>Late-breakout penalty (QB only).</strong> Multiplier keyed
+      to the QB's first NFL season with ≥250 pass attempts or
+      ≥10 games as primary starter:
+      <ul>
+        <li>breakout_age ≤ 22: 1.00 (no penalty)</li>
+        <li>breakout_age = 23: 0.95</li>
+        <li>breakout_age = 24: 0.88</li>
+        <li>breakout_age ≥ 25: 0.80</li>
+      </ul>
+      Confidence-weighted: low-NFL-sample 2nd-year QBs (Daniels,
+      24 starts) take a softer share than established late-breakouts
+      (Bo Nix, 34+ starts). Empirical: see
+      <a href="https://github.com/pstiehl/Dynasty-Football-Model/blob/main/docs/LATE-BREAKOUT-QBs.md">LATE-BREAKOUT-QBs.md</a>.</li>
+</ol>
+<p>Stack composition order:
+<code>raw → ×survival → ×confidence + baseline×(1−conf) → ×late_breakout</code>.
+Floored at 0.20×raw and capped at 1.00×raw — penalties are penalties,
+not lifts. Per-player diagnostics (bust_rate, durable_career_rate,
+breakout_age, confidence) are saved to <code>data/diagnostics/v2.2_*.json</code>.</p>
+
+<h3>7 · Why this is dynasty-appropriate</h3>
 <p>Dynasty value is the projected lifetime fantasy points a player will
 score for your roster. v1.x's stat-shape matching answered a different
 question ("what shape of NFL career does this player project to have?")
@@ -515,11 +568,13 @@ which correlated imperfectly with fantasy production. v2.0 measures the
 thing we actually care about directly: <em>fantasy points produced under
 modern scoring</em>.</p>
 
-<h3>7 · Format overlay</h3>
-<p>The base <a href="rankings.html">Rankings</a> page uses Superflex PPR.
-The <a href="league.html">League Overlay</a> page reads per-format
-fp totals directly from the pre-computed arc corpus (no re-scoring needed)
-and recomputes positional VORP baselines under the target roster rules.</p>
+<h3>8 · Format overlay</h3>
+<p>The base <a href="rankings.html">Similarity Scores</a> page uses
+Superflex PPR. The <a href="league.html">Dynasty Rankings</a> page reads
+per-format fp totals directly from the pre-computed arc corpus (no
+re-scoring needed) and recomputes positional VORP baselines under the
+target roster rules. v2.2 keeps two preset formats: Superflex PPR and
+2QB PPR.</p>
 
 <h3>Known limitations</h3>
 <ul>
@@ -535,7 +590,7 @@ and recomputes positional VORP baselines under the target roster rules.</p>
 </div>"""
 
     return _page(
-        "Dynasty Football Model — Methodology",
+        "Kings of Dynasty — Methodology",
         _site_header("methodology", latest_ts, league_label),
         body,
     )
@@ -589,7 +644,7 @@ production history. See <a href="methodology.html">Methodology</a>.</p>
 
 </div>"""
     return _page(
-        "Dynasty Football Model — Sources",
+        "Kings of Dynasty — Sources",
         _site_header("sources", latest_ts, league_label),
         body,
     )
@@ -615,15 +670,15 @@ roadmap. For now this page is a placeholder so the IA matches the
 basketball model.</p>
 
 <p class="lede" style="margin-top:18px">If you're looking for veteran NFL
-rankings, head back to <a href="rankings.html">Rankings</a>. If you want to
-rank players under your specific league's scoring, the
-<a href="league.html">League Overlay</a> has presets for SF, 1QB, 2QB, and
-SF TE-Premium plus a delta column showing how your format reshuffles
+rankings, head back to <a href="rankings.html">Similarity Scores</a>. If
+you want to rank players under your specific league's scoring, the
+<a href="league.html">Dynasty Rankings</a> page has presets for Superflex
+PPR and 2QB PPR plus a delta column showing how your format reshuffles
 things.</p>
 
 </div>"""
     return _page(
-        "Dynasty Football Model — Prospects",
+        "Kings of Dynasty — Prospects",
         _site_header("prospects", latest_ts, league_label),
         body,
     )
@@ -677,7 +732,7 @@ def _player_header(row: Dict, team: str, league_label: str) -> str:
     <div class="metric"><div class="num">{row['n_comps']}</div><div class="label">Long-arc comps</div></div>
   </div>
   {lift_panel}
-  <div style="margin-top:14px"><a href="../rankings.html" style="color:var(--header-text);opacity:0.8;font-size:13px">← back to rankings</a></div>
+  <div style="margin-top:14px"><a href="../rankings.html" style="color:var(--header-text);opacity:0.8;font-size:13px">← back to Similarity Scores</a></div>
 </div>"""
 
 
@@ -727,12 +782,12 @@ dragged down by an occasional low-projection comp).</p>
 
 <p class="lede" style="margin-top:24px">Want this player ranked under your
 league's specific scoring + roster rules? Head to
-<a href="../league.html">League Overlay</a>.</p>
+<a href="../league.html">Dynasty Rankings</a>.</p>
 
 </div>"""
 
     return _page(
-        f"Dynasty Football Model — {row['name']}",
+        f"Kings of Dynasty — {row['name']}",
         _site_header("rankings", latest_ts, league_label),
         body,
         css_href="../assets/style.css",

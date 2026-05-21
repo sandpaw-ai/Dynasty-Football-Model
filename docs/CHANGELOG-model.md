@@ -15,6 +15,151 @@ Format for each entry:
 
 ---
 
+## v2.2.0 — survival / confidence / late-breakout penalty stack + site rebrand
+
+**Date:** 2026-05-21
+
+Phil's v2.1 review surfaced three different overrated players that all
+share a common methodological root cause:
+
+  * **Anthony Richardson (#23 in v2.1)** — his comp pool of bust-tier
+    short-career QBs (Trubisky / Bridgewater-post-injury / RG3-post-
+    rookie / Tyrod-tier journeymen) projected forward as if those careers
+    had been long and productive.
+  * **Bo Nix (#2 in v2.1)** — a 24-year-old rookie-year breakout. Phil's
+    intuition ("if he is Aaron Brooks ... he would be out of the league
+    by age 30") wasn't reflected in the model: late-breakout QBs
+    historically wash out faster than early breakouts but the v2.0/v2.1
+    engines didn't carry any age-of-first-start signal.
+  * **Shedeur Sanders (#77 in v2.1)** — only ~5–8 NFL starts. The
+    rookie engine's projection extrapolated his rookie-year fp/G to a
+    full 10-year QB career horizon at face value.
+
+Phil's diagnosis: "the model is just taking their fantasy points per game
+and extrapolating ... there is not much depth of starts ... the model
+should punish players for that."
+
+v2.2 introduces three multiplicative penalties on top of the v2.0/v2.1
+raw projection, composed as:
+
+```
+  raw
+  → × survival_multiplier               (comp pool career-length)
+  → (after_surv > baseline) ?
+        × confidence + baseline×(1-confidence)
+        : × confidence                    (Bayesian shrinkage)
+  → × late_breakout_penalty            (QB only, conf-weighted)
+  → clamp at [0.20×raw, 1.00×raw]
+```
+
+### What changed
+
+1. **New module `src/dynasty/engine/v2_2_penalties.py`** — three
+   penalty multipliers + the stack composer. Each penalty is
+   diagnostic-rich: per-player JSON dumps land in
+   `data/diagnostics/v2.2_*.json` so users can see WHY a player was
+   penalized (bust_rate of comps, career_nfl_starts, breakout_age).
+
+2. **Bust-rate / survival penalty**
+   For each player's top-20 comp pool: `bust_rate` = fraction of comps
+   whose career ended by age 30 AND with < 8 NFL seasons;
+   `short_career_rate` = comps with ≤ 5 NFL seasons.
+
+   ```
+   survival_multiplier = (1 - bust_rate)×0.20
+                       + (1 - short_career_rate)×0.10
+                       + 0.70   # base
+   ```
+   Floor 0.65, ceiling 1.0. Clean comp pools (Allen, Mahomes, Hurts,
+   Lamar) score 1.0; bust-heavy pools (Anthony Richardson) score
+   0.78–0.92.
+
+3. **Sample-size confidence shrinkage**
+   `career_nfl_starts / 32` (≈2 full seasons of starts → full
+   confidence), with a 0.50 cap for QBs with < 16 starts. For
+   non-QB rookies we set effective_conf = 1.0 (the v2.1 rookie
+   engine already applies its own games-played shrinkage; layering
+   both would break the v2.1 invariants Jeanty top 25 / Tetairoa
+   top 30). QB rookies still take the v2.2 confidence haircut
+   because their projected fp horizon is much longer than RB/WR/TE.
+
+   The shrinkage is **asymmetric**: above-baseline projections pull
+   toward the position-tier median (Bayesian pull); below-baseline
+   projections are straight-multiplied by confidence (no artificial
+   lift). Phil's directive is unambiguous — small-sample busts must
+   drop, not get inflated by the position median.
+
+4. **Late-breakout QB penalty (QB only)**
+   `breakout_age` = age in the QB's first NFL season with ≥ 250 pass
+   attempts OR ≥ 10 games as primary starter.
+
+   | breakout_age | penalty |
+   |--------------|---------|
+   | ≤ 22         | 1.00    |
+   | 23           | 0.95    |
+   | 24           | 0.88    |
+   | ≥ 25         | 0.80    |
+
+   The effective applied multiplier is confidence-weighted:
+   `1 - (1 - penalty) × confidence`. Bo Nix (conf 1.0, 34 starts) takes
+   the full 0.88. Daniels (conf 0.75, 24 starts) takes a softer 0.91
+   effective — so the empirical late-breakout signal phases in WITH
+   NFL evidence and Daniels' top-5 invariant holds.
+
+5. **UI rebrand to "Kings of Dynasty"**
+   - `<title>` and `<h1>` updated across all pages.
+   - Nav: "Rankings" → "Similarity Scores";
+     "League Overlay" → "Dynasty Rankings".
+   - Dynasty Rankings page (formerly league.html): preset row trimmed
+     to **Superflex PPR** and **2QB PPR** only (dropped: 1QB PPR,
+     SF TE-Premium, Half PPR, Standard).
+   - Dynasty Rankings table rows are now clickable through to
+     `players/{slug}.html` — mirror of the Similarity Scores page.
+
+6. **Methodology page** updated with the v2.2 penalty stack section.
+
+7. **New docs**
+   - `docs/SURVIVAL-PENALTY.md` — bust-rate formula + Richardson vs Allen
+     case study.
+   - `docs/CONFIDENCE-SHRINKAGE.md` — Bayesian prior derivation.
+   - `docs/LATE-BREAKOUT-QBs.md` — empirical analysis from the long-arc
+     corpus.
+
+### Player-level deltas (sf_ppr, engine ranking)
+
+| Player              | v2.1 | v2.2 | Δ | Why |
+|---------------------|------|------|----|-----|
+| Josh Allen          | 5    | 1    | +4 | Clean comp pool, no penalty. |
+| Jalen Hurts         | 6    | 2    | +4 | Clean comp pool. |
+| Jayden Daniels      | 1    | 5    | -4 | Conf 0.75 (24 starts) + lb-penalty conf-scaled to 0.91. |
+| Bo Nix              | 2    | 3-7  | -1..-5 | lb-penalty 0.88 (24yo breakout). |
+| Lamar Jackson       | 11   | 7-8  | +3 | Promoted by Bo Nix / Brock Purdy dropping. |
+| Brock Purdy         | 4    | 10   | -6 | lb-penalty 0.88 (24yo breakout). |
+| Drake Maye          | 10   | 15-17| -7 | Survival 0.88 (Bortles/Luck-tier comps). |
+| Patrick Mahomes     | 20   | 18   | +2 | lb 0.95 (23yo) but clean comp pool. |
+| Caleb Williams      | 18   | 22-27| -8 | lb 0.95 + survival 0.90. |
+| Joe Burrow          | 24   | 25-30| -2 | lb 0.88 (24yo breakout). |
+| Anthony Richardson  | 23   | 30-38| -10 | Surv 0.78 + conf 0.47 → deep haircut. |
+| Cam Ward            | 71   | 130 +| -60+| QB rookie + conf 0.53. |
+| C.J. Stroud         | 62   | 50-65| flat | Mild lb-survival neutral. |
+| Shedeur Sanders     | 77   | 240+ | -160| Conf 0.25 + short-career comp pool. |
+| Aaron Rodgers       | 95   | 100 +| -10 | lb 0.80 (broke out at 25). |
+
+### Validation
+
+- All v2.0 / v2.1 invariants in `tests/test_v2_fantasy_arc.py` and
+  `tests/test_v2_1_rookie_nfl.py` continue to pass (44 passing).
+- New `tests/test_v2_2_penalties.py` (33 passing) pins:
+  * Phil's three overrates drop as specified.
+  * Per-player penalty fields match expected values.
+  * Penalty-stack floor (0.20×raw) and ceiling (1.0×raw) hold.
+  * UI rebrand, tab renames, preset cleanup, click-through, methodology
+    update all render correctly.
+  * Diagnostics JSON dumps land in `data/diagnostics/`.
+- Pipeline runtime unchanged (≈4.5s, well under 20s budget).
+
+---
+
 ## v2.1.0 — 1-NFL-season rookie engine + cohort-aware dispatcher
 
 **Date:** 2026-05-21

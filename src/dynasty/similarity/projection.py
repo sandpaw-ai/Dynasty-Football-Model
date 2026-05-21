@@ -35,7 +35,13 @@ from dataclasses import dataclass, field
 from statistics import median
 from typing import Optional
 
-from .comparables import Comparable, find_comparables
+from .comparables import (
+    Comparable,
+    CohortIndex,
+    build_cohort_index,
+    find_comparables,
+    find_comparables_cohort,
+)
 from .comparables import _player_seasons_by_pid
 from .vectorize import (
     PlayerSeason,
@@ -289,15 +295,37 @@ def project_player(
     league_format: str = "sf_ppr",
     k: int = 20,
     age_window: float = 1.0,
+    cohort_index: Optional[CohortIndex] = None,
+    diagnostics: Optional[list] = None,
 ) -> CareerArcProjection:
-    comps_raw = find_comparables(
-        query=query,
-        corpus=corpus,
-        stats=stats,
-        k=k,
-        age_window=age_window,
-        by_pid=by_pid,
-    )
+    # PR #17 path: cohort-filtered + percentile-tiered + two-vector
+    # blended KNN. Falls back gracefully to legacy snapshot-only KNN
+    # inside find_comparables_cohort when the cohort is too thin (rookies
+    # or rare-stage-of-career players).
+    if cohort_index is not None:
+        comps_raw, diag = find_comparables_cohort(
+            query=query,
+            corpus=corpus,
+            snapshot_stats=stats,
+            cohort_index=cohort_index,
+            k=k,
+            age_window=age_window,
+            by_pid=by_pid,
+            league_format=league_format,
+        )
+        if diagnostics is not None:
+            diagnostics.append(diag)
+    else:
+        # Legacy v0.14/v0.15 path — kept for callers that haven't been
+        # updated to pre-build the cohort index.
+        comps_raw = find_comparables(
+            query=query,
+            corpus=corpus,
+            stats=stats,
+            k=k,
+            age_window=age_window,
+            by_pid=by_pid,
+        )
     if not comps_raw:
         return CareerArcProjection(
             player_id=query.player_id,
@@ -610,14 +638,23 @@ def project_all_active_players(
     min_query_season: int = 2023,
     min_games: int = 8,
     league_format: str = "sf_ppr",
+    collect_diagnostics: bool = False,
 ) -> list[CareerArcProjection]:
     """Build projections for every player with a recent active season.
 
     "Active" = had a season >= min_query_season with >= min_games.
+
+    PR #17: also pre-builds the cohort index (cumulative-career-arc
+    vectors + (position, age, career_season_number) buckets) so the
+    KNN can apply the cohort filter, percentile-tier band, and the
+    two-vector blend.
     """
     corpus = corpus or build_nfl_corpus()
     stats = compute_zscore_stats(corpus)
     by_pid = _player_seasons_by_pid(corpus)
+    cohort_index = build_cohort_index(corpus, league_format=league_format)
+
+    diagnostics: Optional[list] = [] if collect_diagnostics else None
 
     projections: list[CareerArcProjection] = []
     seen: set[str] = set()
@@ -629,8 +666,21 @@ def project_all_active_players(
         latest = latest_season_for_player(ps.player_id, by_pid, min_games=min_games)
         if latest is None or latest.season < min_query_season:
             continue
-        proj = project_player(latest, corpus, stats, by_pid, league_format=league_format)
+        proj = project_player(
+            latest,
+            corpus,
+            stats,
+            by_pid,
+            league_format=league_format,
+            cohort_index=cohort_index,
+            diagnostics=diagnostics,
+        )
         projections.append(proj)
         seen.add(ps.player_id)
 
-    return apply_vorp_and_rescale(projections, league_format)
+    enriched = apply_vorp_and_rescale(projections, league_format)
+    if collect_diagnostics:
+        # Stash on the module so callers can inspect after the fact
+        # without changing the return signature.
+        globals()["_LAST_PROJECTION_DIAGNOSTICS"] = diagnostics
+    return enriched

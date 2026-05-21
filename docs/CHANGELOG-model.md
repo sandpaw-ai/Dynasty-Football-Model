@@ -15,6 +15,103 @@ Format for each entry:
 
 ---
 
+## v0.17.0 — Cumulative-career-arc similarity vectorization (PR #17)
+
+**Date:** 2026-05-21
+
+Fixes the v0.14/v0.15 single-season-snapshot pathology that lets
+structurally-incomparable players surface as top comps. Phil's directive
+(2026-05-21):
+
+> "The similarity scores need an adjustment. Look at Puka Nacua for
+> example. There is no reason he should ever be compared to Jarrett
+> Boykin. Nacua has 1715 yards and 10TDs in 2025 at age 24. The
+> calculation should look like this for Nacua — Which historical
+> players have had 4191 yards through 3 seasons in the NFL at his age.
+> That type of analysis should be applied across every player. and
+> thought about from a fantasy production lens"
+
+### Root cause
+
+The v0.14 similarity engine vectorized a SINGLE-SEASON snapshot — a
+player's per-game rates plus YoY deltas. Two players with totally
+different career production could match on per-game shape:
+
+| Player          | Age | NFL Yr | Career Rec Yds | This Yr Rec Yds | This Yr GP |
+|-----------------|----:|-------:|---------------:|----------------:|-----------:|
+| Puka Nacua 2024 |  23 |     2  |          2,476 |             990 |         11 |
+| Jarrett Boykin 2013 | 24 |  2  |             27 |             681 |         12 |
+
+Nacua and Boykin both averaged ~80-90 rec yds/GP as starters at the
+same age — but Nacua's *career-to-date* production was 35× Boykin's.
+The v0.14 vector couldn't see this because it only encoded the
+current season's per-game shape. So Boykin 2013 ranked in Nacua's
+top 5 comps every run.
+
+### What changed (v0.17.0)
+
+1. **New cumulative-career-arc vector** — `vectorize_career_through_age`
+   builds a per-position feature vector encoding career-to-date totals,
+   peak season fantasy, career durability, trajectory slope, peak age,
+   plus a time-decay-weighted recency aggregate (1.0 / 0.7 / 0.5 / 0.35).
+   Fantasy points re-scored under the active format. Z-score normalized
+   per position across the whole corpus.
+
+2. **Cohort filter before KNN** — corpus pre-indexed by
+   `(position, age_bucket, career_season_number)`. A 3-NFL-season-deep
+   24yo can ONLY comp to other 3-NFL-season-deep 24-year-olds at the
+   same position. Boykin (2 NFL seasons in by his age-24 year) is
+   filtered structurally before any KNN scoring happens.
+
+3. **Production-percentile tier matching** — within the cohort,
+   compute the query player's percentile by career-to-date fantasy.
+   Restrict KNN to comps within a percentile band:
+   - elite (>=p90): ±15 percentile points
+   - mid (p40-p90):  ±20 percentile points
+   - low  (<p40):    ±25 percentile points
+
+4. **Two-vector blended KNN** — final similarity is a weighted blend
+   of the cumulative-arc cosine and the snapshot cosine. Blend curve
+   by NFL seasons played:
+   - 1 season:  100% snapshot (rookie fallback — no career arc yet)
+   - 2 seasons: 50% / 50% (Nacua's actual blend)
+   - 3+ seasons: 70% cumulative / 30% snapshot
+
+5. **Cohort-widening fallback** — if the strict (age ±1, career-season
+   ±1) cohort yields fewer than 10 valid comps, the engine widens to
+   ±2 then ±3 before falling back to snapshot-only KNN. Rare in
+   practice; fallback rate <2% of the active player pool.
+
+### Expected output shift
+
+The aggregate top-N rankings shift only modestly — the methodology
+change is about COMP-LIST QUALITY, not about composite-score
+ordering. The visible win is in the comparables table on the site:
+
+| Player           | Before (v0.15)               | After (v0.17)                          |
+|------------------|------------------------------|----------------------------------------|
+| Puka Nacua       | Harvin, Diggs, JJ, Moore, **Boykin** | Julio Jones, Chase, Keenan Allen, Bowe |
+| Justin Jefferson | AJ Brown, DeVonta, Ridley, Crabtree, Thomas | Mike Evans, Cooper, Metcalf, AJ Brown |
+| Mike Evans       | Jordy Nelson, AB, Marshall, Thielen, Jones | Fitzgerald, Randy Moss, Adams, Hopkins |
+| CMC              | Jamaal Charles, Faulk, Ekeler, Gore, Foster | Kamara, Ekeler, Charles, Westbrook, Foster |
+| Joe Burrow       | Dak, Rodgers, McNabb, Stafford, Warner | Rodgers ×2, Mahomes, Peyton, Matt Ryan |
+| Brock Purdy      | Watson, Lawrence, Kyler, Dak, Allen | Burrow, Watson, Kyler, Bortles, Rodgers |
+
+Nacua's cohort filter snapshot: of ~10,400 historical WR seasons,
+Nacua's (age=23, career_season=2, position=WR) cohort filtered to
+1,358 candidates (age ±1, career-season ±1), then production-tier
+filtered to 262 final comps (Nacua's career_fantasy percentile within
+the cohort: 95.7, band ±15pp).
+
+### Validation
+
+- `tests/test_cumulative_career_arc.py` pins the Nacua/Boykin
+  exclusion + elite-cohort preservation + blend curve.
+- All v0.14/v0.15 invariants stay green (Luke Grimm coverage, Allen
+  #1 SF, Bijan top 15 both formats, Allen demoted in 1QB).
+
+---
+
 ## v0.16.0 — Rookie college→NFL similarity chain (PR #16)
 
 **Date:** 2026-05-21
@@ -195,7 +292,6 @@ adds:
   compose at the scoring layer without engine changes — the NFL
   similarity values it blends with already inherit PR #15's
   format-awareness.
-
 ---
 
 ## v0.15.0 — Positional VORP + SF-aware composite weighting (PR #15)

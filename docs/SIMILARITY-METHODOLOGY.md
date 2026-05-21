@@ -5,6 +5,13 @@
 > college players and projected to the pros, and current NFL players
 > compared to similar historical players to extrapolate the rest of
 > their careers." This doc explains how that works.
+>
+> **v0.17.0 update**: the single-season-snapshot pipeline below is now
+> the *rookie-fallback path*. For 2+ NFL-season players, the engine
+> uses a cumulative-career-arc vector with cohort filtering and
+> percentile-tier matching. See [docs/CUMULATIVE-ARC.md](CUMULATIVE-ARC.md)
+> for the full technical writeup and the section ["Two-vector blend
+> (v0.17.0)"](#two-vector-blend-v0170) below for the wiring.
 
 ## The big idea
 
@@ -153,3 +160,42 @@ See `tests/test_similarity_football.py`:
 5. Aaron Rodgers' composite rank > his nfl_impact rank (similarity
    engine penalizes his age) AND his similarity dynasty_value < 50
 6. PFR cache exists and covers 1999-2024
+
+See `tests/test_cumulative_career_arc.py` (v0.17.0):
+
+7. Puka Nacua's top-10 comps include Jefferson OR Chase
+8. Jarrett Boykin 2013 does NOT appear in Nacua's top 50
+9. Cumulative vector dimensionality is stable across player ages
+10. 1-NFL-season players fall back to 100% snapshot KNN
+11. 2-NFL-season players use the 50/50 blend
+12. 3+-NFL-season players use the 70/30 cumulative-dominant blend
+13. Elite-tier (>=p90) players only get comps from their tier band
+14. A late-bloomer's cohort does NOT include elite-from-day-1 arcs
+
+---
+
+## Two-vector blend (v0.17.0)
+
+The v0.14/v0.15 single-season-snapshot vector lives on (above) but is
+no longer the sole similarity signal. PR #17 introduced a parallel
+**cumulative-career-arc vector** (`vectorize_career_through_age`)
+encoding career-to-date totals, peak-season fantasy, durability, peak
+age, trajectory slope, plus a time-decay-weighted recency aggregate.
+
+The two vectors are blended:
+
+| Career season # | Snapshot weight | Cumulative weight |
+|---:|---:|---:|
+| 1 (rookie)      | 1.00 | 0.00 |
+| 2               | 0.50 | 0.50 |
+| 3+              | 0.30 | 0.70 |
+
+Before the KNN even runs, the cumulative path **cohort-filters** the
+corpus by `(position, age, career_season_number)` and then
+**percentile-tier-filters** by career-to-date fantasy production. This
+is what fixes the Nacua/Boykin pathology that motivated PR #17.
+
+The single-vector snapshot pipeline above remains the *rookie
+fallback* (1 NFL season) and the *thin-cohort fallback* (when the
+strict cohort + percentile filter leaves <10 comps). See
+[docs/CUMULATIVE-ARC.md](CUMULATIVE-ARC.md) for the full technical writeup.

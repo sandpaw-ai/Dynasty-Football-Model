@@ -38,6 +38,7 @@ from ..sources.historical_ncaa_football import (
     load_ncaa_seasons,
     CONFERENCE_MULTIPLIER,
 )
+from ..scoring_rules import score_season
 
 
 # Position groups we vectorize. "FB" lumps into RB; everyone else drops out.
@@ -412,5 +413,380 @@ def vectorize_college_football_season(
     pos_stats = stats[ps.position]
     return tuple(
         (ps.features[k] - pos_stats[k][0]) / pos_stats[k][1]
+        for k in keys
+    )
+
+
+
+# ===========================================================================
+# Cumulative-career-arc vector (PR #17, v0.17.0)
+# ===========================================================================
+#
+# The single-season-snapshot vector above answers "what does this player
+# *look like* right now, per-game?" That's the wrong question for the
+# Puka Nacua / Jarrett Boykin pathology Phil flagged: Boykin had one
+# fluky starter stretch at age 24 that ate similar per-game shape to
+# Nacua's elite age-24 season, but the two had categorically different
+# CAREER-TO-DATE production (Nacua ~4191 receiving yds through 3
+# seasons; Boykin ~700).
+#
+# The cumulative-career-arc vector below answers a different question:
+# "Which historical players had THIS MUCH career-to-date production,
+# at this age, this many NFL seasons in?"
+#
+# Features encoded (per position, all z-score normalized within position
+# across the cohort of (position, age, career_season_number) tuples):
+#
+#   QB:  career PassYds, PassTD, Int, RushYds, RushTD, career fantasy,
+#        peak season fantasy, career GS, career durability, career-per-
+#        season averages, trajectory slope, peak-season age.
+#   RB:  career RushAtt, RushYds, RushTD, Rec, RecYds, scrimmage yds,
+#        scrimmage TDs, peak fantasy, career GS, career YPC, slope.
+#   WR/TE: career Tgt, Rec, RecYds, RecTD, target-share proxy (Tgt/yr),
+#        peak fantasy, career GS, career YPR, slope.
+#
+# Time-decay INSIDE the cumulative aggregation: recent=1.0, prior=0.7,
+# prior-2=0.5, prior-3+=0.35. The most recent season weighs the most.
+# (Career *totals* are also kept un-decayed so the absolute production
+# floor remains visible.)
+#
+# Production percentile within the (position, age, career_season_number)
+# cohort lives in comparables.py because it requires the full corpus
+# index; this module just emits the raw features.
+# ---------------------------------------------------------------------------
+
+
+# Cumulative feature names per position group. Order is stable: every
+# vector returned for a given position has this exact shape.
+QB_CUM_FEATURES = (
+    "career_pass_yds", "career_pass_td", "career_int",
+    "career_rush_yds", "career_rush_td",
+    "career_fantasy", "peak_fantasy",
+    "career_gs", "career_durability",
+    "fantasy_per_season", "slope", "peak_age_norm",
+    "decayed_pass_yds", "decayed_pass_td", "decayed_rush_yds", "decayed_fantasy",
+)
+RB_CUM_FEATURES = (
+    "career_rush_att", "career_rush_yds", "career_rush_td",
+    "career_rec", "career_rec_yds",
+    "career_scrimmage_yds", "career_scrimmage_td",
+    "career_fantasy", "peak_fantasy",
+    "career_gs", "career_ypc",
+    "fantasy_per_season", "slope", "peak_age_norm",
+    "decayed_rush_yds", "decayed_rec_yds", "decayed_fantasy",
+)
+WR_CUM_FEATURES = (
+    "career_tgt", "career_rec", "career_rec_yds", "career_rec_td",
+    "career_tgt_per_season",
+    "career_fantasy", "peak_fantasy",
+    "career_gs", "career_ypr",
+    "fantasy_per_season", "slope", "peak_age_norm",
+    "decayed_rec_yds", "decayed_rec", "decayed_fantasy",
+)
+TE_CUM_FEATURES = WR_CUM_FEATURES
+
+CUM_FEATURES_BY_POSITION: dict[str, tuple[str, ...]] = {
+    "QB": QB_CUM_FEATURES,
+    "RB": RB_CUM_FEATURES,
+    "WR": WR_CUM_FEATURES,
+    "TE": TE_CUM_FEATURES,
+}
+
+# Time-decay weights applied INSIDE the cumulative roll-up: most
+# recent NFL season gets 1.0, prior 0.7, prior-2 0.5, prior-3+ 0.35.
+# These weights ride alongside the un-decayed career-total features so
+# both the absolute career floor and the recency-tilted trajectory are
+# encoded simultaneously.
+_TIME_DECAY_WEIGHTS = (1.0, 0.7, 0.5, 0.35)
+
+
+def _time_decay_weight(seasons_back: int) -> float:
+    """seasons_back=0 means "this is the most recent season".
+
+    seasons_back=3+ collapses to 0.35.
+    """
+    if seasons_back < 0:
+        return 0.0
+    if seasons_back < len(_TIME_DECAY_WEIGHTS):
+        return _TIME_DECAY_WEIGHTS[seasons_back]
+    return _TIME_DECAY_WEIGHTS[-1]
+
+
+def _career_through_age_seasons(
+    seasons: list[PlayerSeason], age: float
+) -> list[PlayerSeason]:
+    """Return the subset of a player's seasons through (and including) the
+    given age. Seasons must be sorted by season ascending.
+
+    Age comparison is fuzzy: any season whose age is at most ``age``
+    counts (i.e. includes the age-A season itself). We rely on the
+    corpus's ``min_games=4`` filter for what counts as a "career
+    season" — sub-4-GP rows are excluded upstream.
+    """
+    if not seasons:
+        return []
+    out = []
+    for ps in seasons:
+        ps_age = ps.age if ps.age is not None else -1.0
+        if ps_age <= age + 0.5:  # +0.5 tolerance for floating-point age math
+            out.append(ps)
+    return out
+
+
+def _slope_per_year(values: list[float]) -> float:
+    """Linear-regression slope of per-season fantasy points across the
+    player's career so far (least-squares, intercept-free formulation
+    centered on the season midpoint).
+
+    Returns 0.0 if fewer than 2 seasons are available.
+    """
+    n = len(values)
+    if n < 2:
+        return 0.0
+    # x = 0..n-1, center at mean for stability
+    mx = (n - 1) / 2.0
+    my = sum(values) / n
+    num = sum((i - mx) * (v - my) for i, v in enumerate(values))
+    den = sum((i - mx) ** 2 for i in range(n))
+    if den == 0:
+        return 0.0
+    return num / den
+
+
+def _extract_cumulative_features(
+    seasons: list[PlayerSeason],
+    pos: str,
+    league_format: str,
+) -> dict[str, float]:
+    """Build the cumulative feature dict for a list of seasons (already
+    filtered through-age-A) at the given position.
+
+    All career counters use the RAW stat line from ``ps.raw`` so the
+    cumulative vector survives any future per-game-normalization
+    refactor. Fantasy points are re-scored under ``league_format``.
+    """
+    n = len(seasons)
+    if n == 0:
+        # Empty cohort — return all zeros at the correct shape.
+        return {k: 0.0 for k in CUM_FEATURES_BY_POSITION[pos]}
+
+    # Re-score fantasy points under the active format so the
+    # cumulative-arc vector reflects what the cohort will be worth in
+    # the format the user is actually playing.
+    fantasy_per_season = [score_season(ps.raw, league_format, position=pos) for ps in seasons]
+    peak_fantasy = max(fantasy_per_season) if fantasy_per_season else 0.0
+    peak_idx = fantasy_per_season.index(peak_fantasy) if fantasy_per_season else 0
+    peak_age = seasons[peak_idx].age if seasons[peak_idx].age is not None else 0.0
+    career_fantasy = sum(fantasy_per_season)
+
+    # Career totals (unweighted)
+    pass_yds = sum(_f(ps.raw.get("passing_yards")) for ps in seasons)
+    pass_td = sum(_f(ps.raw.get("passing_tds")) for ps in seasons)
+    interceptions = sum(_f(ps.raw.get("interceptions")) for ps in seasons)
+    rush_att = sum(_f(ps.raw.get("carries")) for ps in seasons)
+    rush_yds = sum(_f(ps.raw.get("rushing_yards")) for ps in seasons)
+    rush_td = sum(_f(ps.raw.get("rushing_tds")) for ps in seasons)
+    rec = sum(_f(ps.raw.get("receptions")) for ps in seasons)
+    rec_yds = sum(_f(ps.raw.get("receiving_yards")) for ps in seasons)
+    rec_td = sum(_f(ps.raw.get("receiving_tds")) for ps in seasons)
+    tgt = sum(_f(ps.raw.get("targets")) for ps in seasons)
+    career_games = sum(ps.games for ps in seasons)
+    # career_gs proxy: PFR sometimes lacks 'games_started'; if missing,
+    # fall back to ``games`` so the feature is non-zero.
+    career_gs = sum(
+        _f(ps.raw.get("games_started")) or _f(ps.games) for ps in seasons
+    )
+    # Durability: ratio of games played to the theoretical max
+    # (17 GP/season post-2021, 16 prior). We use 17 as the modern
+    # denominator since the cohort is recency-weighted anyway.
+    possible_games = 17.0 * n
+    durability = career_games / possible_games if possible_games else 0.0
+
+    scrimmage_yds = rush_yds + rec_yds
+    scrimmage_td = rush_td + rec_td
+
+    # Trajectory slope (per-season fantasy)
+    slope = _slope_per_year(fantasy_per_season)
+
+    # Decayed (recency-tilted) aggregates: last season has weight 1.0,
+    # prior 0.7, prior-2 0.5, prior-3+ 0.35.
+    # seasons is sorted oldest → newest, so index from the end.
+    decayed_pass_yds = 0.0
+    decayed_pass_td = 0.0
+    decayed_rush_yds = 0.0
+    decayed_rec_yds = 0.0
+    decayed_rec = 0.0
+    decayed_fantasy = 0.0
+    for i, ps in enumerate(reversed(seasons)):
+        w = _time_decay_weight(i)
+        decayed_pass_yds += w * _f(ps.raw.get("passing_yards"))
+        decayed_pass_td += w * _f(ps.raw.get("passing_tds"))
+        decayed_rush_yds += w * _f(ps.raw.get("rushing_yards"))
+        decayed_rec_yds += w * _f(ps.raw.get("receiving_yards"))
+        decayed_rec += w * _f(ps.raw.get("receptions"))
+        decayed_fantasy += w * fantasy_per_season[len(seasons) - 1 - i]
+
+    common: dict[str, float] = {
+        "career_pass_yds":   pass_yds,
+        "career_pass_td":    pass_td,
+        "career_int":        interceptions,
+        "career_rush_att":   rush_att,
+        "career_rush_yds":   rush_yds,
+        "career_rush_td":    rush_td,
+        "career_rec":        rec,
+        "career_rec_yds":    rec_yds,
+        "career_rec_td":     rec_td,
+        "career_tgt":        tgt,
+        "career_tgt_per_season": tgt / max(n, 1),
+        "career_scrimmage_yds": scrimmage_yds,
+        "career_scrimmage_td": scrimmage_td,
+        "career_fantasy":    career_fantasy,
+        "peak_fantasy":      peak_fantasy,
+        "career_gs":         career_gs,
+        "career_durability": durability,
+        "career_ypc":        _safe_div(rush_yds, rush_att),
+        "career_ypr":        _safe_div(rec_yds, rec),
+        "fantasy_per_season": career_fantasy / max(n, 1),
+        "slope":             slope,
+        # Normalize peak-age into roughly [-1, +1]: subtract 25 (typical
+        # NFL peak) and divide by 10 (career span). Keeps it in the
+        # same magnitude band as other z-score features pre-normalization.
+        "peak_age_norm":     (peak_age - 25.0) / 10.0 if peak_age else 0.0,
+        "decayed_pass_yds":  decayed_pass_yds,
+        "decayed_pass_td":   decayed_pass_td,
+        "decayed_rush_yds":  decayed_rush_yds,
+        "decayed_rec_yds":   decayed_rec_yds,
+        "decayed_rec":       decayed_rec,
+        "decayed_fantasy":   decayed_fantasy,
+    }
+    keys = CUM_FEATURES_BY_POSITION[pos]
+    return {k: common[k] for k in keys}
+
+
+@dataclass(frozen=True)
+class CareerArcVector:
+    """A cumulative-career-arc vector at a specific (player, age) state.
+
+    Stored alongside the corpus so KNN at query time is O(N) and the
+    historical arcs don't need rebuilding for each query.
+    """
+    player_id: str
+    player_name: str
+    position: str
+    age: float                       # the age through which this arc accumulates
+    career_season_number: int        # 1, 2, 3, … (count of seasons in corpus through age)
+    league_format: str
+    raw_features: dict[str, float]   # un-normalized features (for percentile math)
+    # Most-recent (latest in the cumulative window) PlayerSeason — used
+    # by projection.py to compute realized future career outcomes.
+    latest_season: PlayerSeason
+
+
+def build_career_arc_corpus(
+    corpus: list[PlayerSeason],
+    league_format: str = "sf_ppr",
+) -> list[CareerArcVector]:
+    """Materialize a cumulative-career-arc record for every (player,
+    age-through) checkpoint in the historical corpus.
+
+    For each player with N qualifying seasons we emit N records:
+    "through age of season-1", "through age of season-2", …, "through
+    age of season-N". Each record exposes the cumulative-through-age
+    feature vector.
+
+    The result is the historical corpus the cohort-filtered KNN searches
+    over.
+    """
+    by_pid: dict[str, list[PlayerSeason]] = {}
+    for ps in corpus:
+        by_pid.setdefault(ps.player_id, []).append(ps)
+    for arr in by_pid.values():
+        arr.sort(key=lambda x: x.season)
+
+    out: list[CareerArcVector] = []
+    for pid, seasons in by_pid.items():
+        for i, ps in enumerate(seasons, start=1):
+            if ps.age is None:
+                continue
+            sub = seasons[:i]
+            feats = _extract_cumulative_features(sub, ps.position, league_format)
+            out.append(CareerArcVector(
+                player_id=pid,
+                player_name=ps.player_name,
+                position=ps.position,
+                age=float(ps.age),
+                career_season_number=i,
+                league_format=league_format,
+                raw_features=feats,
+                latest_season=ps,
+            ))
+    return out
+
+
+def vectorize_career_through_age(
+    player_id: str,
+    age: float,
+    corpus: list[PlayerSeason],
+    league_format: str = "sf_ppr",
+) -> Optional[CareerArcVector]:
+    """Convenience helper exposed at module level for direct callers.
+
+    Builds (on demand) the cumulative-career-arc vector for one
+    (player, age) state. Returns ``None`` if the player has no
+    qualifying season at or before ``age``.
+    """
+    arr = [ps for ps in corpus if ps.player_id == player_id and ps.age is not None]
+    arr.sort(key=lambda x: x.season)
+    sub = _career_through_age_seasons(arr, age)
+    if not sub:
+        return None
+    pos = sub[-1].position
+    feats = _extract_cumulative_features(sub, pos, league_format)
+    return CareerArcVector(
+        player_id=player_id,
+        player_name=sub[-1].player_name,
+        position=pos,
+        age=float(sub[-1].age),
+        career_season_number=len(sub),
+        league_format=league_format,
+        raw_features=feats,
+        latest_season=sub[-1],
+    )
+
+
+def compute_cumulative_zscore_stats(
+    arcs: list[CareerArcVector],
+) -> dict[str, dict[str, tuple[float, float]]]:
+    """Per-(position, feature) (mean, stdev) tuples for the cumulative
+    corpus, used to z-score-normalize a CareerArcVector for cosine
+    similarity. Mirrors :func:`compute_zscore_stats` for the snapshot
+    vector.
+    """
+    by_pos: dict[str, list[CareerArcVector]] = {}
+    for a in arcs:
+        by_pos.setdefault(a.position, []).append(a)
+
+    out: dict[str, dict[str, tuple[float, float]]] = {}
+    for pos, group in by_pos.items():
+        keys = CUM_FEATURES_BY_POSITION[pos]
+        per_feature: dict[str, tuple[float, float]] = {}
+        for k in keys:
+            vals = [a.raw_features[k] for a in group]
+            mu = statistics.fmean(vals) if vals else 0.0
+            sd = statistics.pstdev(vals) if len(vals) > 1 else 0.0
+            per_feature[k] = (mu, sd if sd > 1e-9 else 1.0)
+        out[pos] = per_feature
+    return out
+
+
+def vectorize_cumulative(
+    arc: CareerArcVector,
+    stats: dict[str, dict[str, tuple[float, float]]],
+) -> tuple[float, ...]:
+    """Z-score normalized vector for a CareerArcVector — used in KNN."""
+    keys = CUM_FEATURES_BY_POSITION[arc.position]
+    pos_stats = stats[arc.position]
+    return tuple(
+        (arc.raw_features[k] - pos_stats[k][0]) / pos_stats[k][1]
         for k in keys
     )

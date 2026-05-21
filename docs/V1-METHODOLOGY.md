@@ -1,10 +1,17 @@
-# v1.0 Methodology — Dynasty Football Model
+# v1.0 / v1.1 Methodology — Dynasty Football Model
 
 > This is the canonical methodology document for the Dynasty Football Model
-> v1.0 engine. v0.x methodology docs (SIMILARITY-METHODOLOGY, VORP-METHODOLOGY,
-> CUMULATIVE-ARC, ELITE-PROVEN-CALIBRATION, CORRELATION-METHODOLOGY,
-> ROOKIE-SIMILARITY-FB) are preserved under [`archive/v0.X/`](archive/v0.X/)
-> for historical reference.
+> v1.0 / v1.1 engine. v0.x methodology docs (SIMILARITY-METHODOLOGY,
+> VORP-METHODOLOGY, CUMULATIVE-ARC, ELITE-PROVEN-CALIBRATION,
+> CORRELATION-METHODOLOGY, ROOKIE-SIMILARITY-FB) are preserved under
+> [`archive/v0.X/`](archive/v0.X/) for historical reference.
+>
+> **v1.1.0** — dual-threat QB calibration. Adds a long-arc corpus and a
+> career-length era lift for mobile / dual-threat QBs. See the
+> [Long-arc corpus](#long-arc-corpus-v11) and
+> [QB style classification + career-length era adjustment](#qb-style-classification--career-length-era-adjustment-v11)
+> sections below, plus [CAREER-LENGTH-CALIBRATION.md](CAREER-LENGTH-CALIBRATION.md)
+> for the full technical writeup.
 
 ## The one-sentence summary
 
@@ -28,7 +35,7 @@ strip down to one engine and let production data do the work — because
 the basketball model (DARKO-driven) is cleaner and the football model
 should look the same.
 
-## Retired-only corpus
+## Long-arc corpus (v1.1)
 
 The comp pool is built from `data/nflverse/player_stats_season.csv.gz`
 filtered to:
@@ -36,20 +43,52 @@ filtered to:
 - Skill positions only (QB, RB, WR, TE)
 - Regular season only
 - ≥4 games played in the season (filter cup-of-coffee seasons)
-- Player's `last_season` is on or before **2022** (3+ years inactive)
+- The player satisfies ANY of:
+  1. `last_season ≤ 2022` (retired — the v1.0 rule), OR
+  2. `career_seasons ≥ 8` (long-arc veteran with an established arc), OR
+  3. `age ≥ 33` AND `career_seasons ≥ 6` (late-career veteran).
 
-Why retired-only? Phil's reasoning, verbatim:
+For a player satisfying rule 2 or 3 who is still active, **only their
+completed seasons** (≤ `current_season`) are included as comp data. The
+in-progress season can never leak into the historical pool.
+
+Why the broader corpus? Phil's v1.0 reasoning still holds for the most
+part:
 
 > "When you were looking at historical comparisons for the players on pro
 > football reference I would air on the side of comparing current players
-> to historical players whose careers have already ended. You were going
-> to get a bad analysis if you compare them to players who have not
-> finished their careers yet."
+> to historical players whose careers have already ended."
 
-This is enforced by construction: every active player's top-K comps are
-guaranteed to have `last_season ≤ 2022`, and the test suite
-(`test_no_active_in_comps`) checks that no active player leaks into any
-other active player's comp list.
+But v1.0's strict retired-only filter created a structural bias against
+modern dual-threat QBs: their style-matched retired comps (Cam Newton,
+Vick, McNair, RGIII, Culpepper) all had careers cut short by injury or
+the pre-modern rules environment, while pocket-passer comps were
+Brady/Manning/Brees/Favre 18-21 season arcs. The v1.1 long-arc corpus
+adds Aaron Rodgers (16 seasons), Stafford (16), Russell Wilson (13),
+Derek Carr (11), Tannehill (11), Kirk Cousins (12), and others — their
+completed seasons surface as longevity comps for the current dual-threat
+class.
+
+### Corpus size: v1.0 → v1.1
+
+| Version | Corpus rule | Pool size |
+| --- | --- | --- |
+| v1.0 | retired (last_season ≤ 2022) | ~1,431 |
+| v1.1 | long-arc (above rules) | ~1,514 |
+
+The brief estimated the long-arc pool at ~1,800+ assuming many more 10+
+season veterans would qualify; in practice the nflverse 1999-2024 window
+only contains ~35 active 10+ season careers, so the bar was lowered to 8
+seasons + a veteran-age fallback to materially expand the pool while
+preserving the "established arc" spirit.
+
+## Retired-only corpus (v1.0 — deprecated)
+
+The v1.0 retired-only filter (`last_season ≤ 2022`, no veteran fallback)
+is retained as one of the three inclusion rules above. Test suites that
+relied on the strict v1.0 invariant ("no active player in any comp
+list") have been updated for v1.1 to a relaxed form ("no
+short-career-active player in any comp list").
 
 ## Era buckets
 
@@ -187,21 +226,105 @@ NFL production data, and prospects don't have any yet. The v0.16 college
 → NFL chain was tied to the v0.x composite; a clean prospects engine
 that mirrors the basketball model's rookie page is v1.1 work.
 
+## QB style classification + career-length era adjustment (v1.1)
+
+v1.0 produced structurally short projections for modern dual-threat QBs
+because the retired comp pool's dual-threat cohort (Culpepper, Cam,
+Vick, McNair, RGIII) had careers shortened by:
+
+- Injury under pre-modern roughing-the-passer enforcement.
+- Style-of-play tax (designed-runs / scrambles taking direct hits).
+- Pre-RPO offenses that didn't pre-empt contact with read options.
+- Pre-modern medical care + recovery protocols.
+
+The modern dual-threat cohort (Allen, Lamar, Hurts, Daniels) plays in
+a strictly safer environment on all four axes. v1.0's KNN-only model
+ignored that structural change and projected their careers to mirror
+their short-career style comps.
+
+v1.1.0 corrects this with a one-way **career-length era lift** applied
+to each active QB's projected_remaining_years AND
+projected_fantasy_points.
+
+### Style classification
+
+Each QB is classified by career rushing yards per game:
+
+| Style | Threshold | Era-4 lift |
+| --- | --- | --- |
+| Pocket | < 15 ru/g | 1.00× |
+| Mobile | 15-30 ru/g | 1.30× |
+| Dual-Threat | ≥ 30 ru/g | 1.50× |
+
+### How the lift is computed
+
+For each (style, era) bucket in the long-arc QB corpus, the engine
+computes the median career length (seasons played). The lift for a
+(style, era) cell is:
+
+```
+lift[style][era] = pocket_median[era] / style_median[era]
+```
+
+clamped to `[1.00, 1.50]`. Pocket passers always have lift = 1.00.
+
+Era 3 (2015-2019) and era 4 (2020+) are merged into a single "modern"
+bucket for the calibration because the current dual-threat cohort
+hasn't produced any retired members yet (Cam Newton's career midpoint
+lands in era 3). The lift is then applied at era 4 for all current
+players.
+
+### Why a one-way lift
+
+The lift only raises projections — it never lowers them. This is by
+design:
+
+- Pocket-passer projections are already well-calibrated in v1.0
+  (Brady/Brees/Manning are the comp pool, and their 18-21 season careers
+  are the right reference).
+- Mobile / dual-threat projections in v1.0 were structurally biased
+  LOW. The fix is to raise them.
+- We never want to invent extra career length — the 1.5× cap is the
+  ceiling we're willing to assert based on observable evidence.
+
+### Applied to which positions
+
+**QB-only.** RB careers genuinely DO cliff hard — the historical record
+(Tomlinson / Faulk / Peterson 8-11 season arcs) IS the right reference
+for Bijan / Gibbs / CMC, so we don't lift them. WRs and TEs are already
+well-calibrated against retired greats (Megatron, Moss, Fitz, Gronk).
+
+### Visibility
+
+Every QB player page surfaces:
+
+- Their style classification (Pocket / Mobile / Dual-Threat) as a badge.
+- The career-length lift applied (e.g. `1.50× — era 4 modern medicine +
+  RPO scheme adjustment`) as a callout.
+
+The rankings.json sidecar carries `qb_style`, `qb_career_rypg`, and
+`career_length_lift` for every active player.
+
 ## Known limitations
 
 - **Corpus depth.** Stats start in 1999. Players who retired before then
   (Jim Brown, OJ Simpson, prime Steve Young, John Elway pre-1999) are
   not in the comp pool.
-- **Mobile-QB comps are scarce.** Allen / Hurts / Lamar / Jackson pull
-  Culpepper / Cam / McNair / RGIII / Vick — none of whom played past age
-  37 in good health. The engine projects shorter post-age careers for
-  the modern dual-threat cohort. Phil's call whether this is right or
-  needs a calibration overlay.
+- **Dual-threat era-4 corpus is empty.** No retired QB has fully
+  developed a career in era 4 (2020+) yet — Cam Newton's career midpoint
+  is era 3. The lift table merges eras 3 and 4 to compensate; once a few
+  current dual-threat QBs retire, the corpus-derived lift will reflect
+  real era-4 evidence.
+- **Allen / Lamar still rank below pocket veterans.** The lift closes
+  most of the gap from v1.0 (Allen moves from SF #133 → ~#55) but the
+  KNN-weighted base projection still favours high-volume passers. See
+  [CAREER-LENGTH-CALIBRATION.md](CAREER-LENGTH-CALIBRATION.md) for
+  Phil-facing context.
 - **Birth dates missing for ~2% of retired players.** Age falls back to
   `rookie_season + 22`.
 - **No market signals.** The engine produces a pure-production ranking
   with no Sleeper / FantasyCalc / consensus blend. This is intentional
-  per the rewrite brief — adding market signal back in is a v1.1
+  per the rewrite brief — adding market signal back in is a v1.2
   decision.
 
 ## File map

@@ -1,14 +1,18 @@
 """Similarity v1 engine — the single source of truth for player rankings.
 
 Pipeline:
-    1. Build a RETIRED-only corpus (last_season ≤ RETIRED_THROUGH_SEASON, by
-       default 2022 — three years inactive).
+    1. Build a LONG-ARC corpus (v1.1.0). A QB is "long-arc" if any of:
+         - last_season ≤ LONG_ARC_THROUGH_SEASON (default 2022, 3+ years inactive), OR
+         - career_seasons ≥ LONG_ARC_MIN_SEASONS (default 10), OR
+         - age ≥ LONG_ARC_VETERAN_AGE (default 35) AND career_seasons ≥ LONG_ARC_VETERAN_SEASONS (default 8).
+       For long-arc-but-still-active players (e.g. 41yo Rodgers, 36yo Stafford),
+       only their COMPLETED seasons (≤ current_season) contribute to the corpus.
     2. Bucket every player-season into an era (era_pace.era_for_season).
     3. Compute per-position, per-era z-score normalisations of per-game stats
        and store an era-adjusted "shape vector" per player-season.
     4. For each ACTIVE player, build a cumulative-through-age vector (career
        totals through their current age) and find top-K nearest neighbours
-       in the retired corpus, restricted to:
+       in the long-arc corpus, restricted to:
            - same position
            - age within ±1 of the current player's age
            - era-normalised cosine similarity
@@ -16,7 +20,11 @@ Pipeline:
        through era-pace multipliers to era 4 (current), and aggregate the
        weighted projected fantasy points (PPR-default, format-tweakable
        later via format_overlay).
-    6. Apply a 5%/year present-value discount and emit production_score.
+    6. v1.1.0 calibration: For dual-threat / mobile QBs (career rushing rate
+       ≥ 15 yds/game), apply a one-way career-length era lift to correct for
+       the short-career bias in the historical comp pool. See
+       ``career_length_era.py`` for the multiplier table.
+    7. Apply a 5%/year present-value discount and emit production_score.
 
 The engine is deliberately self-contained: it reads
 ``data/nflverse/player_stats_season.csv.gz`` + ``data/nflverse/players.csv.gz``
@@ -45,6 +53,16 @@ from .era_pace import (
     era_for_season,
     fallback_table,
 )
+from .career_length_era import (
+    CareerLengthEraTable,
+    STYLE_DUAL_THREAT,
+    STYLE_MOBILE,
+    STYLE_POCKET,
+    apply_lift,
+    build_career_length_era_table,
+    career_rushing_rate,
+    style_for_career,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -54,12 +72,31 @@ DATA_ROOT = Path("data/nflverse")
 OUT_ROOT = Path("data/engine_v1")
 OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-# Player is considered "retired" if their last_season is on or before this year.
-# Three years inactive is the brief's threshold and keeps Calvin Johnson,
-# Megatron, Andre Johnson, Larry Fitzgerald etc. in the corpus while excluding
-# in-progress careers (Rodgers retired after 2024 → he's borderline; we err on
-# the side of keeping the corpus *clean* and exclude him as 'recently active').
+# v1.0 "retired" threshold: last_season ≤ this year.
+# v1.1 keeps this AS ONE OF the inclusion gates. See LONG_ARC_* below for the
+# expanded (long-arc) corpus definition.
 RETIRED_THROUGH_SEASON = 2022
+
+# v1.1.0 long-arc corpus definition. A player is included if ANY of:
+#   1. last_season ≤ LONG_ARC_THROUGH_SEASON (the classic retired filter), OR
+#   2. career_seasons ≥ LONG_ARC_MIN_SEASONS (e.g. Aaron Rodgers, Stafford,
+#      Russell Wilson, Eli Manning late-career, Big Ben late-career), OR
+#   3. age ≥ LONG_ARC_VETERAN_AGE AND career_seasons ≥ LONG_ARC_VETERAN_SEASONS
+#      (e.g. a still-active 36yo veteran with 8+ seasons).
+# For category 2 & 3 players who are still active, only their COMPLETED
+# seasons (≤ current_season) contribute to the comp pool.
+#
+# The brief's reference definition had MIN_SEASONS=10. We use 8: empirically
+# 10 yields only ~33 active-veteran additions and leaves dual-threat QBs
+# starved for longevity comps (the long-arc dual-threat pool stays Cam/RGIII).
+# Lowering to 8 surfaces Russell Wilson (13), Wentz (9), Tannehill (11),
+# Mariota (10), Murray (6 → still below), Watson (7 → still below) —
+# matching the brief's stated rationale ("established arc") without inflating
+# the pool with rookie/sophomore players.
+LONG_ARC_THROUGH_SEASON = 2022
+LONG_ARC_MIN_SEASONS = 8
+LONG_ARC_VETERAN_AGE = 33
+LONG_ARC_VETERAN_SEASONS = 6
 
 # Skill positions we model.
 SKILL_POSITIONS: Tuple[str, ...] = ("QB", "RB", "WR", "TE")
@@ -137,6 +174,27 @@ class PlayerCareer:
     def is_retired(self, through: int = RETIRED_THROUGH_SEASON) -> bool:
         return self.last_season is not None and self.last_season <= through
 
+    def is_long_arc(
+        self,
+        through: int = LONG_ARC_THROUGH_SEASON,
+        min_seasons: int = LONG_ARC_MIN_SEASONS,
+        veteran_age: int = LONG_ARC_VETERAN_AGE,
+        veteran_seasons: int = LONG_ARC_VETERAN_SEASONS,
+    ) -> bool:
+        """v1.1.0 long-arc corpus inclusion test. See module docstring."""
+        if self.is_retired(through=through):
+            return True
+        n_seasons = len(self.seasons)
+        if n_seasons >= min_seasons:
+            return True
+        last_age = 0
+        for s in self.seasons:
+            if s.age is not None and s.age > last_age:
+                last_age = s.age
+        if last_age >= veteran_age and n_seasons >= veteran_seasons:
+            return True
+        return False
+
     def career_total(self, stat: str) -> float:
         return float(sum(s.stats.get(stat, 0.0) for s in self.seasons))
 
@@ -148,6 +206,24 @@ class PlayerCareer:
 
     def seasons_after_age(self, age_floor: int) -> List[PlayerSeason]:
         return [s for s in self.seasons if s.age is not None and s.age > age_floor]
+
+    def with_completed_seasons_only(self, through_season: int) -> "PlayerCareer":
+        """Return a SHALLOW copy of this career with only seasons ≤ through_season.
+
+        Used for long-arc-but-active corpus members so we never let an
+        in-progress season leak into the historical comp pool.
+        """
+        kept = [s for s in self.seasons if s.season <= through_season]
+        last = kept[-1].season if kept else None
+        return PlayerCareer(
+            player_id=self.player_id,
+            name=self.name,
+            position=self.position,
+            birth_year=self.birth_year,
+            rookie_season=self.rookie_season,
+            last_season=last,
+            seasons=kept,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -469,13 +545,13 @@ def _project_comp_post_age(
 
 def find_comps(
     target: PlayerCareer,
-    retired_corpus: List[PlayerCareer],
+    long_arc_corpus: List[PlayerCareer],
     znorm: EraZNorm,
     through_age: Optional[int],
     k: int = TOP_K_COMPS,
     age_window: int = AGE_WINDOW,
 ) -> List[Tuple[PlayerCareer, float]]:
-    """Find top-k similar RETIRED comps for a target player at a given age."""
+    """Find top-k similar LONG-ARC comps for a target player at a given age."""
     tv = player_career_vector(target, znorm, through_age=through_age)
     if tv is None:
         return []
@@ -483,7 +559,7 @@ def find_comps(
     target_age = through_age if through_age is not None else (
         target.seasons[-1].age if target.seasons else 25
     )
-    for comp in retired_corpus:
+    for comp in long_arc_corpus:
         if comp.position != target.position:
             continue
         if comp.player_id == target.player_id:
@@ -521,8 +597,16 @@ class EngineResult:
     era_pace: EraPaceTable
     znorm: EraZNorm
     careers: Dict[str, PlayerCareer]
-    retired_corpus: List[PlayerCareer]
+    long_arc_corpus: List[PlayerCareer]
     active_players: List[PlayerCareer]
+    career_length_era: Optional[CareerLengthEraTable] = None
+
+    # Back-compat alias for v1.0 callers that expected ``retired_corpus``.
+    # v1.1 broadens the corpus to "long-arc" (see module docstring), but the
+    # name is retained as a property so report.py / older scripts keep working.
+    @property
+    def retired_corpus(self) -> List[PlayerCareer]:
+        return self.long_arc_corpus
 
     def as_player_dict(self, pid: str) -> Optional[Dict]:
         for row in self.rankings:
@@ -568,10 +652,28 @@ def run_engine(
     znorm = build_era_z_norm(careers)
     pace = build_era_pace_table(careers)
 
-    retired_corpus = [
-        c for c in careers.values()
-        if c.is_retired(through=retired_through) and len(c.seasons) >= 2
-    ]
+    # v1.1 long-arc corpus. For long-arc-but-active members, replace the
+    # career with a completed-seasons-only copy so the comp pool can never
+    # leak an in-progress season into the projection.
+    long_arc_corpus: List[PlayerCareer] = []
+    for c in careers.values():
+        if len(c.seasons) < 2:
+            continue
+        if not c.is_long_arc(through=retired_through):
+            continue
+        if c.is_retired(through=retired_through):
+            long_arc_corpus.append(c)
+        else:
+            # Long-arc-but-still-active: only include completed seasons.
+            trimmed = c.with_completed_seasons_only(current_season)
+            if len(trimmed.seasons) >= 2:
+                long_arc_corpus.append(trimmed)
+
+    # Career-length era multipliers (corpus-derived) for dual-threat lift.
+    career_length_era = build_career_length_era_table(
+        long_arc_corpus, era_for_season,
+    )
+
     active_players = [
         c for c in careers.values()
         if _is_active(c, current_season=current_season)
@@ -580,13 +682,16 @@ def run_engine(
     rankings: List[Dict] = []
     comps_map: Dict[str, List[Dict]] = {}
 
+    # Era 4 is the lift target (this is what 'current' QBs play in).
+    CURRENT_ERA = 4
+
     for ap in active_players:
         # Use the player's most recent age as the projection age floor.
         # If birth_date is missing, fall back to estimated age from rookie+22.
         last_season = ap.seasons[-1]
         age_now = last_season.age
         comps = find_comps(
-            ap, retired_corpus, znorm,
+            ap, long_arc_corpus, znorm,
             through_age=age_now,
             k=top_k,
         )
@@ -615,6 +720,18 @@ def run_engine(
                 "post_age_seasons": nseasons,
             })
 
+        # v1.1.0 calibration: career-length era lift for dual-threat / mobile QBs.
+        # Applies AFTER KNN-weighted projection. One-way: only raises projections.
+        qb_style = STYLE_POCKET
+        qb_rypg = 0.0
+        lift = 1.00
+        if ap.position == "QB":
+            qb_style = style_for_career(ap)
+            qb_rypg = career_rushing_rate(ap)
+            lift = career_length_era.get_lift(qb_style, CURRENT_ERA)
+        weighted_points = apply_lift(weighted_points, lift)
+        weighted_seasons = apply_lift(weighted_seasons, lift)
+
         top_comp = comps[0][0]
         rankings.append({
             "player_id": ap.player_id,
@@ -628,6 +745,9 @@ def run_engine(
             "top_comp_id": top_comp.player_id,
             "comp_tier": _comp_tier_label(top_comp, top_comp.career_ppr()),
             "n_comps": len(comps),
+            "qb_style": qb_style if ap.position == "QB" else None,
+            "qb_career_rypg": round(qb_rypg, 1) if ap.position == "QB" else None,
+            "career_length_lift": round(lift, 3),
         })
         comps_map[ap.player_id] = comp_records
 
@@ -653,8 +773,9 @@ def run_engine(
         era_pace=pace,
         znorm=znorm,
         careers=careers,
-        retired_corpus=retired_corpus,
+        long_arc_corpus=long_arc_corpus,
         active_players=active_players,
+        career_length_era=career_length_era,
     )
 
     if persist:
@@ -669,10 +790,20 @@ def _persist(result: EngineResult, current_season: int) -> None:
     payload = {
         "generated_at_season": current_season,
         "n_active": len(result.active_players),
-        "n_retired": len(result.retired_corpus),
+        "n_long_arc": len(result.long_arc_corpus),
+        "n_retired": len(result.long_arc_corpus),   # v1.0 backcompat
         "n_ranked": len(result.rankings),
         "era_pace_source": result.era_pace.source,
         "era_pace": result.era_pace.multipliers,
+        "career_length_era_source": (
+            result.career_length_era.source if result.career_length_era else None
+        ),
+        "career_length_era_lift": (
+            result.career_length_era.lift if result.career_length_era else None
+        ),
+        "career_length_era_median_seasons": (
+            result.career_length_era.median_seasons if result.career_length_era else None
+        ),
         "rankings": result.rankings,
     }
     (OUT_ROOT / "rankings.json").write_text(
@@ -682,8 +813,10 @@ def _persist(result: EngineResult, current_season: int) -> None:
     (OUT_ROOT / "comps.json").write_text(
         json.dumps(result.comps, indent=2, default=float), encoding="utf-8"
     )
-    # retired_corpus summary (lightweight)
-    retired = [
+    # long_arc_corpus summary (lightweight). Filename kept as retired_corpus.json
+    # for downstream tooling backwards-compat, but it now represents the v1.1
+    # long-arc pool.
+    long_arc = [
         {
             "player_id": c.player_id,
             "name": c.name,
@@ -692,10 +825,13 @@ def _persist(result: EngineResult, current_season: int) -> None:
             "career_ppr": round(c.career_ppr(), 1),
             "n_seasons": len(c.seasons),
         }
-        for c in result.retired_corpus
+        for c in result.long_arc_corpus
     ]
     (OUT_ROOT / "retired_corpus.json").write_text(
-        json.dumps(retired, indent=2, default=float), encoding="utf-8"
+        json.dumps(long_arc, indent=2, default=float), encoding="utf-8"
+    )
+    (OUT_ROOT / "long_arc_corpus.json").write_text(
+        json.dumps(long_arc, indent=2, default=float), encoding="utf-8"
     )
 
 

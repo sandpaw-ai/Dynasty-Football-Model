@@ -141,6 +141,12 @@ footer { color: var(--muted); font-size: 12px; padding: 32px 40px; text-align: c
 .comp-tier-elite { color: #b45309; font-weight: 600; }
 .comp-tier-above-avg { color: #047857; font-weight: 600; }
 .comp-tier-starter { color: #1d4ed8; }
+.style-badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em; margin-left: 4px;
+  background: rgba(255,255,255,0.15); color: var(--header-text); }
+.style-pocket { background: rgba(96, 165, 250, 0.25); }
+.style-mobile { background: rgba(167, 139, 250, 0.30); }
+.style-dual_threat { background: rgba(250, 204, 21, 0.35); color: #fde68a; }
 .comp-tier-deep { color: var(--muted); }
 """
 
@@ -232,20 +238,27 @@ def _build_rankings(engine: EngineResult, latest_ts: datetime, league_label: str
 
 <h2>Dynasty Football <span class="accent">Rankings</span></h2>
 <p class="lede">A clean, similarity-driven dynasty NFL ranking. Each active
-player is matched against <strong>retired</strong> NFL players (last season ≤ 2022)
-with similar production shape at the same career age. Their realised
+player is matched against <strong>long-arc</strong> NFL players (retired ∪ 8+ season
+veterans) with similar production shape at the same career age. Their realised
 remaining careers are then projected forward through modern era-pace
-multipliers and scored under {_esc(league_label)} scoring.</p>
+multipliers, scored under {_esc(league_label)} scoring, and (for dual-threat /
+mobile QBs) lifted by a career-length era adjustment to correct for the
+short-career bias in the historical comp pool.</p>
 
 <div class="kpi-row">
   <div class="kpi"><div class="num">{len(engine.rankings):,}</div><div class="label">Active players ranked</div></div>
-  <div class="kpi"><div class="num">{len(engine.retired_corpus):,}</div><div class="label">Retired comp pool</div></div>
-  <div class="kpi"><div class="num">1</div><div class="label">Engine · v1.0 (no composite)</div></div>
+  <div class="kpi"><div class="num">{len(engine.long_arc_corpus):,}</div><div class="label">Long-arc comp pool</div></div>
+  <div class="kpi"><div class="num">v1.1</div><div class="label">Engine · dual-threat calibrated</div></div>
 </div>
 
-<div class="callout"><strong>One engine, one source of truth.</strong> v1.0
-strips the v0.x composite of 10+ ranking sources and replaces it with a single
-similarity engine. See <a href="methodology.html">Methodology</a>.</div>
+<div class="callout"><strong>v1.1.0 — dual-threat QB calibration.</strong> The
+v1.0 retired-only similarity engine systematically underprojected modern
+dual-threat QBs (Allen, Lamar, Hurts, Daniels) because their style-matched
+retired comp pool had careers cut short by injury and the pre-modern rules
+environment. v1.1 (a) broadens the comp pool to long-arc veterans like Aaron
+Rodgers, Stafford and Russell Wilson, and (b) applies a per-style, per-era
+career-length lift (capped at 1.5×). See
+<a href="methodology.html">Methodology</a>.</div>
 
 <div class="controls">
   <input id="q" placeholder="Search by player name…" type="search">
@@ -612,15 +625,48 @@ things.</p>
 # ---------------------------------------------------------------------------
 
 def _player_header(row: Dict, team: str, league_label: str) -> str:
+    # v1.1.0: surface QB style classification and career-length lift.
+    qb_style = row.get("qb_style")
+    style_badge = ""
+    if row.get("position") == "QB" and qb_style:
+        style_label = {
+            "pocket": "Pocket",
+            "mobile": "Mobile",
+            "dual_threat": "Dual-Threat",
+        }.get(qb_style, qb_style.title())
+        rypg = row.get("qb_career_rypg") or 0.0
+        style_badge = (
+            f" · <span class=\"style-badge style-{qb_style}\">"
+            f"{style_label} ({rypg:.1f} ru/g)</span>"
+        )
+    lift = row.get("career_length_lift") or 1.0
+    lift_panel = ""
+    if row.get("position") == "QB" and lift > 1.0:
+        era_note = (
+            "era 4 modern medicine + RPO scheme adjustment"
+            if qb_style == "dual_threat"
+            else "era 4 mobile-QB longevity adjustment"
+        )
+        lift_panel = (
+            f"<div class=\"callout\" style=\"margin-top:14px\">"
+            f"<strong>{('Dual-threat' if qb_style=='dual_threat' else 'Mobile')} "
+            f"career-length lift: {lift:.2f}×</strong> — {era_note}. "
+            f"v1.1.0 corrects for the short-career bias in the historical "
+            f"comp pool by lifting projected_remaining_years and "
+            f"projected_fantasy_points by this factor. The lift is one-way "
+            f"(never lowers a projection) and capped at 1.5×."
+            f"</div>"
+        )
     return f"""<div class="player-header">
   <h1>{_esc(row['name'])}</h1>
-  <div class="sub">{_pos_badge(row['position'])} · {_esc(team)} · Rank #{row['overall_rank']} · Tier T{row['tier']}</div>
+  <div class="sub">{_pos_badge(row['position'])} · {_esc(team)} · Rank #{row['overall_rank']} · Tier T{row['tier']}{style_badge}</div>
   <div class="metrics">
     <div class="metric"><div class="num">{row['production_score']:.0f}</div><div class="label">Production score</div></div>
     <div class="metric"><div class="num">{row['age']}</div><div class="label">Age</div></div>
     <div class="metric"><div class="num">{row['projected_years_remaining']:.1f}</div><div class="label">Yrs remaining</div></div>
-    <div class="metric"><div class="num">{row['n_comps']}</div><div class="label">Retired comps</div></div>
+    <div class="metric"><div class="num">{row['n_comps']}</div><div class="label">Long-arc comps</div></div>
   </div>
+  {lift_panel}
   <div style="margin-top:14px"><a href="../rankings.html" style="color:var(--header-text);opacity:0.8;font-size:13px">← back to rankings</a></div>
 </div>"""
 
@@ -641,15 +687,17 @@ def _build_player_page(row: Dict, comps: List[Dict], team: str,
             f"</tr>"
         )
 
-    body = f"""<div class="container">
+    body = f"""{_player_header(row, team, league_label)}
+<div class="container">
 
 <h2>Career-Arc <span class="accent">Comparables</span></h2>
-<p class="lede">The top-10 most similar <em>retired</em> NFL players at this
+<p class="lede">The top-10 most similar <em>long-arc</em> NFL players at this
 career stage, by era-normalised production shape. Each row's
 "Projected pts" is what their post-age-{row['age']} career
 would have looked like under modern era-pace and {_esc(league_label)} scoring,
 time-discounted 5%/year. The player's production score is the
-similarity-weighted average across all {row['n_comps']} comps.</p>
+similarity-weighted average across all {row['n_comps']} comps, with v1.1.0's
+career-length era lift applied (see player header above).</p>
 
 <table>
 <thead><tr>

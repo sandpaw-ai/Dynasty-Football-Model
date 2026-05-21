@@ -15,6 +15,181 @@ Format for each entry:
 
 ---
 
+## v1.1.0 — Dual-threat QB career-length calibration
+
+**Date:** 2026-05-21
+
+A *calibration*, not a rewrite. v1.0's retired-only similarity engine is
+internally consistent but produces a SF #133 ranking for Josh Allen and a SF
+#2 ranking for Brock Purdy. That's a sample-era artefact, not a model insight.
+v1.1.0 corrects it without touching the v1.0 architecture.
+
+### The dual-threat QB problem
+
+v1.0's KNN engine matches Josh Allen to Daunte Culpepper (sim 0.979),
+Cam Newton (0.974), and Steve McNair (0.953) — all retired dual-threat
+style comps with careers cut short by injury (Culpepper's knee, Cam's
+shoulder, McNair's chronic pain) or pre-modern usage patterns. Their
+post-age-28 career projections were 3-6 seasons. Brock Purdy, meanwhile,
+matches to Drew Brees, Peyton Manning, Tom Brady — 18-21 season arcs.
+
+The engine was correctly applying the historical comp pool. The pool was
+the problem: modern dual-threat QBs (Allen, Lamar, Hurts, Daniels) play in
+a strictly safer rules + medical environment than Cam/RGIII/Vick did.
+
+### What changed
+
+Two compounding mechanisms (Phil's "option 3" — implement both):
+
+#### 1. Long-arc corpus (loosened comp pool)
+
+The v1.0 "last_season ≤ 2022" filter is replaced with a long-arc rule:
+
+| Inclusion rule | v1.0 | v1.1 |
+| --- | --- | --- |
+| `last_season ≤ 2022` (retired) | ✓ | ✓ |
+| `career_seasons ≥ 8` (established arc) | ✗ | ✓ |
+| `age ≥ 33 AND career_seasons ≥ 6` (late-career veteran) | ✗ | ✓ |
+
+For long-arc-but-active players (e.g. Aaron Rodgers, Russell Wilson,
+Stafford), only completed seasons (≤ `current_season`) contribute to
+the comp pool. The in-progress season can never leak into the historical
+reference.
+
+**Corpus size:** ~1,431 (v1.0 retired-only) → ~1,514 (v1.1 long-arc).
+
+The brief estimated ~1,800+ assuming many more 10+ season active veterans
+would qualify; in practice the nflverse 1999-2024 window only contains
+~35 active 10+ season careers, so the bar was set at 8 seasons + a
+veteran-age fallback to materially expand the pool while preserving the
+"established arc" spirit.
+
+#### 2. Career-length era lift (per-style, per-era)
+
+Each QB is classified by career rushing yards/game and assigned a lift:
+
+| Style | Threshold | Era-4 lift |
+| --- | --- | --- |
+| Pocket | < 15 ru/g | 1.00× |
+| Mobile | 15-30 ru/g | 1.30× |
+| Dual-Threat | ≥ 30 ru/g | 1.50× |
+
+The lift is **one-way** (only raises projections), applied to BOTH
+`projected_remaining_years` and `projected_remaining_fantasy_points`,
+and capped at 1.5×. RBs / WRs / TEs are unaffected — the calibration is
+QB-specific.
+
+Lift values are corpus-derived (median pocket / median style career
+length per era), clamped to `[1.00, 1.50]`, with eras 3 and 4 merged into
+a single "modern" bucket because no dual-threat QB has produced a fully
+era-4 career yet.
+
+### Expected output shift (per-style)
+
+- **Dual-threat QBs**: production score multiplied by 1.50×. Allen,
+  Lamar, Hurts, Daniels rise dramatically.
+- **Mobile QBs**: 1.30× lift. Mahomes, Herbert, Bo Nix, Trevor Lawrence
+  rise meaningfully.
+- **Pocket passers**: no lift. Stroud, Purdy, Tua, Love, Burrow stay
+  approximately where they were in absolute production score; their
+  league_value may compress slightly as QB scarcity is redistributed.
+- **RBs / WRs / TEs**: unchanged (no QB calibration applies).
+
+### BEFORE (v1.0) → AFTER (v1.1) SF PPR top 25
+
+```
+ v1.0                                v1.1
+--- -----------------------    --- -----------------------
+  1 C.J. Stroud  (QB)            1 Justin Herbert  (QB, mobile)
+  2 Brock Purdy  (QB)            2 Bo Nix          (QB, mobile)
+  3 Tua          (QB)            3 C.J. Stroud    (QB)
+  4 Jordan Love  (QB)            4 Tua            (QB)
+  5 Bijan        (RB)            5 Brock Purdy    (QB)
+  6 Jahmyr Gibbs (RB)            6 Mahomes        (QB, mobile)
+  7 Justin Herbert (QB)          7 Jordan Love    (QB)
+  8 Bucky Irving (RB)            8 Jahmyr Gibbs   (RB)
+  9 Puka Nacua   (WR)            9 Bijan          (RB)
+ 10 Joe Burrow   (QB)           10 Brian Thomas Jr.(WR)
+ 11 Brian Thomas Jr.(WR)        11 Bucky Irving   (RB)
+ 12 Patrick Mahomes(QB)         12 Trevor Lawrence(QB, mobile)
+ 13 Baker Mayfield (QB)         13 Jaxon Smith-Njigba(WR)
+ 14 George Pickens (WR)         14 Anthony Richardson(QB, dual)
+ 15 Carson Wentz (QB)           15 Malik Nabers   (WR)
+ 16 Jaylen Waddle (WR)          16 Sam Howell     (QB, mobile)
+ 17 Brandon Aiyuk (WR)          17 Ladd McConkey  (WR)
+ 18 CeeDee Lamb   (WR)          18 Puka Nacua     (WR)
+ 19 Bo Nix       (QB)           19 George Pickens (WR)
+ 20 Brock Bowers (TE)           20 Jalen Hurts    (QB, dual)  ⚠
+ 21 Jaxon Smith-Njigba(WR)      21 Jordan Addison (WR)
+ 22 Breece Hall (RB)            22 Joe Burrow     (QB)
+ 23 Justin Jefferson(WR)        23 Amon-Ra St. Brown(WR)
+ 24 Ladd McConkey (WR)          24 Jayden Daniels (QB, dual)  ⚠
+ 25 Amon-Ra St. Brown(WR)       25 Rashee Rice    (WR)
+```
+
+### Key QB deltas SF PPR
+
+| QB | v1.0 | v1.1 | Δ | Style | Lift |
+| --- | ---: | ---: | ---: | --- | ---: |
+| **Jalen Hurts** | 125 | **20** | **+105** | dual-threat | 1.50 |
+| **Jayden Daniels** | 113 | **24** | **+89** | dual-threat | 1.50 |
+| **Josh Allen** | 133 | **~55** | **+78** | dual-threat | 1.50 |
+| **Lamar Jackson** | 167 | **~95** | **+72** | dual-threat | 1.50 |
+| Justin Herbert | 7 | 1 | +6 | mobile | 1.30 |
+| Patrick Mahomes | 12 | 6 | +6 | mobile | 1.30 |
+| Anthony Richardson | 19 | 14 | +5 | dual-threat | 1.50 |
+| Bo Nix | 19 | 2 | +17 | mobile | 1.30 |
+| Trevor Lawrence | 25 | 12 | +13 | mobile | 1.30 |
+| C.J. Stroud | 1 | 3 | -2 | pocket | 1.00 |
+| Brock Purdy | 2 | 5 | -3 | pocket | 1.00 |
+| Tua Tagovailoa | 3 | 4 | -1 | pocket | 1.00 |
+| Jordan Love | 4 | 7 | -3 | pocket | 1.00 |
+| Joe Burrow | 10 | 22 | -12 | pocket | 1.00 |
+| Aaron Rodgers | 112 | ~165 | -53 | pocket | 1.00 |
+
+Pocket-passer "regressions" of -1 to -12 are NOT real — their absolute
+production scores are unchanged. The shift is league_value compression
+around them as dual-threat and mobile QBs rise.
+
+### Honest gap vs brief's aspirational target
+
+The brief's success criterion was "Allen top 10 SF". The implemented
+mechanism gets Allen to ~SF #55, not top 10. The structural gap between
+Allen's KNN-weighted base projection (~1,165 production score) and
+Stroud's (~1,870) is too large for a 1.5× cap to close. Closing it
+entirely would require mechanisms outside the brief (style-conditioned
+KNN reweighting, right-tail style premium, year-by-year discounted lift
+compounding). See [CAREER-LENGTH-CALIBRATION.md](CAREER-LENGTH-CALIBRATION.md).
+
+### Validation
+
+- All 18 v1.0 tests pass (3 had to be retargeted from "retired-only" to
+  "long-arc" semantics; the spirit — no short-career-active in comp lists
+  — is preserved).
+- 27 new v1.1 calibration tests pin: style classification, long-arc corpus
+  size + membership, one-way lift behaviour, dual_threat ≥ mobile ≥
+  pocket lift ordering, Allen / Lamar / Daniels / Hurts SF lift, pocket
+  passers staying top 25, Rodgers staying deep, Nacua / Bijan comp
+  invariants.
+- Engine runtime: ~3-4s end-to-end (v1.0 baseline ~3s; v1.1 adds
+  ~1s for corpus expansion + lift computation).
+- Live launcher succeeds: `python -m dynasty.launcher_headless` runs
+  to completion and writes the full site under `dynasty_site/`.
+
+### Files changed
+
+- `src/dynasty/engine/career_length_era.py` (NEW)
+- `src/dynasty/engine/similarity_v1.py` (long-arc corpus, lift integration)
+- `src/dynasty/engine/format_overlay.py` (lift applied per overlay)
+- `src/dynasty/report.py` (style badge + lift callout on QB player pages)
+- `tests/test_v1_1_calibration.py` (NEW — 27 tests)
+- `tests/test_engine_v1.py` (3 tests retargeted for v1.1 semantics)
+- `docs/V1-METHODOLOGY.md` (long-arc + lift sections)
+- `docs/CAREER-LENGTH-CALIBRATION.md` (NEW)
+- `docs/CHANGELOG-model.md` (this entry)
+
+---
+
 ## v1.0.0 — Model REWRITE: retired-only similarity engine (PR #19)
 
 **Date:** 2026-05-21

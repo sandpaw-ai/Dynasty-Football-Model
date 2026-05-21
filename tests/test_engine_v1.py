@@ -1,14 +1,22 @@
-"""v1.0 engine tests — the single source of truth.
+"""v1.0 engine tests — carried forward into v1.1.
 
-These tests pin the contract the brief specified:
-  - retired-only corpus (no active players in any comp list)
+These tests pin the v1.0 contract that survives v1.1.0's calibration:
+  - corpus excludes ACTIVE-but-short-career players (a rookie can never be a comp)
   - era-pace multipliers in sensible ranges
-  - real comp lists (Nacua → retired all-time WRs; Allen → modern dual-threat
-    QBs; etc.)
+  - real comp lists (Nacua → retired all-time WRs; etc.)
   - format overlay produces SF > 1QB QB premium
   - rankings exclude any player not currently in the NFL
   - UI parity: rendered rankings.html includes the same CSS class names as
     the basketball model
+
+v1.1.0 NOTES:
+  - The corpus is now the LONG-ARC corpus (retired ∪ 8+ season veterans).
+    Tests that previously asserted "Allen / Mahomes NOT in corpus" no longer
+    hold by literal definition. They've been re-aimed at the underlying spirit:
+    no short-career active player is in the corpus.
+  - test_retired_corpus_last_season_threshold replaced by
+    test_long_arc_corpus_membership which allows long-arc active veterans.
+  - test_no_active_in_comps replaced by test_no_short_career_active_in_comps.
 """
 import os
 import sys
@@ -18,6 +26,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pytest
 
 from dynasty.engine.similarity_v1 import (
+    LONG_ARC_MIN_SEASONS,
+    LONG_ARC_THROUGH_SEASON,
     RETIRED_THROUGH_SEASON,
     comp_names_for,
     run_engine,
@@ -38,30 +48,57 @@ def engine():
 # Corpus invariants
 # ---------------------------------------------------------------------------
 
-def test_retired_corpus_excludes_active(engine):
-    """Justin Jefferson is active — he must NOT be in the retired corpus."""
-    names = {c.name for c in engine.retired_corpus}
-    assert "Justin Jefferson" not in names
-    # CMC, Mahomes, etc. — all active — also not in corpus.
-    for n in ("Patrick Mahomes", "Christian McCaffrey", "Josh Allen", "Joe Burrow"):
-        assert n not in names, f"{n} should be active, not in retired corpus"
+def test_corpus_excludes_short_career_active(engine):
+    """v1.1 long-arc corpus must still exclude active short-career players.
+
+    Justin Jefferson, CMC, Mahomes, Allen, Burrow — all active with <
+    LONG_ARC_MIN_SEASONS (=8) seasons — must NOT appear in the corpus.
+    """
+    names = {c.name for c in engine.long_arc_corpus}
+    for n in (
+        "Justin Jefferson",       # 5 seasons
+        "Patrick Mahomes",         # 7 seasons
+        "Christian McCaffrey",     # 7 seasons
+        "Josh Allen",              # 7 seasons
+        "Joe Burrow",              # 5 seasons
+        "Lamar Jackson",           # 7 seasons
+    ):
+        assert n not in names, (
+            f"{n} should be excluded from long-arc corpus (short-career active)"
+        )
 
 
-def test_retired_corpus_includes_calvin_johnson(engine):
+def test_corpus_includes_calvin_johnson(engine):
     """Calvin Johnson retired after 2015 — must be in the corpus."""
-    names = {c.name for c in engine.retired_corpus}
+    names = {c.name for c in engine.long_arc_corpus}
     assert "Calvin Johnson" in names
     # A handful of other retired greats:
     for n in ("Randy Moss", "Larry Fitzgerald", "Andre Johnson", "Steve Smith",
               "Peyton Manning", "Tom Brady", "Drew Brees"):
-        assert n in names, f"{n} should be in retired corpus"
+        assert n in names, f"{n} should be in long-arc corpus"
 
 
-def test_retired_corpus_last_season_threshold(engine):
-    """Every member of the retired corpus has last_season ≤ RETIRED_THROUGH_SEASON."""
-    for c in engine.retired_corpus:
-        assert c.last_season is not None and c.last_season <= RETIRED_THROUGH_SEASON, (
-            f"{c.name} last_season={c.last_season} should be ≤ {RETIRED_THROUGH_SEASON}"
+def test_long_arc_corpus_membership(engine):
+    """Every member of the long-arc corpus satisfies the v1.1 membership rule:
+    either last_season ≤ LONG_ARC_THROUGH_SEASON (retired) OR career has
+    ≥ LONG_ARC_MIN_SEASONS seasons (long-arc veteran). For long-arc-but-active
+    members, all seasons are completed (≤ current_season=2024).
+    """
+    for c in engine.long_arc_corpus:
+        assert c.last_season is not None
+        retired = c.last_season <= LONG_ARC_THROUGH_SEASON
+        long_arc = len(c.seasons) >= LONG_ARC_MIN_SEASONS
+        # Veteran-age rule fallback (age ≥ 33 + 6 seasons)
+        last_age = max((s.age for s in c.seasons if s.age is not None), default=0)
+        veteran = last_age >= 33 and len(c.seasons) >= 6
+        assert retired or long_arc or veteran, (
+            f"{c.name} last_season={c.last_season} "
+            f"seasons={len(c.seasons)} last_age={last_age} — not long-arc"
+        )
+        # All seasons must be completed.
+        max_season = max(s.season for s in c.seasons)
+        assert max_season <= 2024, (
+            f"{c.name} has in-progress season {max_season}"
         )
 
 
@@ -81,27 +118,50 @@ def test_puka_nacua_comps_are_retired_greats(engine):
     assert hits >= 3, f"Nacua's top 20 comps should include ≥3 retired all-time WRs, got {hits}: {comps[:10]}"
 
 
-def test_no_active_in_comps(engine):
-    """For every active player, ZERO of their comps are active.
-
-    Definition of active: last_season > RETIRED_THROUGH_SEASON.
+def test_no_short_career_active_in_comps(engine):
+    """v1.1 contract: every comp is either retired OR a long-arc veteran
+    (≥ LONG_ARC_MIN_SEASONS seasons OR age-33+ with 6+ seasons). Short-career
+    active players (rookies, sophomores, etc.) can NEVER appear as a comp.
     """
     careers = engine.careers
     violations = []
     for pid, comp_list in engine.comps.items():
         for c in comp_list:
             comp = careers.get(c["player_id"])
-            if comp and comp.last_season is not None and comp.last_season > RETIRED_THROUGH_SEASON:
-                violations.append((pid, c["name"], comp.last_season))
-    assert not violations, f"{len(violations)} active-in-comp violations: {violations[:5]}"
+            if not comp or comp.last_season is None:
+                continue
+            if comp.last_season <= LONG_ARC_THROUGH_SEASON:
+                continue  # retired → fine
+            # Active comp — must be long-arc.
+            last_age = max(
+                (s.age for s in comp.seasons if s.age is not None), default=0,
+            )
+            if (
+                len(comp.seasons) < LONG_ARC_MIN_SEASONS
+                and not (last_age >= 33 and len(comp.seasons) >= 6)
+            ):
+                violations.append(
+                    (pid, c["name"], comp.last_season, len(comp.seasons))
+                )
+    assert not violations, (
+        f"{len(violations)} short-career active comp violations: {violations[:5]}"
+    )
 
 
 def test_active_only_in_rankings(engine):
-    """No retired player should appear in the active rankings list."""
-    ranked_ids = {r["player_id"] for r in engine.rankings}
-    retired_ids = {c.player_id for c in engine.retired_corpus}
-    overlap = ranked_ids & retired_ids
-    assert not overlap, f"{len(overlap)} retired players leaked into rankings"
+    """Rankings only contain currently-active NFL players. Note: with v1.1's
+    long-arc corpus, some active veterans (Rodgers, Stafford, Wilson) appear
+    in BOTH the corpus (as comp sources) and the rankings (as active players).
+    The check below is now: every ranked player is currently active.
+    """
+    careers = engine.careers
+    for r in engine.rankings:
+        c = careers.get(r["player_id"])
+        assert c is not None
+        # Active = last_season >= 2023 (current_season - 1).
+        assert c.last_season is not None and c.last_season >= 2023, (
+            f"{c.name} last_season={c.last_season} should be ≥ 2023 to be ranked"
+        )
 
 
 # ---------------------------------------------------------------------------

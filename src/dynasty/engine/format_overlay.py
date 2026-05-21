@@ -22,6 +22,14 @@ from .similarity_v1 import (
     EngineResult,
     _project_comp_post_age,
 )
+from .career_length_era import (
+    STYLE_POCKET,
+    apply_lift,
+    style_for_career,
+)
+
+# Current era is era 4 (2020+). The lift is applied per-style at this era.
+_CURRENT_ERA = 4
 
 
 # Roster setting presets (starters per team; bench/depth not modeled).
@@ -132,6 +140,17 @@ def apply_overlay(
                 pace=engine.era_pace, scoring=local_scoring,
             )
             weighted_points += pts * (c["similarity"] / total_sim)
+
+        # v1.1.0: Apply the same career-length era lift the engine used. The
+        # overlay re-projects from raw comps under different scoring, but the
+        # structural longevity calibration must transfer or the lift would
+        # only show up in PPR-default rankings.
+        lift = row.get("career_length_lift", 1.0) or 1.0
+        if engine.career_length_era and ap.position == "QB":
+            style = row.get("qb_style") or style_for_career(ap)
+            lift = engine.career_length_era.get_lift(style, _CURRENT_ERA)
+        weighted_points = apply_lift(weighted_points, lift)
+
         re_projected.append({
             "player_id": pid,
             "name": row["name"],
@@ -139,6 +158,9 @@ def apply_overlay(
             "age": row["age"],
             "production_score_overlay": round(weighted_points, 1),
             "production_score_default": row["production_score"],
+            "qb_style": row.get("qb_style"),
+            "qb_career_rypg": row.get("qb_career_rypg"),
+            "career_length_lift": round(lift, 3),
         })
 
     # 2) Compute replacement baselines.

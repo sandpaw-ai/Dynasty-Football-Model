@@ -1,10 +1,19 @@
-# v1.0 / v1.1 Methodology — Dynasty Football Model
+# v1.0 / v1.1 / v1.2 Methodology — Dynasty Football Model
 
 > This is the canonical methodology document for the Dynasty Football Model
-> v1.0 / v1.1 engine. v0.x methodology docs (SIMILARITY-METHODOLOGY,
+> v1.x engine. v0.x methodology docs (SIMILARITY-METHODOLOGY,
 > VORP-METHODOLOGY, CUMULATIVE-ARC, ELITE-PROVEN-CALIBRATION,
 > CORRELATION-METHODOLOGY, ROOKIE-SIMILARITY-FB) are preserved under
 > [`archive/v0.X/`](archive/v0.X/) for historical reference.
+>
+> **v1.2.0** — fantasy-point-weighted vectorization + style-conditioned
+> KNN. The KNN vector is now in fantasy-points-per-stat-per-game space
+> (not raw counting-stat space), and the comp pool for each target is
+> restricted to its style cohort. See [Fantasy-point-weighted
+> vectorization (v1.2)](#fantasy-point-weighted-vectorization-v12) and
+> [Style-conditioned KNN cohort (v1.2)](#style-conditioned-knn-cohort-v12),
+> plus [STYLE-COHORTS.md](STYLE-COHORTS.md) for the per-position
+> calibration notes.
 >
 > **v1.1.0** — dual-threat QB calibration. Adds a long-arc corpus and a
 > career-length era lift for mobile / dual-threat QBs. See the
@@ -121,47 +130,129 @@ All stats are **per-game rates**, not season totals. This decouples
 similarity from games played (injuries shouldn't make a player look
 fundamentally different in shape).
 
+## Fantasy-point-weighted vectorization (v1.2)
+
+v1.0 / v1.1 used a per-stat z-score vector where each stat (passing
+yards, passing TDs, rushing TDs, ...) was treated as one feature
+dimension with equal weight. v1.2 RE-EXPRESSES each component as the
+per-game fantasy points contributed by that stat under the active league
+format:
+
+  vec_component(stat) = (raw_stat_per_game * scoring_coef[stat])
+
+under ``scoring_rules.LEAGUE_SCORING[league_format]``. Each component is
+then era-z-scored per position per format (Era-Z-Norm keyed by
+``(position, era, stat, format)``).
+
+**Why fantasy-weighted matters.** Under sf_ppr 1 passing yard = 0.04 fp
+and 1 rushing TD = 6 fp — a ~150x scoring spread. v1.1's equal-weighted
+raw-stat z-score vector buried that. v1.2's fantasy-point vector means
+cosine similarity now matches players on the *shape of their fantasy
+production*, not the *shape of which counting-stat columns they fill*.
+Josh Allen (high rushing-TD volume) now correctly compares to dual-
+threat-style retired QBs whose fantasy production was rushing-heavy,
+not to pocket passers who happened to share his cumulative-shape signature.
+
+**Why sub-features and not coarse categories.** A 2-component vector
+(passing total, rushing total) for QBs collapses to near-degenerate
+cosine — every pocket passer sits on the same ray. v1.2 keeps the
+stat-level granularity so the KNN can distinguish (e.g.) high-TD pocket
+from high-volume pocket.
+
+**Format awareness.** The Era-Z-Norm is computed per format, so the
+same player has a different vector under ``sf_ppr`` (receptions = 1.0
+fp/catch) vs ``std`` (receptions = 0 fp/catch). For ppr-equivalent
+formats z-score invariance under positive linear scaling means the
+receptions component is identical numerically; under ``std`` the
+receptions component collapses to zero (after era-z-norm), materially
+shifting the KNN match space for reception-heavy RBs and WRs.
+
 ## Era-normalised z-scoring
 
-For each (position, era, stat) cell, we compute the mean and standard
-deviation of the per-game rate across qualifying seasons. A
-player-season's z-score is `(per_game_rate - μ) / σ`, where μ and σ come
-from the matching (position, era, stat) cell.
+For each (position, era, stat, format) cell, we compute the mean and
+standard deviation of the per-game fantasy-point contribution across
+qualifying seasons. A player-season's z-score is `(per_game_fp - μ) /
+σ`, where μ and σ come from the matching cell.
 
 This means:
 
-- A 2010 Peyton Manning at 285 passing yds/game is era-elite (top 5% of
-  Era-3 QBs).
-- A 2024 Justin Herbert at 285 passing yds/game is era-average (top 50%
-  of Era-4 QBs).
+- A 2010 Peyton Manning at 285 passing yds/game (= 11.4 fp/game from
+  passing yards alone) is era-elite (top 5% of Era-3 QBs).
+- A 2024 Justin Herbert at 285 passing yds/game (= 11.4 fp/game) is
+  era-average (top 50% of Era-4 QBs).
 
 The engine sees them as different shapes even though the raw numbers
 match. That's the point.
+
+## Style-conditioned KNN cohort (v1.2)
+
+Every player (active and retired) is classified into a per-position
+style cohort and the KNN pool is restricted to comps in the same cohort,
+with adjacent-bucket fallback when the strict cohort yields fewer than
+20 qualified comps after age-window filtering. The fallback chain is
+capped at 2 styles (primary + 1 adjacent).
+
+Full threshold definitions, fallback chains, and calibration notes are
+in [STYLE-COHORTS.md](STYLE-COHORTS.md). At a glance:
+
+- **QB**: pocket / mobile / dual-threat by rushing_fp_share (0.15 / 0.30).
+- **RB**: workhorse / committee / receiving-back by touches/game +
+  rec_fp_share.
+- **WR**: alpha / secondary / deep-threat by targets/game + ypr.
+- **TE**: receiving / hybrid / blocking by rec_fp_share (effectively
+  single-cohort because nflverse only tracks receiving stats for TEs).
+
+The two style classifications (v1.1's `style_for_career` in
+`career_length_era` and v1.2's `cohort_for` in `style_cohort`) are
+INTENTIONALLY INDEPENDENT:
+
+  * v1.1 `style_for_career` (rypg-based) → which career-length lift
+    multiplier the player gets.
+  * v1.2 `cohort_for` (fp_share-based) → which comp pool the KNN draws
+    from.
+
+Mahomes (rypg ~20 → mobile under v1.1, gets 1.3x lift; fp_share 0.127 →
+pocket under v1.2, pulls Brady/Brees comps) is the canonical hybrid case
+that the two-classification approach handles cleanly.
 
 ## Cumulative-through-age vector
 
 For each player at a given age, the vector is the **games-weighted
 average** of their per-season era z-scores across their position's
-feature set, taken across all qualifying seasons up to that age.
+feature set (fantasy-points-per-stat-per-game under the active format,
+see [Fantasy-point-weighted vectorization](#fantasy-point-weighted-
+vectorization-v12) above), taken across all qualifying seasons up to
+that age.
 
 This is similar to PR #17's cumulative-arc vector with one critical
-difference: **the cohort is restricted to retired players**. There is
-no active-to-active comping in v1.
+difference: **the cohort is restricted to retired and long-arc players**.
+There is no active-to-active comping in v1.x.
 
 ## Finding comps
 
 For an active player at age A:
 
-1. Build their cumulative-through-A vector.
-2. Iterate every retired player at the same position.
-3. Require the retired player to have at least one season in age window
-   A±1 (so they were active at a comparable age — no comping a 22-year-old
+1. Build their cumulative-through-A vector (v1.2: fantasy-point-weighted,
+   format-aware — see [Fantasy-point-weighted vectorization](#fantasy-
+   point-weighted-vectorization-v12)).
+2. Determine the player's style cohort (v1.2) and walk the cohort's
+   fallback chain to assemble the candidate pool.
+3. Iterate the candidate pool (long-arc retired members of the same
+   position).
+4. Require the candidate to have at least one season in age window A±1
+   (so they were active at a comparable age — no comping a 22-year-old
    to a player whose only seasons were post-30).
-4. Require the retired player to have at least one season **after** age A
+5. Require the candidate to have at least one season **after** age A
    (so there's a remaining career to project).
-5. Build the retired comp's cumulative-through-(A+1) vector.
-6. Score by cosine similarity.
-7. Keep the top-20.
+6. Build the candidate comp's cumulative-through-(A+1) vector under the
+   same format.
+7. Score by cosine similarity.
+8. Keep the top-20.
+
+The v1.2 cohort restriction (step 2) is the structural change from v1.0/
+v1.1's whole-position iteration. Cohort fallback widens from the strict
+bucket to 1 adjacent style only when the strict cohort yields fewer than
+20 qualified comps after age-window filtering.
 
 ## Era-pace projection
 

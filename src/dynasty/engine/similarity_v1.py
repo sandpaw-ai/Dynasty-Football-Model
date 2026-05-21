@@ -1,37 +1,39 @@
-"""Similarity v1 engine — the single source of truth for player rankings.
+"""Engine entry point — v2.0 fantasy-point-arc methodology.
+
+NOTE: the module name remains ``similarity_v1`` for back-compat with all
+existing callers (``format_overlay``, ``report``, sources, tests). The
+IMPLEMENTATION is the v2.0 fantasy-point-arc engine; the v1.x per-stat
+z-score machinery has been removed.
 
 Pipeline:
-    1. Build a LONG-ARC corpus (v1.1.0). A QB is "long-arc" if any of:
-         - last_season ≤ LONG_ARC_THROUGH_SEASON (default 2022, 3+ years inactive), OR
-         - career_seasons ≥ LONG_ARC_MIN_SEASONS (default 10), OR
-         - age ≥ LONG_ARC_VETERAN_AGE (default 35) AND career_seasons ≥ LONG_ARC_VETERAN_SEASONS (default 8).
-       For long-arc-but-still-active players (e.g. 41yo Rodgers, 36yo Stafford),
-       only their COMPLETED seasons (≤ current_season) contribute to the corpus.
-    2. Bucket every player-season into an era (era_pace.era_for_season).
-    3. Compute per-position, per-era z-score normalisations of per-game stats
-       and store an era-adjusted "shape vector" per player-season.
-    4. For each ACTIVE player, build a cumulative-through-age vector (career
-       totals through their current age) and find top-K nearest neighbours
-       in the long-arc corpus, restricted to:
-           - same position
-           - age within ±1 of the current player's age
-           - era-normalised cosine similarity
-    5. For each comp, take their realised post-age career, rescale every stat
-       through era-pace multipliers to era 4 (current), and aggregate the
-       weighted projected fantasy points (PPR-default, format-tweakable
-       later via format_overlay).
-    6. v1.1.0 calibration: For dual-threat / mobile QBs (career rushing rate
-       ≥ 15 yds/game), apply a one-way career-length era lift to correct for
-       the short-career bias in the historical comp pool. See
-       ``career_length_era.py`` for the multiplier table.
-    7. Apply a 5%/year present-value discount and emit production_score.
 
-The engine is deliberately self-contained: it reads
-``data/nflverse/player_stats_season.csv.gz`` + ``data/nflverse/players.csv.gz``
-and writes per-player JSON sidecars + the master rankings JSON under
-``data/engine_v1/``.
+    1.  Load player careers from nflverse season CSV.
+    2.  Classify each player as ``long_arc`` (retired before
+        ``LONG_ARC_THROUGH_SEASON``, or 8+ NFL seasons, or 33+ years old
+        with 6+ seasons).
+    3.  Build a corpus-derived era-pace table (era 1→4, 2→4, 3→4
+        multipliers per (position, stat)).
+    4.  Build a FANTASY-POINT ARC for every player under every supported
+        scoring format (sf_ppr, 1qb_ppr, 2qb_ppr, half_ppr, std,
+        sf_te_premium). Each season's stat line is era-pace-adjusted
+        BEFORE scoring, so every fp value in the arc is in
+        modern-fp-equivalent units.
+    5.  Build a per-(position, career_stage) percentile table from the
+        long-arc corpus' career-total fp.
+    6.  For each ACTIVE player, build their 10-dim arc vector at the
+        current age, cosine-match against same-position long-arc players
+        in an age ±1 / career-stage ±1 window, take top-20 by cosine.
+    7.  Project each comp's realised post-age fantasy points
+        (modern-fp-equivalent), discount 5%/yr, similarity-weight, sum.
+    8.  For QBs, apply v1.1's career-length era lift on
+        projected_remaining_seasons AND projected_remaining_fp (mobile /
+        dual-threat only; pocket lift = 1.0). This is the ONE piece of
+        v1.x machinery v2.0 keeps — modern medicine extends mobile-QB
+        careers and the long-arc comp pool is still half-retired-from-
+        era-3 dual-threats.
 
-No network calls. All inputs are committed.
+No z-scoring. No style cohort. No per-stat-shape vectors. The 10-dim
+vector lives in raw fantasy-point space.
 """
 from __future__ import annotations
 
@@ -63,13 +65,26 @@ from .career_length_era import (
     career_rushing_rate,
     style_for_career,
 )
-from .style_cohort import (
-    COHORTS,
-    MIN_COHORT_COMPS,
-    cohort_for,
-    cohort_summary,
-    index_corpus_by_cohort,
-    widen_pool,
+from .fantasy_arc import (
+    CareerArc,
+    SUPPORTED_FORMATS,
+    build_career_arc,
+    persist_corpus,
+)
+from .fantasy_arc_similarity import (
+    AGE_WINDOW,
+    BASE_FORMAT,
+    CAREER_STAGE_WINDOW,
+    CompMatch,
+    CareerStagePercentileTable,
+    DISCOUNT_PER_YEAR,
+    MIN_GAMES_PER_SEASON,
+    TOP_K_COMPS,
+    build_arc_vector,
+    build_career_stage_percentile_table,
+    find_comps as arc_find_comps,
+    project_remaining as arc_project_remaining,
+    project_player as arc_project_player,
 )
 from ..scoring_rules import LEAGUE_SCORING
 
@@ -80,171 +95,32 @@ from ..scoring_rules import LEAGUE_SCORING
 DATA_ROOT = Path("data/nflverse")
 OUT_ROOT = Path("data/engine_v1")
 OUT_ROOT.mkdir(parents=True, exist_ok=True)
+OUT_ROOT_V2 = Path("data/engine_v2")
+OUT_ROOT_V2.mkdir(parents=True, exist_ok=True)
 
-# v1.0 "retired" threshold: last_season ≤ this year.
-# v1.1 keeps this AS ONE OF the inclusion gates. See LONG_ARC_* below for the
-# expanded (long-arc) corpus definition.
+# Long-arc corpus thresholds — UNCHANGED from v1.1.
 RETIRED_THROUGH_SEASON = 2022
-
-# v1.1.0 long-arc corpus definition. A player is included if ANY of:
-#   1. last_season ≤ LONG_ARC_THROUGH_SEASON (the classic retired filter), OR
-#   2. career_seasons ≥ LONG_ARC_MIN_SEASONS (e.g. Aaron Rodgers, Stafford,
-#      Russell Wilson, Eli Manning late-career, Big Ben late-career), OR
-#   3. age ≥ LONG_ARC_VETERAN_AGE AND career_seasons ≥ LONG_ARC_VETERAN_SEASONS
-#      (e.g. a still-active 36yo veteran with 8+ seasons).
-# For category 2 & 3 players who are still active, only their COMPLETED
-# seasons (≤ current_season) contribute to the comp pool.
-#
-# The brief's reference definition had MIN_SEASONS=10. We use 8: empirically
-# 10 yields only ~33 active-veteran additions and leaves dual-threat QBs
-# starved for longevity comps (the long-arc dual-threat pool stays Cam/RGIII).
-# Lowering to 8 surfaces Russell Wilson (13), Wentz (9), Tannehill (11),
-# Mariota (10), Murray (6 → still below), Watson (7 → still below) —
-# matching the brief's stated rationale ("established arc") without inflating
-# the pool with rookie/sophomore players.
 LONG_ARC_THROUGH_SEASON = 2022
 LONG_ARC_MIN_SEASONS = 8
 LONG_ARC_VETERAN_AGE = 33
 LONG_ARC_VETERAN_SEASONS = 6
 
-# Skill positions we model.
 SKILL_POSITIONS: Tuple[str, ...] = ("QB", "RB", "WR", "TE")
 
-# Per-position raw-stat feature set (kept for back-compat / era-pace plumbing).
-# v1.2 replaces this with FANTASY-POINT-PER-CATEGORY vectors (see
-# FANTASY_CATEGORIES below) so cosine similarity weighs each stat by its
-# scoring value under the active format, not by raw counting volume.
-FEATURES: Dict[str, Tuple[str, ...]] = {
-    "QB": (
-        "passing_yards", "passing_tds", "interceptions",
-        "rushing_yards", "rushing_tds",
-    ),
-    "RB": (
-        "rushing_yards", "rushing_tds",
-        "receptions", "receiving_yards", "receiving_tds",
-    ),
-    "WR": (
-        "receptions", "receiving_yards", "receiving_tds",
-        "rushing_yards", "rushing_tds",  # WR-rushing trickle (jet sweeps)
-    ),
-    "TE": (
-        "receptions", "receiving_yards", "receiving_tds",
-    ),
-}
-
-# v1.2.0 fantasy-point-weighted vector categories.
-#
-# Each entry is a (category_label, stat_name, scoring_key) triplet. The vector
-# is a *fantasy-points-per-game-by-sub-category* vector under the active
-# format: each component = (raw_stat_per_game * scoring_coef[scoring_key]).
-# Categories that don't apply to a position simply aren't in the position's
-# tuple. Each sub-category gets its OWN era-z-norm so cosine similarity
-# matches players on the *shape* of their fantasy production, not the gross
-# magnitude.
-#
-# Why fantasy-weighted: under sf_ppr 1 passing yard is worth 0.04 fp and 1
-# rushing TD is worth 6 fp — equal-weighting raw-stat z-scores buries that
-# ~150x scoring spread. Building the vector in fantasy-point space makes
-# cosine similarity match players on what they produce for fantasy scoring,
-# not on which counting-stat columns they fill.
-#
-# Why keep sub-categories (passing_yards / passing_tds / interceptions)
-# rather than collapsing to one number per category: dimensionality. A 2D
-# vector (passing, rushing) for QBs produces near-degenerate cosine — every
-# pocket passer sits on the same ray. Keeping the sub-components gives the
-# KNN enough room to distinguish "high-TD pocket" from "high-volume pocket".
-FANTASY_FEATURES: Dict[str, Tuple[Tuple[str, str, str], ...]] = {
-    "QB": (
-        ("passing", "passing_yards", "passing_yards"),
-        ("passing", "passing_tds",   "passing_tds"),
-        ("passing", "interceptions", "interceptions"),
-        ("rushing", "rushing_yards", "rushing_yards"),
-        ("rushing", "rushing_tds",   "rushing_tds"),
-    ),
-    "RB": (
-        ("rushing",   "rushing_yards",   "rushing_yards"),
-        ("rushing",   "rushing_tds",     "rushing_tds"),
-        ("receiving", "receptions",      "receptions"),
-        ("receiving", "receiving_yards", "receiving_yards"),
-        ("receiving", "receiving_tds",   "receiving_tds"),
-    ),
-    "WR": (
-        ("receiving", "receptions",      "receptions"),
-        ("receiving", "receiving_yards", "receiving_yards"),
-        ("receiving", "receiving_tds",   "receiving_tds"),
-        ("rushing",   "rushing_yards",   "rushing_yards"),  # jet-sweep trickle
-        ("rushing",   "rushing_tds",     "rushing_tds"),
-    ),
-    "TE": (
-        ("receiving", "receptions",      "receptions"),
-        ("receiving", "receiving_yards", "receiving_yards"),
-        ("receiving", "receiving_tds",   "receiving_tds"),
-    ),
-}
-
-# Coarse category list per position (used for cohort thresholds and
-# diagnostic readouts only).
-FANTASY_CATEGORIES: Dict[str, Tuple[str, ...]] = {
-    "QB": ("passing", "rushing"),
-    "RB": ("rushing", "receiving"),
-    "WR": ("receiving", "rushing"),
-    "TE": ("receiving",),
-}
-
-# Map category -> (stat, scoring_key) pairs (used by style_cohort to compute
-# career fantasy points per coarse category, e.g. for rushing_fp_share).
-_CATEGORY_STATS: Dict[str, Tuple[Tuple[str, str], ...]] = {
-    "passing": (
-        ("passing_yards", "passing_yards"),
-        ("passing_tds", "passing_tds"),
-        ("interceptions", "interceptions"),
-    ),
-    "rushing": (
-        ("rushing_yards", "rushing_yards"),
-        ("rushing_tds", "rushing_tds"),
-    ),
-    "receiving": (
-        ("receptions", "receptions"),
-        ("receiving_yards", "receiving_yards"),
-        ("receiving_tds", "receiving_tds"),
-    ),
-}
-
-# Fantasy scoring (SF-PPR default).
-DEFAULT_SCORING = {
-    "passing_yards":   0.04,   # 1 pt / 25 yds
-    "passing_tds":     4.0,
-    "interceptions":   -2.0,
-    "rushing_yards":   0.10,   # 1 pt / 10 yds
-    "rushing_tds":     6.0,
-    "receptions":      1.0,    # PPR
-    "receiving_yards": 0.10,
-    "receiving_tds":   6.0,
-}
-
-# Format used for the BASE production score (the engine's master ranking).
-# Per the v1.2 brief this is sf_ppr (the primary site format). Format overlays
-# reproject under their own scoring keys via format_overlay.apply_overlay.
-BASE_FORMAT = "sf_ppr"
-
-# Discount future seasons.
-DISCOUNT_PER_YEAR = 0.05
-
-# Neighbourhood size.
-TOP_K_COMPS = 20
-AGE_WINDOW = 1
-MIN_GAMES_PER_SEASON = 4   # filter cup-of-coffee seasons
+# Fantasy scoring (sf_ppr default) — used only as the "default scoring"
+# parameter callers expect. The real scoring lives in scoring_rules.LEAGUE_SCORING.
+DEFAULT_SCORING = dict(LEAGUE_SCORING[BASE_FORMAT])
 
 
 # ---------------------------------------------------------------------------
-# Data containers
+# Data containers (kept for back-compat with format_overlay + tests)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class PlayerSeason:
     player_id: str
     season: int
-    age: int                       # may be None-ish (-1) if birth_date missing
+    age: int
     position: str
     games: int
     stats: Dict[str, float]
@@ -275,7 +151,6 @@ class PlayerCareer:
         veteran_age: int = LONG_ARC_VETERAN_AGE,
         veteran_seasons: int = LONG_ARC_VETERAN_SEASONS,
     ) -> bool:
-        """v1.1.0 long-arc corpus inclusion test. See module docstring."""
         if self.is_retired(through=through):
             return True
         n_seasons = len(self.seasons)
@@ -302,11 +177,6 @@ class PlayerCareer:
         return [s for s in self.seasons if s.age is not None and s.age > age_floor]
 
     def with_completed_seasons_only(self, through_season: int) -> "PlayerCareer":
-        """Return a SHALLOW copy of this career with only seasons ≤ through_season.
-
-        Used for long-arc-but-active corpus members so we never let an
-        in-progress season leak into the historical comp pool.
-        """
         kept = [s for s in self.seasons if s.season <= through_season]
         last = kept[-1].season if kept else None
         return PlayerCareer(
@@ -321,11 +191,10 @@ class PlayerCareer:
 
 
 # ---------------------------------------------------------------------------
-# Loaders
+# Loaders (unchanged from v1.x)
 # ---------------------------------------------------------------------------
 
 def _load_players_meta(path: Path) -> Dict[str, Dict[str, str]]:
-    """Return gsis_id -> row from players.csv.gz."""
     out: Dict[str, Dict[str, str]] = {}
     with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
         r = csv.DictReader(fh)
@@ -333,8 +202,6 @@ def _load_players_meta(path: Path) -> Dict[str, Dict[str, str]]:
             gid = row.get("gsis_id") or ""
             if not gid:
                 continue
-            # Skip ID collisions (the LB Justin Jefferson case): keep the
-            # skill-position row preferentially.
             existing = out.get(gid)
             pos = (row.get("position") or "").upper()
             if existing is None or pos in SKILL_POSITIONS:
@@ -357,7 +224,6 @@ def _birth_year(meta_row: Optional[Dict[str, str]]) -> Optional[int]:
 def _age_for_season(birth_year: Optional[int], season: int) -> Optional[int]:
     if birth_year is None:
         return None
-    # NFL season starts in September → player's age during the season.
     return season - birth_year
 
 
@@ -374,7 +240,6 @@ def load_corpus(
     stats_path: Path = DATA_ROOT / "player_stats_season.csv.gz",
     players_path: Path = DATA_ROOT / "players.csv.gz",
 ) -> Dict[str, PlayerCareer]:
-    """Load every player career into PlayerCareer objects keyed by gsis_id."""
     meta = _load_players_meta(players_path)
     careers: Dict[str, PlayerCareer] = {}
 
@@ -415,8 +280,6 @@ def load_corpus(
             by = _birth_year(m)
             age = _age_for_season(by, season)
             if age is None:
-                # Estimate age from rookie_season + 22 as a fallback so that
-                # we don't lose retired greats with missing birth dates.
                 rs = None
                 if m and (m.get("rookie_season") or "").isdigit():
                     rs = int(m["rookie_season"])
@@ -461,7 +324,6 @@ def load_corpus(
                 careers[pid] = c
             c.seasons.append(ps)
 
-    # Sort seasons chronologically; derive last_season if metadata missing.
     for c in careers.values():
         c.seasons.sort(key=lambda s: s.season)
         if c.last_season is None and c.seasons:
@@ -473,172 +335,10 @@ def load_corpus(
 
 
 # ---------------------------------------------------------------------------
-# Era-z-scoring
-# ---------------------------------------------------------------------------
-
-def _season_category_fp_per_game(
-    season: "PlayerSeason",
-    category: str,
-    scoring_coefs: Dict[str, float],
-) -> float:
-    """Compute fantasy points produced in ``category`` per game for one season.
-
-    Categories are: ``passing``, ``rushing``, ``receiving``. Uses
-    ``scoring_coefs`` (a per-format scoring dict from
-    ``scoring_rules.LEAGUE_SCORING``) to weigh each stat by its fantasy
-    scoring value.
-    """
-    pairs = _CATEGORY_STATS.get(category, ())
-    total = 0.0
-    for stat, scoring_key in pairs:
-        coef = float(scoring_coefs.get(scoring_key, 0.0))
-        total += season.stats.get(stat, 0.0) * coef
-    games = max(season.games, 1)
-    return total / games
-
-
-def _season_subfeature_fp_per_game(
-    season: "PlayerSeason",
-    stat: str,
-    scoring_key: str,
-    scoring_coefs: Dict[str, float],
-) -> float:
-    """Per-game fantasy points contributed by a single sub-feature stat."""
-    coef = float(scoring_coefs.get(scoring_key, 0.0))
-    games = max(season.games, 1)
-    return (season.stats.get(stat, 0.0) * coef) / games
-
-
-@dataclass
-class EraZNorm:
-    """Per-position, per-era, per-SUBFEATURE (and per-format) mean/std on
-    per-game FANTASY POINTS.
-
-    v1.2.0 change: the z-norm operates in fantasy-point-per-game space at
-    the SUB-feature granularity (passing_yards, passing_tds, interceptions,
-    rushing_yards, ...), not raw-stat. Each entry is keyed by
-    (position, era, stat, format).
-    """
-
-    means: Dict[Tuple[str, int, str, str], float]
-    stds: Dict[Tuple[str, int, str, str], float]
-
-    def z(
-        self,
-        position: str,
-        era: int,
-        stat: str,
-        per_game_fp: float,
-        league_format: str = BASE_FORMAT,
-    ) -> float:
-        key = (position, era, stat, league_format)
-        mu = self.means.get(key, 0.0)
-        sd = self.stds.get(key, 1.0)
-        if sd <= 1e-9:
-            return 0.0
-        return (per_game_fp - mu) / sd
-
-
-def build_era_z_norm(
-    careers: Dict[str, PlayerCareer],
-    formats: Optional[Sequence[str]] = None,
-) -> EraZNorm:
-    """Build per-position, per-era, per-subfeature, per-format z-norms.
-
-    v1.2.0: feature space is fantasy-points-per-game per stat sub-feature
-    (passing_yards * 0.04, passing_tds * 4, rushing_tds * 6, ...). The same
-    player has a DIFFERENT vector under sf_ppr vs sf_te_premium when the
-    format's coefficients differ.
-    """
-    if formats is None:
-        formats = tuple(LEAGUE_SCORING.keys())
-    bucket: Dict[Tuple[str, int, str, str], List[float]] = defaultdict(list)
-    for c in careers.values():
-        feats = FANTASY_FEATURES.get(c.position, ())
-        if not feats:
-            continue
-        for s in c.seasons:
-            if s.games < MIN_GAMES_PER_SEASON:
-                continue
-            for fmt in formats:
-                coefs = LEAGUE_SCORING.get(fmt, LEAGUE_SCORING[BASE_FORMAT])
-                for _cat, stat, scoring_key in feats:
-                    fp = _season_subfeature_fp_per_game(s, stat, scoring_key, coefs)
-                    bucket[(c.position, s.era, stat, fmt)].append(fp)
-    means: Dict[Tuple[str, int, str, str], float] = {}
-    stds: Dict[Tuple[str, int, str, str], float] = {}
-    for k, vals in bucket.items():
-        if not vals:
-            means[k] = 0.0
-            stds[k] = 1.0
-            continue
-        mu = sum(vals) / len(vals)
-        var = sum((v - mu) ** 2 for v in vals) / max(len(vals) - 1, 1)
-        sd = math.sqrt(var) if var > 0 else 1.0
-        means[k] = mu
-        stds[k] = sd
-    return EraZNorm(means=means, stds=stds)
-
-
-def player_career_vector(
-    career: PlayerCareer,
-    znorm: EraZNorm,
-    through_age: Optional[int] = None,
-    league_format: str = BASE_FORMAT,
-) -> Optional[List[float]]:
-    """Compute an era-normalised, fantasy-point-weighted, cumulative
-    through-age vector under ``league_format``.
-
-    v1.2.0 change: each component of the vector is FANTASY POINTS
-    contributed per game by a single stat sub-feature (e.g. passing_tds *
-    4.0 / games), era-z-scored per position per format. The vector
-    measures "what does this player produce for fantasy under this
-    format" rather than "what are this player's raw counting stats".
-    """
-    feats = FANTASY_FEATURES.get(career.position, ())
-    if not feats:
-        return None
-    seasons = career.seasons_through_age(through_age) if through_age is not None else career.seasons
-    seasons = [s for s in seasons if s.games >= MIN_GAMES_PER_SEASON]
-    if not seasons:
-        return None
-    coefs = LEAGUE_SCORING.get(league_format, LEAGUE_SCORING[BASE_FORMAT])
-    vec: List[float] = []
-    for _cat, stat, scoring_key in feats:
-        num = 0.0
-        den = 0.0
-        for s in seasons:
-            fp = _season_subfeature_fp_per_game(s, stat, scoring_key, coefs)
-            z = znorm.z(career.position, s.era, stat, fp, league_format=league_format)
-            num += z * s.games
-            den += s.games
-        vec.append(num / den if den > 0 else 0.0)
-    return vec
-
-
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    if na <= 1e-9 or nb <= 1e-9:
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    return dot / (na * nb)
-
-
-# ---------------------------------------------------------------------------
-# Era-pace calibration (corpus-derived)
+# Era-pace calibration (corpus-derived) — unchanged from v1.x
 # ---------------------------------------------------------------------------
 
 def build_era_pace_table(careers: Dict[str, PlayerCareer]) -> EraPaceTable:
-    """Empirically calibrate era_from→4 multipliers from the corpus.
-
-    For each (position, stat, era_from): take the median per-game rate among
-    qualifying seasons in era_from and in era 4. Multiplier = median_era4 /
-    median_era_from. Fall back to documented values when a cell is empty
-    (e.g., fewer than 20 era-1 QB seasons in our 1999+ window).
-    """
     samples: Dict[Tuple[str, str, int], List[float]] = defaultdict(list)
     for c in careers.values():
         for s in c.seasons:
@@ -669,158 +369,57 @@ def build_era_pace_table(careers: Dict[str, PlayerCareer]) -> EraPaceTable:
                     mults[pos][stat][era_from] = FALLBACK_MULTIPLIERS[pos][stat].get(era_from, 1.0)
                     continue
                 ratio = med4 / med_from
-                # Clamp to sane band [0.6, 2.0] to avoid one-off seasons
-                # blowing the ratio up.
                 ratio = max(0.6, min(2.0, ratio))
                 mults[pos][stat][era_from] = ratio
     return EraPaceTable(multipliers=mults, source="corpus")
 
 
 # ---------------------------------------------------------------------------
-# Projection
+# CareerArc construction
 # ---------------------------------------------------------------------------
 
-def _project_comp_post_age(
-    comp: PlayerCareer,
-    age_floor: int,
-    pace: EraPaceTable,
-    scoring: Dict[str, float],
-) -> Tuple[float, int]:
-    """Re-score a retired comp's post-age career through modern era-pace
-    and the supplied fantasy scoring rules.
-
-    Returns (total_projected_points, n_seasons).
-    """
-    total = 0.0
-    n = 0
-    for s in comp.seasons_after_age(age_floor):
+def _career_to_arc_seasons(career: PlayerCareer) -> List[Dict]:
+    """Convert a PlayerCareer's seasons into the dict-of-dicts shape that
+    ``fantasy_arc.build_career_arc`` expects."""
+    out: List[Dict] = []
+    for s in career.seasons:
         if s.games < MIN_GAMES_PER_SEASON:
             continue
-        season_pts = 0.0
-        era_from = s.era
-        for stat, weight in scoring.items():
-            raw = s.stats.get(stat, 0.0)
-            mult = pace.get(comp.position, stat, era_from)
-            season_pts += raw * mult * weight
-        # Time-discount by years out from current (n=0 is first projected year)
-        season_pts *= (1.0 - DISCOUNT_PER_YEAR) ** n
-        total += season_pts
-        n += 1
-    return total, n
+        out.append({
+            "season": s.season,
+            "age": s.age,
+            "games": s.games,
+            "era": s.era,
+            "stats": s.stats,
+        })
+    return out
 
 
-def find_comps(
-    target: PlayerCareer,
-    long_arc_corpus: List[PlayerCareer],
-    znorm: EraZNorm,
-    through_age: Optional[int],
-    k: int = TOP_K_COMPS,
-    age_window: int = AGE_WINDOW,
-    league_format: str = BASE_FORMAT,
-    cohort_index: Optional[Dict[Tuple[str, str], List["PlayerCareer"]]] = None,
-    target_style: Optional[str] = None,
-    cohort_diag: Optional[Dict[str, object]] = None,
-) -> List[Tuple[PlayerCareer, float]]:
-    """Find top-k similar LONG-ARC comps for a target player at a given age.
-
-    v1.2.0: when ``cohort_index`` is supplied, restrict the comp pool to the
-    target's STYLE bucket; widen to adjacent buckets if the bucket has fewer
-    than ``MIN_COHORT_COMPS`` qualifying comps. ``cohort_diag`` (if passed)
-    records the cohort-fallback path for diagnostics.
-    """
-    tv = player_career_vector(target, znorm, through_age=through_age, league_format=league_format)
-    if tv is None:
-        return []
-    target_age = through_age if through_age is not None else (
-        target.seasons[-1].age if target.seasons else 25
-    )
-
-    # ---- v1.2.0 style-cohort pool selection ---------------------------
-    # Walk the fallback chain widening until we accumulate enough QUALIFIED
-    # candidates (post-age career exists, age-window match, valid vector).
-    # The raw bucket size can be misleading because many of a thin cohort's
-    # members lack post-age production (e.g., the dual-threat bucket has 16
-    # members but ~half retired before age 28).
-    if cohort_index is not None and target_style is not None and target.position in COHORTS:
-        from .style_cohort import cohort_fallback_chain
-        chain = list(cohort_fallback_chain(target.position, target_style))
-    else:
-        chain = [None]
-
-    def _qualified_candidates(pool_iter):
-        out: List[Tuple[PlayerCareer, float]] = []
-        for comp in pool_iter:
-            if comp.position != target.position:
-                continue
-            if comp.player_id == target.player_id:
-                continue
-            if not comp.seasons_after_age(target_age):
-                continue
-            comp_v = player_career_vector(
-                comp, znorm, through_age=target_age + age_window,
-                league_format=league_format,
-            )
-            if comp_v is None:
-                continue
-            ages_in_window = any(
-                abs(s.age - target_age) <= age_window for s in comp.seasons
-            )
-            if not ages_in_window:
-                continue
-            sim = _cosine(tv, comp_v)
-            if sim <= 0:
-                continue
-            out.append((comp, sim))
-        return out
-
-    candidates: List[Tuple[PlayerCareer, float]] = []
-    styles_used: List[str] = []
-    pool_size = 0
-    if chain == [None]:
-        candidates = _qualified_candidates(long_arc_corpus)
-        pool_size = len(long_arc_corpus)
-    else:
-        seen_ids = set()
-        # Cap the widening at the first 2 styles in the fallback chain
-        # (primary + 1 adjacent). The brief's wording is "adjacent style
-        # buckets" — singular adjacent step. Walking the full chain to a
-        # third style pollutes the comp pool (e.g., a dual-threat target
-        # picking up pocket-style retired QBs), defeating the purpose of
-        # cohort restriction. Targets with insufficient candidates after
-        # one adjacent step accept the smaller qualified set.
-        capped_chain = chain[:2]
-        for style in capped_chain:
-            members = cohort_index.get((target.position, style), []) if cohort_index else []
-            if not members:
-                continue
-            # Append only new comps; pool grows monotonically as we widen.
-            new_members = [m for m in members if m.player_id not in seen_ids]
-            for m in new_members:
-                seen_ids.add(m.player_id)
-            new_qualified = _qualified_candidates(new_members)
-            candidates.extend(new_qualified)
-            styles_used.append(style)
-            pool_size += len(members)
-            if len(candidates) >= MIN_COHORT_COMPS:
-                break
-        # Last resort: widen to the full corpus if cohort + adjacent didn't
-        # produce any qualified comps (rare — only when style index is empty).
-        if not candidates:
-            candidates = _qualified_candidates(long_arc_corpus)
-            pool_size = len(long_arc_corpus)
-            if cohort_diag is not None:
-                cohort_diag["raw_fallback"] = True
-
-        if cohort_diag is not None:
-            cohort_diag["primary_style"] = target_style
-            cohort_diag["styles_used"] = styles_used
-            cohort_diag["fallback_chain"] = list(chain)
-            cohort_diag["pool_size"] = pool_size
-            cohort_diag["qualified_count"] = len(candidates)
-            cohort_diag["widened"] = len(styles_used) > 1
-
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    return candidates[:k]
+def _build_arcs(
+    careers: Iterable[PlayerCareer],
+    pace: EraPaceTable,
+) -> Dict[str, CareerArc]:
+    arcs: Dict[str, CareerArc] = {}
+    for c in careers:
+        seasons = _career_to_arc_seasons(c)
+        if not seasons:
+            continue
+        retired = c.is_retired()
+        is_long_arc = c.is_long_arc()
+        arc = build_career_arc(
+            player_id=c.player_id,
+            name=c.name,
+            position=c.position,
+            last_season=c.last_season,
+            rookie_season=c.rookie_season,
+            retired=retired,
+            is_long_arc=is_long_arc,
+            seasons=seasons,
+            pace=pace,
+            formats=SUPPORTED_FORMATS,
+        )
+        arcs[c.player_id] = arc
+    return arcs
 
 
 # ---------------------------------------------------------------------------
@@ -829,22 +428,23 @@ def find_comps(
 
 @dataclass
 class EngineResult:
-    rankings: List[Dict]                             # sorted production list
-    comps: Dict[str, List[Dict]]                    # player_id -> comp list
+    rankings: List[Dict]
+    comps: Dict[str, List[Dict]]
     era_pace: EraPaceTable
-    znorm: EraZNorm
     careers: Dict[str, PlayerCareer]
     long_arc_corpus: List[PlayerCareer]
     active_players: List[PlayerCareer]
     career_length_era: Optional[CareerLengthEraTable] = None
-    # v1.2.0 — style cohort plumbing.
-    cohort_index: Optional[Dict[Tuple[str, str], List["PlayerCareer"]]] = None
-    cohort_diag: Optional[Dict[str, Dict[str, object]]] = None
+    # v2.0 — fantasy-arc data
+    arcs: Dict[str, CareerArc] = field(default_factory=dict)
+    long_arc_arcs: List[CareerArc] = field(default_factory=list)
+    percentile_table: Optional[CareerStagePercentileTable] = None
     base_format: str = BASE_FORMAT
+    # Removed-in-v2 fields kept as None for downstream readers that hardcode them.
+    znorm: object = None
+    cohort_index: object = None
+    cohort_diag: object = None
 
-    # Back-compat alias for v1.0 callers that expected ``retired_corpus``.
-    # v1.1 broadens the corpus to "long-arc" (see module docstring), but the
-    # name is retained as a property so report.py / older scripts keep working.
     @property
     def retired_corpus(self) -> List[PlayerCareer]:
         return self.long_arc_corpus
@@ -857,8 +457,6 @@ class EngineResult:
 
 
 def _is_active(career: PlayerCareer, current_season: int) -> bool:
-    """Active = last_season >= current_season - 1, AND at least one qualifying
-    NFL season on file."""
     if not career.seasons:
         return False
     if career.last_season is None:
@@ -866,16 +464,18 @@ def _is_active(career: PlayerCareer, current_season: int) -> bool:
     return career.last_season >= (current_season - 1)
 
 
-def _comp_tier_label(top_comp: PlayerCareer, top_comp_career_ppr: float) -> str:
-    """Compact label like 'elite (Megatron)' or 'above-avg (Boldin)'."""
-    # Tier bands chosen from corpus distribution: top 5% ≈ "elite"; top 20%
-    # ≈ "above-avg"; top 40% ≈ "starter"; else "deep".
+def _comp_tier_label(top_comp: CareerArc, top_comp_career_fp: float) -> str:
+    """Compact label like 'elite (Megatron)' or 'above-avg (Boldin)'.
+
+    Tiers re-anchored to fp_total (sf_ppr) since v2.0 ranks by projected
+    fantasy points, not PPR-only points.
+    """
     tier = "deep"
-    if top_comp_career_ppr >= 1800:
+    if top_comp_career_fp >= 1800:
         tier = "elite"
-    elif top_comp_career_ppr >= 1100:
+    elif top_comp_career_fp >= 1100:
         tier = "above-avg"
-    elif top_comp_career_ppr >= 600:
+    elif top_comp_career_fp >= 600:
         tier = "starter"
     return f"{tier} ({top_comp.name})"
 
@@ -887,15 +487,14 @@ def run_engine(
     top_k: int = TOP_K_COMPS,
     persist: bool = True,
 ) -> EngineResult:
-    scoring = scoring or DEFAULT_SCORING
-
+    # NOTE: the ``scoring`` parameter is retained for API back-compat but is
+    # not used by the v2.0 engine — the fantasy arc corpus is pre-computed
+    # across SUPPORTED_FORMATS and the ranking always uses BASE_FORMAT.
+    # Per-format ranks are produced downstream by format_overlay.
     careers = load_corpus()
-    znorm = build_era_z_norm(careers)
     pace = build_era_pace_table(careers)
 
-    # v1.1 long-arc corpus. For long-arc-but-active members, replace the
-    # career with a completed-seasons-only copy so the comp pool can never
-    # leak an in-progress season into the projection.
+    # v1.1 long-arc corpus selection.
     long_arc_corpus: List[PlayerCareer] = []
     for c in careers.values():
         if len(c.seasons) < 2:
@@ -905,20 +504,44 @@ def run_engine(
         if c.is_retired(through=retired_through):
             long_arc_corpus.append(c)
         else:
-            # Long-arc-but-still-active: only include completed seasons.
             trimmed = c.with_completed_seasons_only(current_season)
             if len(trimmed.seasons) >= 2:
                 long_arc_corpus.append(trimmed)
 
-    # Career-length era multipliers (corpus-derived) for dual-threat lift.
+    # Career-length era multipliers (corpus-derived).
     career_length_era = build_career_length_era_table(
         long_arc_corpus, era_for_season,
     )
 
-    # v1.2.0 — build style-cohort index under the BASE format.
-    base_scoring_coefs = LEAGUE_SCORING.get(BASE_FORMAT, LEAGUE_SCORING["sf_ppr"])
-    cohort_index = index_corpus_by_cohort(long_arc_corpus, base_scoring_coefs)
-    cohort_diag: Dict[str, Dict[str, object]] = {}
+    # Build fantasy-point arcs for the entire corpus + actives.
+    arcs = _build_arcs(careers.values(), pace)
+    # The long-arc-arc list. For long-arc-but-still-active members, we must
+    # use a TRIMMED arc (completed seasons only). Build a parallel set keyed
+    # by player_id → trimmed arc.
+    long_arc_arcs: List[CareerArc] = []
+    for c in long_arc_corpus:
+        # ``c`` is already trimmed for active veterans in the loop above.
+        seasons = _career_to_arc_seasons(c)
+        if not seasons:
+            continue
+        arc = build_career_arc(
+            player_id=c.player_id,
+            name=c.name,
+            position=c.position,
+            last_season=c.last_season,
+            rookie_season=c.rookie_season,
+            retired=c.is_retired(through=retired_through),
+            is_long_arc=True,
+            seasons=seasons,
+            pace=pace,
+            formats=SUPPORTED_FORMATS,
+        )
+        long_arc_arcs.append(arc)
+
+    # Percentile table from long-arc corpus.
+    percentile_table = build_career_stage_percentile_table(
+        long_arc_arcs, league_format=BASE_FORMAT,
+    )
 
     active_players = [
         c for c in careers.values()
@@ -927,66 +550,87 @@ def run_engine(
 
     rankings: List[Dict] = []
     comps_map: Dict[str, List[Dict]] = {}
-
-    # Era 4 is the lift target (this is what 'current' QBs play in).
     CURRENT_ERA = 4
 
     for ap in active_players:
-        # Use the player's most recent age as the projection age floor.
-        # If birth_date is missing, fall back to estimated age from rookie+22.
+        target_arc = arcs.get(ap.player_id)
+        if target_arc is None or not target_arc.career_arc:
+            continue
         last_season = ap.seasons[-1]
         age_now = last_season.age
-        target_style = cohort_for(ap, base_scoring_coefs)
-        diag: Dict[str, object] = {}
-        comps = find_comps(
-            ap, long_arc_corpus, znorm,
-            through_age=age_now,
-            k=top_k,
-            league_format=BASE_FORMAT,
-            cohort_index=cohort_index,
-            target_style=target_style,
-            cohort_diag=diag,
-        )
-        if diag:
-            cohort_diag[ap.player_id] = diag
-        if not comps:
-            continue
-        # Weighted projection.
-        total_sim = sum(s for _, s in comps) or 1.0
-        weighted_points = 0.0
-        weighted_seasons = 0.0
-        comp_records: List[Dict] = []
-        for comp, sim in comps:
-            pts, nseasons = _project_comp_post_age(
-                comp, age_floor=age_now, pace=pace, scoring=scoring,
-            )
-            w = sim / total_sim
-            weighted_points += pts * w
-            weighted_seasons += nseasons * w
-            comp_records.append({
-                "player_id": comp.player_id,
-                "name": comp.name,
-                "position": comp.position,
-                "last_season": comp.last_season,
-                "similarity": round(float(sim), 4),
-                "career_ppr": round(comp.career_ppr(), 1),
-                "post_age_projected_pts": round(pts, 1),
-                "post_age_seasons": nseasons,
-            })
 
-        # v1.1.0 calibration: career-length era lift for dual-threat / mobile QBs.
-        # Applies AFTER KNN-weighted projection. One-way: only raises projections.
+        proj = arc_project_player(
+            target=target_arc,
+            long_arc_corpus=long_arc_arcs,
+            target_age=age_now,
+            league_format=BASE_FORMAT,
+            percentile_table=percentile_table,
+            k=top_k,
+        )
+        if not proj.comps:
+            continue
+
+        weighted_points = proj.projected_remaining_fp
+        weighted_seasons = proj.projected_remaining_seasons
+
+        # v1.1.0 career-length era lift — v2.0 keeps it as a MILD lift on
+        # projected fantasy points for mobile/dual-threat QBs only.
+        #
+        # Why milder than v1.1: the v2.0 fantasy-arc methodology already
+        # surfaces long-career comps (Manning, Brees, Rodgers, Stafford,
+        # Cam) for any high-fp dual-threat target via their actual
+        # similarity score — we are no longer comp-pool-starved. The
+        # 1.50× multiplier from v1.1 was correcting for a v1.x sample-
+        # bias bug that this methodology doesn't have. We retain a
+        # smaller lift (1.10 dual-threat, 1.05 mobile) to acknowledge
+        # that modern medicine + rule changes do extend mobile careers
+        # AT THE TAIL, but we don't over-compound it on top of an
+        # already-fantasy-points-anchored projection.
+        #
+        # The display ``projected_years_remaining`` keeps the FULL v1.1
+        # lift so the UI accurately reflects "these QBs play longer".
         qb_style = STYLE_POCKET
         qb_rypg = 0.0
-        lift = 1.00
+        lift_fp = 1.00     # applied to fp projection (mild)
+        lift_years = 1.00  # applied to display years_remaining (full v1.1 lift)
         if ap.position == "QB":
             qb_style = style_for_career(ap)
             qb_rypg = career_rushing_rate(ap)
-            lift = career_length_era.get_lift(qb_style, CURRENT_ERA)
-        weighted_points = apply_lift(weighted_points, lift)
-        weighted_seasons = apply_lift(weighted_seasons, lift)
+            lift_years = career_length_era.get_lift(qb_style, CURRENT_ERA)
+            if qb_style == STYLE_DUAL_THREAT:
+                lift_fp = 1.10
+            elif qb_style == STYLE_MOBILE:
+                lift_fp = 1.05
+        weighted_points = apply_lift(weighted_points, lift_fp)
+        weighted_seasons = apply_lift(weighted_seasons, lift_years)
 
-        top_comp = comps[0][0]
+        top_comp = proj.comps[0].arc
+        # Record comp list — keep the same shape as v1.x for format_overlay
+        # / report.py.
+        comp_records: List[Dict] = []
+        for c in proj.comps:
+            pts, n_seasons = arc_project_remaining(
+                c.arc, age_floor=c.snapshot_age, league_format=BASE_FORMAT,
+            )
+            comp_records.append({
+                "player_id": c.arc.player_id,
+                "name": c.arc.name,
+                "position": c.arc.position,
+                "last_season": c.arc.last_season,
+                "similarity": round(float(c.similarity), 4),
+                "career_ppr": round(c.arc.career_total_fp.get(BASE_FORMAT, 0.0), 1),
+                "post_age_projected_pts": round(pts, 1),
+                "post_age_seasons": n_seasons,
+                # v2.0 extras for the player page UI
+                "snapshot_age": c.snapshot_age,
+                "peak_3yr_fp_per_game": round(c.arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+                "peak_season_fp_per_game": round(c.arc.peak_season_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+                "career_arc_fp_per_game": [
+                    {"age": s.age, "fp_per_game": round(s.fp_per_game.get(BASE_FORMAT, 0.0), 2)}
+                    for s in c.arc.career_arc
+                ],
+            })
+
         rankings.append({
             "player_id": ap.player_id,
             "name": ap.name,
@@ -997,27 +641,36 @@ def run_engine(
             "projected_years_remaining": round(weighted_seasons, 1),
             "top_comp": top_comp.name,
             "top_comp_id": top_comp.player_id,
-            "comp_tier": _comp_tier_label(top_comp, top_comp.career_ppr()),
-            "n_comps": len(comps),
+            "comp_tier": _comp_tier_label(top_comp, top_comp.career_total_fp.get(BASE_FORMAT, 0.0)),
+            "n_comps": len(proj.comps),
             "qb_style": qb_style if ap.position == "QB" else None,
             "qb_career_rypg": round(qb_rypg, 1) if ap.position == "QB" else None,
-            "career_length_lift": round(lift, 3),
-            # v1.2.0: style-cohort metadata
-            "style_cohort": target_style,
-            "cohort_pool_size": diag.get("pool_size") if diag else None,
-            "cohort_widened": diag.get("widened") if diag else None,
-            "cohort_styles_used": diag.get("styles_used") if diag else None,
+            "career_length_lift": round(lift_years, 3),
+            "career_length_lift_fp": round(lift_fp, 3),
+            # v2.0 projection diagnostics
+            "comp_weighted_fp": round(proj.comp_weighted_fp, 1),
+            "peak_anchored_fp": round(proj.peak_anchored_fp, 1),
+            "projection_path": (
+                "peak_anchored" if proj.peak_anchored_fp > proj.comp_weighted_fp
+                else "comp_weighted"
+            ),
+            # v2.0 player-arc metrics
+            "peak_3yr_fp_per_game": round(target_arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+            "peak_season_fp_per_game": round(target_arc.peak_season_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+            "career_avg_fp_per_game": round(target_arc.career_avg_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+            "career_total_fp_to_date": round(target_arc.career_total_fp.get(BASE_FORMAT, 0.0), 1),
+            # v1.2 cohort fields retained as None for downstream readers
+            "style_cohort": None,
+            "cohort_pool_size": None,
+            "cohort_widened": None,
+            "cohort_styles_used": None,
         })
         comps_map[ap.player_id] = comp_records
 
     rankings.sort(key=lambda r: r["production_score"], reverse=True)
-    # Assign tiers (T1-T9 on production_score quantile buckets).
     n = len(rankings)
     for i, row in enumerate(rankings):
         row["overall_rank"] = i + 1
-        # Roughly even-weight tiers, but log-weighted so T1 is small (top ~12).
-        # Simple bucket: T1=top12, T2=13-24, T3=25-48, T4=49-72, T5=73-108,
-        # T6=109-144, T7=145-200, T8=201-260, T9=261+
         thresholds = [12, 24, 48, 72, 108, 144, 200, 260]
         tier = 9
         for t_idx, th in enumerate(thresholds, start=1):
@@ -1030,13 +683,13 @@ def run_engine(
         rankings=rankings,
         comps=comps_map,
         era_pace=pace,
-        znorm=znorm,
         careers=careers,
         long_arc_corpus=long_arc_corpus,
         active_players=active_players,
         career_length_era=career_length_era,
-        cohort_index=cohort_index,
-        cohort_diag=cohort_diag,
+        arcs=arcs,
+        long_arc_arcs=long_arc_arcs,
+        percentile_table=percentile_table,
         base_format=BASE_FORMAT,
     )
 
@@ -1048,12 +701,13 @@ def run_engine(
 
 def _persist(result: EngineResult, current_season: int) -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    # rankings.json
     payload = {
         "generated_at_season": current_season,
+        "engine_version": "v2.0",
+        "methodology": "fantasy-point-arc",
         "n_active": len(result.active_players),
         "n_long_arc": len(result.long_arc_corpus),
-        "n_retired": len(result.long_arc_corpus),   # v1.0 backcompat
+        "n_retired": len(result.long_arc_corpus),  # back-compat
         "n_ranked": len(result.rankings),
         "era_pace_source": result.era_pace.source,
         "era_pace": result.era_pace.multipliers,
@@ -1071,13 +725,9 @@ def _persist(result: EngineResult, current_season: int) -> None:
     (OUT_ROOT / "rankings.json").write_text(
         json.dumps(payload, indent=2, default=float), encoding="utf-8"
     )
-    # comps.json (sidecar map)
     (OUT_ROOT / "comps.json").write_text(
         json.dumps(result.comps, indent=2, default=float), encoding="utf-8"
     )
-    # long_arc_corpus summary (lightweight). Filename kept as retired_corpus.json
-    # for downstream tooling backwards-compat, but it now represents the v1.1
-    # long-arc pool.
     long_arc = [
         {
             "player_id": c.player_id,
@@ -1095,32 +745,8 @@ def _persist(result: EngineResult, current_season: int) -> None:
     (OUT_ROOT / "long_arc_corpus.json").write_text(
         json.dumps(long_arc, indent=2, default=float), encoding="utf-8"
     )
-
-    # v1.2.0 cohort diagnostics.
-    diag_root = Path("data/diagnostics")
-    diag_root.mkdir(parents=True, exist_ok=True)
-    cohort_stats_payload: Dict = {
-        "base_format": result.base_format,
-        "cohort_sizes": cohort_summary(result.cohort_index or {}),
-        "per_player_widened_count": sum(
-            1 for d in (result.cohort_diag or {}).values() if d.get("widened")
-        ),
-        "per_position_widened_rate": {},
-    }
-    # Compute per-position widened rate.
-    by_pos: Dict[str, List[bool]] = {}
-    for ap in result.active_players:
-        d = (result.cohort_diag or {}).get(ap.player_id, {})
-        if "widened" not in d:
-            continue
-        by_pos.setdefault(ap.position, []).append(bool(d["widened"]))
-    cohort_stats_payload["per_position_widened_rate"] = {
-        pos: round(sum(flags) / max(len(flags), 1), 3)
-        for pos, flags in by_pos.items()
-    }
-    (diag_root / "v1.2_cohort_stats.json").write_text(
-        json.dumps(cohort_stats_payload, indent=2, default=float), encoding="utf-8"
-    )
+    # v2.0 fantasy-arc corpus sidecar.
+    persist_corpus(result.long_arc_arcs, out_path=OUT_ROOT_V2 / "fantasy_arc_corpus.json")
 
 
 # Convenience accessor for tests / debugging.

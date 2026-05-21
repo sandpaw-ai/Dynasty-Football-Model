@@ -237,28 +237,28 @@ def _build_rankings(engine: EngineResult, latest_ts: datetime, league_label: str
     body = f"""<div class="container">
 
 <h2>Dynasty Football <span class="accent">Rankings</span></h2>
-<p class="lede">A clean, similarity-driven dynasty NFL ranking. Each active
-player is matched against <strong>long-arc</strong> NFL players (retired ∪ 8+ season
-veterans) with similar production shape at the same career age. Their realised
-remaining careers are then projected forward through modern era-pace
-multipliers, scored under {_esc(league_label)} scoring, and (for dual-threat /
-mobile QBs) lifted by a career-length era adjustment to correct for the
-short-career bias in the historical comp pool.</p>
+<p class="lede">Players ranked by projected lifetime fantasy points,
+comped to historical players with similar <strong>fantasy production curves</strong>
+under modern scoring. Each active player's fp/g arc is matched against the
+<strong>long-arc</strong> NFL corpus (retired ∪ 8+ season veterans). Comps' realised
+post-snapshot fantasy points (era-pace adjusted to current era, scored under
+{_esc(league_label)}) are similarity-weighted and time-discounted into a
+projected remaining career.</p>
 
 <div class="kpi-row">
   <div class="kpi"><div class="num">{len(engine.rankings):,}</div><div class="label">Active players ranked</div></div>
   <div class="kpi"><div class="num">{len(engine.long_arc_corpus):,}</div><div class="label">Long-arc comp pool</div></div>
-  <div class="kpi"><div class="num">v1.1</div><div class="label">Engine · dual-threat calibrated</div></div>
+  <div class="kpi"><div class="num">v2.0</div><div class="label">Engine · fantasy-point arc</div></div>
 </div>
 
-<div class="callout"><strong>v1.1.0 — dual-threat QB calibration.</strong> The
-v1.0 retired-only similarity engine systematically underprojected modern
-dual-threat QBs (Allen, Lamar, Hurts, Daniels) because their style-matched
-retired comp pool had careers cut short by injury and the pre-modern rules
-environment. v1.1 (a) broadens the comp pool to long-arc veterans like Aaron
-Rodgers, Stafford and Russell Wilson, and (b) applies a per-style, per-era
-career-length lift (capped at 1.5×). See
-<a href="methodology.html">Methodology</a>.</div>
+<div class="callout"><strong>v2.0.0 — fantasy-point-arc methodology.</strong>
+v1.x ranked players by per-stat z-score shape: "who do their counting stats
+look like?" That structurally buried Josh Allen and the modern dual-threat
+elite because z-scoring is scale-invariant within era — it ignored that
+rushing TDs score 6 pts each. v2.0 ranks players by the
+<strong>fantasy points they actually produce</strong> under modern scoring, comping
+them to historical players whose fp/g curves match. Elite-fp QBs cluster at
+the top regardless of style. See <a href="methodology.html">Methodology</a>.</div>
 
 <div class="controls">
   <input id="q" placeholder="Search by player name…" type="search">
@@ -430,45 +430,21 @@ def _build_methodology(engine: EngineResult, latest_ts: datetime,
 
     body = f"""<div class="container narrow">
 
-<h2>v1.0 <span class="accent">Methodology</span></h2>
+<h2>v2.0 <span class="accent">Methodology — Fantasy-Point Arc</span></h2>
 
-<p class="lede">The Dynasty Football Model v1.0 is a deliberate rewrite. v0.x
-composed 10+ ranking sources with hand-tuned weights and overlays. v1.0 is
-a single engine: era-adjusted similarity to retired NFL players, projected
-forward through modern era-pace multipliers, scored under your league
-format.</p>
+<p class="lede">v1.x ranked players by per-stat z-score shape — "who do their
+counting stats look like?" That structurally buried elite dual-threats like
+Josh Allen because z-scoring is scale-invariant within era and ignored that a
+rushing TD scores 6 points. v2.0 replaces the engine: players are matched by
+their <strong>fantasy production curves</strong> under modern scoring, then
+projected forward against historical players with similar curves.</p>
 
-<h3>1 · The retired corpus</h3>
-<p>The comp pool is restricted to players whose final NFL season is on or before
-2022 (3+ years inactive). This avoids comparing active players to in-progress
-careers and keeps the projection honest: every comp has a fully realised
-remaining career we can re-score and average.</p>
-<p>Per the brief: Puka Nacua should be compared to retired greats like Calvin
-Johnson and Randy Moss, not to peers like Justin Jefferson whose career is
-still being written.</p>
-
-<h3>2 · Era buckets</h3>
-<p>Every player-season is bucketed into one of four eras. The brief specified
-1980-1994 / 1995-2004 / 2005-2014 / 2015-present; the on-disk corpus
-(nflverse player_stats_season) starts in 1999, so Era 1 here effectively
-covers 1999-2004. The conceptual structure is unchanged: monotonically
-inflating passing volume and rising QB rushing usage across the four
-buckets.</p>
-
-<h3>3 · Era-normalised similarity</h3>
-<p>For each (position, era, stat), we compute mean + std of the per-game rate
-across qualifying seasons. A player's career vector is the games-weighted
-average of their per-season era z-scores across the position's feature set
-(QB: passing yds/TDs, INTs, rushing yds/TDs; RB: rushing + receiving;
-WR/TE: receiving). Similarity is cosine distance between vectors.</p>
-<p>A 2010 Peyton Manning at 285 yds/game looks era-elite (top 5% of Era-3
-QBs); a 2024 Justin Herbert at 285 yds/game looks era-average (top 50% of
-Era-4 QBs). The engine sees them differently.</p>
-
-<h3>4 · Era-pace projection</h3>
-<p>To project a retired comp's post-age career forward to modern NFL pace,
-every season's stats are multiplied by an empirically-calibrated
-position+stat+era_from→Era-4 ratio. The full table for this build:</p>
+<h3>1 · Era-pace pre-adjustment of historical stats</h3>
+<p>Before any scoring or similarity math, every historical season's raw
+stat line is multiplied by an empirically-calibrated
+position+stat+era_from→Era-4 ratio. A 2010 Peyton Manning passing-yards
+total becomes "what would this season produce if it happened today". The
+full table:</p>
 
 <table style="margin-top:8px">
 <thead><tr><th>Pos</th><th>Stat</th><th>Era 1→4</th><th>Era 2→4</th><th>Era 3→4</th><th>Era 4→4</th></tr></thead>
@@ -476,51 +452,84 @@ position+stat+era_from→Era-4 ratio. The full table for this build:</p>
 </table>
 <p class="lede" style="margin-top:8px">Source: <code>{_esc(engine.era_pace.source)}</code> ·
 multipliers derived from the median per-game rate within each era × position × stat cell,
-clamped to [0.6, 2.0] to avoid one-off outlier seasons distorting the projection.</p>
+clamped to [0.6, 2.0].</p>
+
+<h3>2 · Fantasy-point arc corpus</h3>
+<p>Era-adjusted stats are run through {_esc(league_label)} scoring (plus
+sf_ppr, 1qb_ppr, 2qb_ppr, half_ppr, std, sf_te_premium variants) to
+produce a <code>fp_per_game</code> arc for every player-season. The result
+is a per-player, per-format career arc in MODERN-fp-equivalent units —
+completely free of stat-shape distortion.</p>
+
+<h3>3 · The long-arc corpus</h3>
+<p>The comp pool is restricted to <em>long-arc</em> players: retired through
+2022 OR 8+ NFL seasons OR 33+ years old with 6+ seasons. Long-arc active
+veterans (Rodgers, Stafford, Russell Wilson) contribute only their COMPLETED
+seasons — the in-progress season never leaks.</p>
+
+<h3>4 · Fantasy-arc similarity vector (10-dim, in fp units)</h3>
+<ol>
+  <li><code>v[0]</code> = fp/g at the current age (weight 1.0)</li>
+  <li><code>v[1]</code> = fp/g at age-1 (weight 0.7)</li>
+  <li><code>v[2]</code> = fp/g at age-2 (weight 0.5)</li>
+  <li><code>v[3]</code> = career-avg fp/g through current age</li>
+  <li><code>v[4]</code> = peak-3yr-avg fp/g through current age</li>
+  <li><code>v[5]</code> = peak-single-season fp/g (any age through current)</li>
+  <li><code>v[6]</code> = career-total fp through current age (scaled / 100)</li>
+  <li><code>v[7]</code> = trajectory slope (fp/g per career-season)</li>
+  <li><code>v[8]</code> = durability (games / possible_games)</li>
+  <li><code>v[9]</code> = career-stage fp percentile within position</li>
+</ol>
+<p>Similarity is feature-importance-weighted inverse-distance (not cosine
+because we want magnitude to matter): two players with similar fp/g
+production trajectories under modern scoring are similar, regardless of
+how they earned those points.</p>
 
 <h3>5 · Projection pipeline</h3>
 <ol>
-  <li>For an active player at age <em>A</em> with <em>N</em> seasons, find the top-{20}
-      retired comps at the same position, same age (±1), highest era-normalised
-      cosine similarity.</li>
-  <li>For each comp, take their realised seasons from age <em>A+1</em> onward.</li>
-  <li>Re-score each comp season by era-pace multiplier × your league's scoring
-      table.</li>
-  <li>Time-discount future seasons by 5%/year (present value).</li>
-  <li>Aggregate similarity-weighted projected fantasy points → production_score.</li>
+  <li>For an active player at age <em>A</em>, find top-20 long-arc comps at
+      same position, age ±1, career-stage ±1, ranked by
+      feature-weighted similarity.</li>
+  <li>For each comp, sum their realised post-age fantasy points under the
+      target format (already in modern-fp units — era-pace was applied at
+      corpus build).</li>
+  <li>Time-discount 5%/year, similarity-weight, sum → <code>comp_weighted_fp</code>.</li>
+  <li>Compute <code>peak_anchored_fp</code> = target's projection-rate ×
+      17 games × expected remaining years × mid-life discount factor.
+      Projection-rate = <em>max(recent_3yr × 1.10, peak_3yr × 0.90)</em> —
+      blends current form with all-time ceiling so a single down year
+      doesn't crash a proven star.</li>
+  <li>Take <code>max(comp_weighted_fp, peak_anchored_fp)</code> when the
+      target's peak-3yr clears the elite tier (QB ≥18, RB ≥15, WR ≥16,
+      TE ≥12). Sub-elite players fall back to comp-weighted.</li>
+  <li>For mobile / dual-threat QBs, multiply by 1.05–1.10 (modern
+      medicine continues to extend mobile-QB careers; lift on projected
+      years remaining matches v1.1 at up to 1.50× for display).</li>
 </ol>
 
-<h3>6 · Format overlay</h3>
-<p>The base <a href="rankings.html">Rankings</a> page uses Superflex PPR as
-the default scoring. The <a href="league.html">League Overlay</a> page lets
-you switch presets (1QB, 2QB, SF TE-Premium) and re-applies the same
-comp-projection pipeline under the new scoring + roster rules. The
-positional VORP baseline is recomputed from the overlay's own
-projections — small leagues / superflex / 2QB all reshape who's "above
-replacement" differently.</p>
+<h3>6 · Why this is dynasty-appropriate</h3>
+<p>Dynasty value is the projected lifetime fantasy points a player will
+score for your roster. v1.x's stat-shape matching answered a different
+question ("what shape of NFL career does this player project to have?")
+which correlated imperfectly with fantasy production. v2.0 measures the
+thing we actually care about directly: <em>fantasy points produced under
+modern scoring</em>.</p>
 
-<h3>7 · Prospects (separate page)</h3>
-<p><a href="prospects.html">Prospects</a> is a deliberately decoupled page.
-Rookies and college players don't share an engine with NFL veterans — the
-similarity model needs NFL production data, and prospects don't have any
-yet. The prospects view exists for completeness but does not feed the
-main rankings.</p>
+<h3>7 · Format overlay</h3>
+<p>The base <a href="rankings.html">Rankings</a> page uses Superflex PPR.
+The <a href="league.html">League Overlay</a> page reads per-format
+fp totals directly from the pre-computed arc corpus (no re-scoring needed)
+and recomputes positional VORP baselines under the target roster rules.</p>
 
 <h3>Known limitations</h3>
 <ul>
-  <li>Corpus starts in 1999. Players who retired before then (Jim Brown, OJ
-      Simpson) are not in the comp pool. Era 1 → 4 multipliers for pre-1999
-      seasons fall back to the documented table when corpus medians are
-      unavailable.</li>
-  <li>Mobile-QB comps lean on Daunte Culpepper / Cam Newton / Steve McNair /
-      Donovan McNabb / Randall Cunningham. The pocket-passer greats
-      (Brady, Manning, Brees, Favre) score lower on dual-threat z-scores
-      and may not surface as top-5 comps for runners like Josh Allen,
-      Jalen Hurts, or Lamar Jackson. This is the engine reflecting reality:
-      rushing QBs <em>are</em> a different production shape.</li>
-  <li>Birth dates are missing for some retired players. We fall back to
-      <em>rookie_season + 22</em> as an age estimate. This affects ~2% of
-      the corpus.</li>
+  <li>Corpus starts in 1999. Pre-1999 retired greats (Jim Brown, Steve Young
+      peak, Barry Sanders, Jerry Rice) are not fully represented.</li>
+  <li>Birth dates missing for some retired players — we fall back to
+      <em>rookie_season + 22</em> as an age estimate (~2% of corpus).</li>
+  <li>Sample-of-1 comp pools (e.g. Aaron Rodgers at 41 with only Tom Brady
+      as a same-age comp) fall back to comp-weighted only — the
+      peak-anchored projection requires ≥3 comps.</li>
 </ul>
 
 </div>"""
@@ -625,7 +634,7 @@ things.</p>
 # ---------------------------------------------------------------------------
 
 def _player_header(row: Dict, team: str, league_label: str) -> str:
-    # v1.1.0: surface QB style classification and career-length lift.
+    # v2.0: surface QB style classification + fantasy-arc metrics.
     qb_style = row.get("qb_style")
     style_badge = ""
     if row.get("position") == "QB" and qb_style:
@@ -639,29 +648,30 @@ def _player_header(row: Dict, team: str, league_label: str) -> str:
             f" · <span class=\"style-badge style-{qb_style}\">"
             f"{style_label} ({rypg:.1f} ru/g)</span>"
         )
-    lift = row.get("career_length_lift") or 1.0
+    lift_yr = row.get("career_length_lift") or 1.0
+    lift_fp = row.get("career_length_lift_fp") or 1.0
     lift_panel = ""
-    if row.get("position") == "QB" and lift > 1.0:
+    if row.get("position") == "QB" and (lift_yr > 1.0 or lift_fp > 1.0):
         era_note = (
-            "era 4 modern medicine + RPO scheme adjustment"
+            "modern medicine + RPO scheme adjustment"
             if qb_style == "dual_threat"
-            else "era 4 mobile-QB longevity adjustment"
+            else "mobile-QB longevity adjustment"
         )
         lift_panel = (
             f"<div class=\"callout\" style=\"margin-top:14px\">"
             f"<strong>{('Dual-threat' if qb_style=='dual_threat' else 'Mobile')} "
-            f"career-length lift: {lift:.2f}×</strong> — {era_note}. "
-            f"v1.1.0 corrects for the short-career bias in the historical "
-            f"comp pool by lifting projected_remaining_years and "
-            f"projected_fantasy_points by this factor. The lift is one-way "
-            f"(never lowers a projection) and capped at 1.5×."
+            f"career-length lift: {lift_fp:.2f}× fp / {lift_yr:.2f}× years</strong> "
+            f"— {era_note}. v2.0 retains v1.1's correction for short-career "
+            f"bias in the historical comp pool. Pocket lift = 1.00× (no lift)."
             f"</div>"
         )
+    peak3 = row.get("peak_3yr_fp_per_game") or 0.0
     return f"""<div class="player-header">
   <h1>{_esc(row['name'])}</h1>
   <div class="sub">{_pos_badge(row['position'])} · {_esc(team)} · Rank #{row['overall_rank']} · Tier T{row['tier']}{style_badge}</div>
   <div class="metrics">
-    <div class="metric"><div class="num">{row['production_score']:.0f}</div><div class="label">Production score</div></div>
+    <div class="metric"><div class="num">{row['production_score']:.0f}</div><div class="label">Projected lifetime fp</div></div>
+    <div class="metric"><div class="num">{peak3:.1f}</div><div class="label">Peak 3yr fp/g</div></div>
     <div class="metric"><div class="num">{row['age']}</div><div class="label">Age</div></div>
     <div class="metric"><div class="num">{row['projected_years_remaining']:.1f}</div><div class="label">Yrs remaining</div></div>
     <div class="metric"><div class="num">{row['n_comps']}</div><div class="label">Long-arc comps</div></div>
@@ -675,12 +685,14 @@ def _build_player_page(row: Dict, comps: List[Dict], team: str,
                        league_label: str, latest_ts: datetime) -> str:
     comp_rows = ""
     for c in comps[:10]:
+        comp_peak = c.get("peak_3yr_fp_per_game", 0.0)
         comp_rows += (
             f"<tr>"
             f"<td class='name'>{_esc(c['name'])}</td>"
             f"<td>{_pos_badge(c['position'])}</td>"
             f"<td class='years'>{c['last_season']}</td>"
             f"<td class='score'>{c['similarity']:.3f}</td>"
+            f"<td class='score'>{comp_peak:.1f}</td>"
             f"<td class='years'>{c['post_age_seasons']}</td>"
             f"<td class='years'>{c['career_ppr']:.0f}</td>"
             f"<td class='score'>{c['post_age_projected_pts']:.0f}</td>"
@@ -690,21 +702,24 @@ def _build_player_page(row: Dict, comps: List[Dict], team: str,
     body = f"""{_player_header(row, team, league_label)}
 <div class="container">
 
-<h2>Career-Arc <span class="accent">Comparables</span></h2>
-<p class="lede">The top-10 most similar <em>long-arc</em> NFL players at this
-career stage, by era-normalised production shape. Each row's
-"Projected pts" is what their post-age-{row['age']} career
-would have looked like under modern era-pace and {_esc(league_label)} scoring,
-time-discounted 5%/year. The player's production score is the
-similarity-weighted average across all {row['n_comps']} comps, with v1.1.0's
-career-length era lift applied (see player header above).</p>
+<h2>Fantasy-Point Arc <span class="accent">Comparables</span></h2>
+<p class="lede">The top-10 most similar <em>long-arc</em> NFL players matched by
+<strong>fantasy-point production curve</strong> at this career stage. Each
+comp's "Peak 3yr fp/g" is their best 3-season fp/g average under
+{_esc(league_label)} (era-pace-adjusted to modern). "Projected pts" is what
+their post-age-{row['age']} career would have produced under modern scoring,
+time-discounted 5%/year. The player's projected lifetime fantasy points is
+computed as the max of the similarity-weighted comp projection and the
+target's own peak-anchored projection (proven elite producers don't get
+dragged down by an occasional low-projection comp).</p>
 
 <table>
 <thead><tr>
   <th>Comparable</th><th>Pos</th><th>Last season</th>
   <th style="text-align:right">Similarity</th>
+  <th style="text-align:right">Peak 3yr fp/g</th>
   <th>Their post-age seasons</th>
-  <th>Their career PPR</th>
+  <th>Their career fp</th>
   <th style="text-align:right">Projected pts</th>
 </tr></thead>
 <tbody>{comp_rows}</tbody>

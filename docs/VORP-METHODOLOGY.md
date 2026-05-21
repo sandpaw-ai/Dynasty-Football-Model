@@ -201,6 +201,20 @@ SF tier).
    vector (3-year rolling profile + tier indicator) that finds
    elite-tier comps more reliably. Folded into a future PR.
 
+   **Update (v0.18.0, PR #18):** The self-projection floor now has
+   an ELITE_PROVEN branch that swaps the base-points from
+   `mean(recent 3)` to `0.30 × mean(recent 3) + 0.70 × mean(peak 3)`,
+   and adds a hard track-record floor of
+   `career_pace × remaining_yrs × 0.78` for flagged players (Mahomes,
+   Allen, Lamar, Burrow, Hurts, Herbert, etc.). This stacks ON TOP of
+   the VORP layer: the floor lifts `projected_discounted_ppr` BEFORE
+   the VORP subtraction, so the elite-proven boost flows naturally
+   into the dynasty_value rescale. Aging veterans (Rodgers at 41)
+   collapse to ~0 floor because `remaining_yrs` collapses, preserving
+   the aging-decline signal. RB position is explicitly disabled — the
+   RB cliff is real and recent decline IS predictive. Full writeup:
+   `docs/ELITE-PROVEN-CALIBRATION.md`.
+
 4. **Coverage penalty + Bayesian prior interact with VORP rescale.**
    A player with low coverage gets their pre-shift score pulled
    toward the position baseline; if that pull lands them BELOW

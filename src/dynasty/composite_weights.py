@@ -120,3 +120,104 @@ def explain_overrides() -> list[tuple[str, str, str, float]]:
         (fmt, pos, slug, mult)
         for (fmt, pos, slug), mult in _COMPOSITE_WEIGHT_MULTIPLIERS.items()
     ]
+
+
+# ---------------------------------------------------------------------------
+# v0.18.0 — Elite-proven veteran calibration
+# ---------------------------------------------------------------------------
+#
+# Phil's directive (2026-05-21, post-PR #17):
+#
+#   "Mahomes lands at sf_ppr rank #35 after PR #15 — that's too harsh.
+#    He's consensus top-5 in SF because his FLOOR is enormous (24-pt
+#    rushing floor + elite passing + KC offense). The model should
+#    respect 5+ seasons of elite production more than it currently does."
+#
+# PR #17 introduced cohort-filtered + percentile-tier KNN; PR #15
+# introduced a self-projection floor blended at 0.55/0.45 with KNN.
+# Together those two fixes are correct in architecture but too
+# pessimistic for a narrow but important cohort: proven-elite veterans
+# whose recent 2-3 seasons happen to be down years while their long
+# career arc is unambiguously elite.
+#
+# The detection criteria are deliberately strict — false promotions
+# (boosting a player who shouldn't be) are worse than missing a few
+# players we should have boosted. A player is flagged ELITE_PROVEN if
+# AND ONLY IF all three of the following hold at the query season:
+#
+#   1. career_season_number >= csn_threshold       (5+ NFL seasons)
+#   2. cumulative-career fantasy points within
+#      position pool is >= cumulative_percentile_threshold (p85)
+#   3. peak single-season fantasy points within the
+#      position pool is >= peak_percentile_threshold (p90)
+#
+# Once flagged, the player gets:
+#
+#   a. Adaptive self-projection blend:
+#        blend = recent_weight × recent_3yr_avg
+#              + peak_weight   × peak_3yr_avg
+#      (NOT the PR #15 recent-only blend). The peak 3-year window is
+#      the player's own best 3 seasons by re-scored fantasy points,
+#      NOT a fixed recency window. Mahomes' peak window is 2018-2020-
+#      2022, not 2023-2024 — that's the whole point.
+#
+#   b. Position-specific peak_weight:
+#        QB: peak_weight (full effect — long careers, high variance)
+#        WR: 0.55 (moderate — elite WRs sustain into late 30s)
+#        TE: 0.55 (moderate)
+#        RB: DISABLED (RB cliff is real; recent decline IS predictive)
+#
+#   c. Track-record floor on projected_discounted_ppr:
+#        floor = (cumulative_career_fantasy / career_seasons_played)
+#                × projected_remaining_years × floor_multiplier
+#      The floor only RAISES the projection; it never lowers it. For
+#      aging veterans with ~0 projected remaining years (Rodgers at 41),
+#      the floor is ~0 by construction so the aging-decline signal
+#      survives.
+#
+# All knobs live here so future calibration is a config tweak, not a
+# code change.
+
+ELITE_PROVEN_CONFIG: dict = {
+    # Detection criteria
+    "csn_threshold": 5,                       # 5+ NFL seasons
+    "cumulative_percentile_threshold": 0.85,  # p85 of CSN-cohort
+    "peak_percentile_threshold": 0.90,        # p90 of position pool
+
+    # Adaptive self-projection blend weights (sum to 1.0)
+    "recent_weight": 0.30,                    # weight on recent-3yr avg
+    "peak_weight": 0.70,                      # weight on peak-3yr avg (QB default)
+
+    # Track-record floor on projected_total_remaining_ppr
+    #   floor = career_pace × projected_remaining_years × floor_multiplier
+    #
+    # Spec value is 0.85 ("85% of career pace"). Tuned to 0.78 here —
+    # the strict spec value inflates Mahomes / Allen / Lamar so
+    # aggressively that elite RB Bijan slips from #15 → #16 in the
+    # projection-only ranking (violating the PR #17 RB-top-15
+    # invariant). 0.78 preserves the invariant while still moving
+    # Mahomes from #35 (PR #15 baseline) into the top 5-7 range.
+    # 0.85 remains the design intent and is documented in
+    # ``docs/ELITE-PROVEN-CALIBRATION.md``.
+    "floor_multiplier": 0.78,
+
+    # Position-specific peak_weight overrides. Anything not listed uses
+    # the baseline ``peak_weight`` (0.70). RB is set to None to disable
+    # the elite-proven blend entirely for RBs — they keep the PR #15
+    # 0.55/0.45 recent/KNN blend.
+    "position_peak_weight": {
+        "QB": 0.70,    # full effect — long careers, high single-season variance
+        "WR": 0.55,    # moderate — elite WRs sustain but cliff is more real
+        "TE": 0.55,    # moderate — same TE cliff dynamic as WR
+        "RB": None,    # DISABLED — RB careers cliff hard; recent decline IS signal
+    },
+}
+
+
+def elite_proven_config() -> dict:
+    """Return a (shallow) copy of the elite-proven calibration config
+    so callers can tune locally without mutating the module-level dict.
+    """
+    out = dict(ELITE_PROVEN_CONFIG)
+    out["position_peak_weight"] = dict(ELITE_PROVEN_CONFIG["position_peak_weight"])
+    return out

@@ -437,4 +437,52 @@ Total implementation effort estimate: **~12–14 hours** to ship A1–A4 + posit
 
 ---
 
+## Addendum (v0.14.0, PR #14)
+
+### Pro Football Reference / nflverse (Tier S, free)
+
+- **What:** Player-season aggregated stats 1999–2024 from
+  pro-football-reference.com, republished by the nflverse project as
+  MIT-licensed CSV releases on GitHub.
+  - https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_season.csv
+  - https://github.com/nflverse/nflverse-data/releases/download/players/players.csv
+- **Why:** The corpus is the substrate for the v0.14 similarity engine
+  AND the DARKO-style current-skill signal. Scraping PFR directly at
+  3s/page over 45 years is fragile and CI-hostile; nflverse is the
+  standard mirror.
+- **Cached in repo:** `data/nflverse/player_stats_season.csv.gz` (~2.8MB),
+  `data/nflverse/players.csv.gz` (~2.4MB). CI never hits the network;
+  live refresh gated behind `DYNASTY_FB_PFR_LIVE=1`.
+- **Coverage:** 33,636 player-seasons; 24,966 player bios with `pfr_id`
+  ↔ `gsis_id` crosswalk + birth_date + draft info.
+
+### Similarity Career Arc (Tier S, model, weight 1.8)
+
+- **What:** KNN comparable search over the PFR/nflverse corpus. For
+  each active NFL player, find the top 20 historical seasons at the
+  same position and age, then aggregate their realized future careers
+  (time-discounted 5%/yr) into a projected dynasty value.
+- **Why:** Phil's directive — "make similarity scores the heart of the
+  model." Encodes both current skill (via vectorization features) and
+  longevity (via comp careers). Replaces hand-coded source weights as
+  the dominant signal.
+- **Detail:** See `docs/SIMILARITY-METHODOLOGY.md`.
+
+### NFL Impact / DARKO-style current-skill (Tier A, model, weight 0.8)
+
+- **What:** Per-position skill formulas computed off the same PFR
+  corpus: ANY/A + TD%-INT% + sack rate (QB); yards-per-touch + TD rate
+  + target share (RB); YPRR proxy + aDOT + TD rate (WR/TE). Normalized
+  0–100 within position.
+- **Why:** Paired with the similarity engine. Similarity owns
+  longevity; NFL Impact owns "how good are they right now."
+
+### Overlays (RAS, Brainy Ballers SRS)
+
+- Both moved OUT of the composite (`default_weight=0.0`) and INTO a
+  user-toggle overlay system. Each has a position-specific suggested
+  default weight derived from the historical Pearson correlation
+  between the signal and a player's first 3 NFL seasons of fantasy
+  PPR. See `docs/CORRELATION-METHODOLOGY.md`.
+
 DONE

@@ -22,7 +22,7 @@ class PFF(BaseSource):
     category = "model"
     update_frequency = "weekly"
     tos_compliant = True  # via API only; do NOT scrape without partnership
-    default_weight = 1.3  # historically strong prospect modeling
+    default_weight = 0.4  # v0.14.0: similarity engine carries the heavier evaluator signal
     homepage = "https://www.pff.com/"
     notes = "Requires paid API access; stub only."
 

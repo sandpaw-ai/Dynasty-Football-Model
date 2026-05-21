@@ -111,7 +111,11 @@ class RAS(BaseSource):
     tos_compliant = True
     # Modest weight (research §A2 recommends 0.8). The position-aware
     # weighting in PR #6 will let us boost WR/TE/RB and cancel it for QB.
-    default_weight = 0.8
+    # v0.14.0: demoted from 0.8 → 0.0 — RAS is now a USER OVERLAY (see
+    # src/dynasty/overlays.py + data/overlays/correlation_table.json).
+    # Data still synced; weight is 0 in the composite so the overlay can
+    # apply it data-driven.
+    default_weight = 0.0
     homepage = "https://ras.football/"
     notes = (
         "Local CSV ingestion (set DYNASTY_RAS_CSV_PATH or drop file at "

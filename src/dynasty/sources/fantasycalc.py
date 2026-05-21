@@ -23,7 +23,7 @@ class FantasyCalc(BaseSource):
     category = "market"
     update_frequency = "daily"
     tos_compliant = True
-    default_weight = 1.0
+    default_weight = 0.6  # v0.14.0: rebalanced as market signal alongside ffc_adp
     homepage = "https://fantasycalc.com/"
     notes = "Open API; values derived from real trade data."
 

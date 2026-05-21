@@ -1,0 +1,22 @@
+{
+  "ras": {
+    "QB": 0.172,
+    "RB": 0.2284,
+    "WR": 0.1416,
+    "TE": 0.1766
+  },
+  "ras_sample_sizes": {
+    "QB": 245,
+    "RB": 527,
+    "WR": 719,
+    "TE": 354
+  },
+  "brainy_ballers_srs": {
+    "QB": 0.15,
+    "RB": 0.2,
+    "WR": 0.3,
+    "TE": 0.25
+  },
+  "brainy_ballers_srs_confidence": "low (no historical archive)",
+  "methodology": "Pearson correlation between overlay signal and sum of fantasy_points_ppr over a player's first 3 NFL seasons, computed on the nflverse player-season corpus (1999-2024). RAS joined on pfr_id. Brainy Ballers SRS uses a conservative prior pending a historical archive."
+}

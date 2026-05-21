@@ -1,43 +1,33 @@
-"""Source adapter registry."""
+"""Source adapter registry — v1.0 slimmed.
+
+v0.x had 13+ source adapters feeding a composite ranking. v1.0 runs on a
+single engine (``dynasty.engine.similarity_v1``) and only needs a couple of
+adapters for player-metadata enrichment:
+
+  - SleeperPlayers — current rosters / teams / ages (for site display)
+  - NFLDraftCapital — draft round/pick metadata (rendered on player pages,
+    NOT in the ranking)
+
+The other v0.x adapters (FantasyCalc, DynastyProcess, BrainyBallers, PFF,
+FantasyPros, FFCAdp, RAS, CFBDBreakouts, NFLImpact, SimilarityCareerArc,
+RookieSimilarityChain) are stubbed to no-op so any leftover imports
+keep working but the launcher does not run them. See
+``docs/CHANGELOG-model.md`` v1.0 entry for the rationale.
+"""
 from typing import Type
 from .base import BaseSource, RankingRecord
-from .fantasycalc import FantasyCalc
-from .dynastyprocess import DynastyProcessValues
 from .sleeper import SleeperPlayers
-from .pff import PFF
-from .fantasypros import FantasyPros
-from .brainy_ballers import BrainyBallers
 from .nfl_draft_capital import NFLDraftCapital
-from .ffc_adp import FFCAdp
-from .ras import RAS
-from .cfbd_breakouts import CFBDBreakouts
-from .nfl_impact import NFLImpact
-from .similarity_career_arc import SimilarityCareerArc
-from .rookie_similarity_chain import RookieSimilarityChain
 
 REGISTRY: dict[str, Type[BaseSource]] = {
     cls.slug: cls
     for cls in [
-        FantasyCalc,
-        DynastyProcessValues,
         SleeperPlayers,
-        PFF,
-        FantasyPros,
-        BrainyBallers,
         NFLDraftCapital,
-        FFCAdp,
-        RAS,
-        CFBDBreakouts,
-        NFLImpact,
-        SimilarityCareerArc,
-        RookieSimilarityChain,
     ]
 }
 
 __all__ = [
     "REGISTRY", "BaseSource", "RankingRecord",
-    "FantasyCalc", "DynastyProcessValues", "SleeperPlayers",
-    "PFF", "FantasyPros", "BrainyBallers", "NFLDraftCapital", "FFCAdp", "RAS",
-    "CFBDBreakouts", "NFLImpact", "SimilarityCareerArc",
-    "RookieSimilarityChain",
+    "SleeperPlayers", "NFLDraftCapital",
 ]

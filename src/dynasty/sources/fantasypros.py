@@ -1,33 +1,21 @@
-"""FantasyPros adapter — STUB.
+"""fantasypros adapter — stubbed in v1.0.
 
-FantasyPros offers an Expert Consensus Rankings (ECR) API on a paid tier:
-    https://www.fantasypros.com/api/
-
-This aggregates 70+ analysts into a consensus and is the cleanest legal way
-to incorporate industry-wide expert opinion.
-
-For the *free* path: DynastyProcess already publishes FantasyPros ECR via
-their open CSV (see dynastyprocess.py). That's a reasonable substitute until
-you have a direct FP key.
+Removed from the ranking composite. Kept as a no-op import target so any
+external code referencing this module still loads cleanly. See
+``docs/CHANGELOG-model.md`` v1.0 for the rewrite rationale.
 """
 from __future__ import annotations
 from typing import Iterator
 from .base import BaseSource, RankingRecord
-from ..config import settings
 
 
-class FantasyPros(BaseSource):
+class _Stub(BaseSource):
     slug = "fantasypros"
-    name = "FantasyPros — Expert Consensus Rankings"
-    category = "aggregator"
-    update_frequency = "daily"
-    tos_compliant = True
-    default_weight = 0.4  # v0.14.0: similarity engine carries the heavier expert-style signal
-    homepage = "https://www.fantasypros.com/"
-    notes = "Paid API; stub only. See dynastyprocess.py for a free proxy."
+    name = "fantasypros (removed in v1.0)"
 
     def fetch(self) -> Iterator[RankingRecord]:
-        if not settings.fantasypros_api_key:
-            return iter([])
-        # TODO: call the FantasyPros ECR endpoint and yield RankingRecord per player
-        return iter([])
+        return iter(())
+
+
+# Preserve historical class names for any code that imports them directly.
+FantasyPros = _Stub

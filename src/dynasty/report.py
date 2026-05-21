@@ -1,366 +1,62 @@
-"""Generate a multi-page HTML site of the dynasty model.
+"""Dynasty Football Model — v1.0 report builder.
 
-Output structure:
-    dynasty_site/
-        index.html              — landing page: methodology, sources, divergence highlights
-        rankings.html           — full top-300 with consensus delta column
-        sources.html            — detailed source-by-source breakdown
-        players/<slug>.html     — per-player detail page with full breakdown
-        assets/style.css        — shared styles
+Renders the static site from the v1 similarity engine. Mirrors the basketball
+model's UI architecture: shared CSS, site header, rankings / league / methodology
+/ sources / prospects pages, per-player pages with career-arc comparables.
 
-All HTML is self-contained (no external CDNs), works offline.
+The v0.x ``generate_site`` API is kept as a thin wrapper that ignores the old
+``additional_formats`` parameter; the new site renders every PRESET overlay
+into ``league.html`` via client-side JS, no per-format file fanout needed.
 """
 from __future__ import annotations
+
+import html
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from sqlalchemy import select, func
+from typing import Dict, Iterable, List, Optional
 
-from .db.session import get_session
-from .db.models import Player, CompositeScore, Source, Ranking
-from .sources.similarity_career_arc import load_comps_cache
-from .sources.rookie_similarity_chain import load_rookie_comps_cache
+from .engine.similarity_v1 import EngineResult, OUT_ROOT, run_engine
+from .engine.format_overlay import PRESETS, OverlayResult, all_format_overlays
 
 
-# --------------------------------------------------------------------------
-# Source descriptions — kept human-readable for the landing page
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Position colour palette (mirrors basketball model)
+# ---------------------------------------------------------------------------
 
-SOURCE_DESCRIPTIONS = {
-    "fantasycalc": {
-        "blurb": "Crowdsourced dynasty values derived from ~1M+ real fantasy trades.",
-        "type": "Market signal",
-        "strength": "Reflects what the broader fantasy community actually pays for players, updated multiple times daily.",
-        "weakness": "By definition tracks consensus — won't surface contrarian or evaluator opinions.",
-        "weight_justification": (
-            "Baseline weight (1.0). Pure market signal; weighted as 'consensus' for the "
-            "divergence calculation rather than as an independent evaluator opinion."
-        ),
-    },
-    "dynastyprocess": {
-        "blurb": "FantasyPros Expert Consensus Rankings (ECR) aggregated across 70+ industry analysts.",
-        "type": "Aggregator",
-        "strength": "Broad expert consensus, slow-moving and stable.",
-        "weakness": "By averaging 70+ analysts, mutes the signal from the most accurate evaluators.",
-        "weight_justification": (
-            "Baseline weight (1.0). Treated as 'consensus' alongside FantasyCalc — useful for "
-            "establishing what the market thinks but not for divergence."
-        ),
-    },
-    "sleeper_players": {
-        "blurb": "Sleeper's canonical player ID map. Used internally — does not contribute to scoring.",
-        "type": "Reference data",
-        "strength": "Links every source to a single player identity.",
-        "weakness": "Not a ranking source.",
-        "weight_justification": "N/A — does not contribute to composite scoring.",
-    },
-    "brainy_ballers": {
-        "blurb": "Top-500 dynasty rankings, primarily SPS-driven (Star-Predictor Score) with expert overlays.",
-        "type": "Analytics model",
-        "strength": (
-            "Algorithmic prospect-scoring approach with publicly-cited successes — early calls on Jaxson Dart, "
-            "Trey McBride, JSN, McCaffrey. Featured on Pat McAfee, Forbes, Barstool."
-        ),
-        "weakness": "Rookie-grade detail is paywalled; only the aggregated top-500 is scraped here.",
-        "weight_justification": (
-            "Default weight 1.3. Elevated above consensus because SPS represents an independent, "
-            "transparent algorithmic methodology rather than another consensus aggregator. Track-record "
-            "multiplier will adjust this once backtesting against actual NFL outcomes is run."
-        ),
-    },
-    "lance_zierlein": {
-        "blurb": "NFL.com lead draft analyst. Public scouting reports on every prospect.",
-        "type": "Expert evaluator",
-        "strength": (
-            "Top performer in the Hogs Haven 2018-2020 wAV correlation study — strongest measured "
-            "correlation between pre-draft rankings and actual NFL player performance among major-media analysts."
-        ),
-        "weakness": "No single consolidated ranking export; starter pack contains transcribed top-10 only.",
-        "weight_justification": (
-            "Default weight 1.4 — the highest in the model. Justified by the Hogs Haven independent study "
-            "which measured analyst pre-draft rankings against Weighted Career Approximate Value (wAV) "
-            "over multiple years. Zierlein led that study."
-        ),
-    },
-    "pff_public": {
-        "blurb": "Pro Football Focus public Top-60 dynasty rookies (free article tier).",
-        "type": "Analytics model",
-        "strength": (
-            "PFF publishes hit-rate-by-bucket curves for their prospect model. Transparent methodology. "
-            "Strong relative performance in independent draft-outcome studies."
-        ),
-        "weakness": "Full PFF prospect model is paywalled; only the Top-60 article is loaded for free.",
-        "weight_justification": (
-            "Default weight 1.3. PFF's transparent prospect score-to-fantasy-outcome curves are unique "
-            "among major analytics services. For the full PFF API, see sources/pff.py."
-        ),
-    },
-    "pff": {
-        "blurb": "Pro Football Focus full prospect models and dynasty rankings (paid API).",
-        "type": "Analytics model",
-        "strength": "Transparent prospect score-to-outcome curves. Top performer in independent draft-outcome studies.",
-        "weakness": "Requires paid API access — not active until credentials are added.",
-        "weight_justification": "Default weight 1.3 — same justification as PFF public. Higher granularity when active.",
-    },
-    "fantasypros": {
-        "blurb": "FantasyPros Expert Consensus Rankings via paid API.",
-        "type": "Aggregator",
-        "strength": "Direct line to the largest expert consensus in the industry, updated daily.",
-        "weakness": "Paid; redundant with DynastyProcess unless you want lower latency.",
-        "weight_justification": "Default weight 1.2. Slight premium over DynastyProcess due to update frequency.",
-    },
-    "daniel_jeremiah": {
-        "blurb": "NFL Network lead draft analyst. Top of FantasyPros mock-draft accuracy 2025.",
-        "type": "Expert evaluator",
-        "strength": (
-            "Most accurate of the Big Three (Jeremiah / Kiper / McShay) in 2025 per Inside The Star's review. "
-            "Strong on predicting actual NFL Draft slot — which matters because draft capital is the "
-            "strongest single predictor of fantasy outcomes."
-        ),
-        "weakness": "Specialty is draft order, not fantasy projection — less directly applicable than evaluators like Harmon or RSP.",
-        "weight_justification": (
-            "Default weight 1.1. Elevated because draft capital is empirically the strongest single predictor "
-            "of fantasy outcome, and Jeremiah is documented as the most accurate predictor of where players "
-            "actually get drafted."
-        ),
-    },
-    "nfl_draft_capital": {
-        "blurb": "Every NFL draft pick since 1980 from the public nflverse CSV. Treated as an objective evaluator opinion.",
-        "type": "Analytics model (draft signal)",
-        "strength": (
-            "NFL draft capital is the single strongest predictor of rookie fantasy production "
-            "(r ≈ 0.4–0.6 vs. 3-year fantasy points). Implicitly captures medicals, character, and "
-            "private scouting that NFL teams paid for. Free, ToS-clean, no scraping."
-        ),
-        "weakness": (
-            "Static between drafts — doesn't update mid-season. Less useful for veterans whose "
-            "NFL production has already overwritten the draft-day signal (PR #6 — v0.7 weighting refactor — "
-            "decays this signal as years-pro increases)."
-        ),
-        "weight_justification": (
-            "Default weight 1.5 (highest in the registry). At QB, position modifier of 1.2x boosts "
-            "it further because team draft-capital commitment correlates with opportunity. Years-pro "
-            "decay floors it at 0.3x for Year-5+ veterans."
-        ),
-    },
-    "ffc_adp": {
-        "blurb": "FantasyFootballCalculator ADP across PPR / 2QB / Dynasty / Rookie formats. Live from real mock drafts.",
-        "type": "Market signal (secondary)",
-        "strength": (
-            "Second market signal alongside FantasyCalc, deliberately uncorrelated: FFC's user base "
-            "skews casual and redraft, so it catches sentiment the dynasty-trader crowd lags. Rookie "
-            "ADP especially valuable — it moves within hours of draft night."
-        ),
-        "weakness": "Casual user base means more noise and higher variance than FantasyCalc.",
-        "weight_justification": (
-            "Default weight 0.7 — lower than FantasyCalc because the underlying drafters are less serious. "
-            "Treated as 'consensus' for the divergence calculation."
-        ),
-    },
-    "ras": {
-        "blurb": "Relative Athletic Score (Kent Lee Platte). Position-adjusted composite of Combine/Pro Day testing.",
-        "type": "Analytics model (athleticism)",
-        "strength": (
-            "Best free single-number athleticism composite. Most useful as a *bust filter*: prospects "
-            "with RAS < 5 in positions that demand athleticism (WR/TE) substantially underperform "
-            "their draft capital."
-        ),
-        "weakness": (
-            "Modest standalone signal at WR (r ≈ 0.10–0.15). Near-zero predictive value for QB. "
-            "Requires a local CSV file at data/ras/ras_database.csv — yields zero rows when missing."
-        ),
-        "weight_justification": (
-            "Default weight 0.8. Position modifier amplifies to 1.5x for WR/TE, 1.2x for RB, drops to "
-            "0.3x at QB. Years-pro decay treats RAS strictly as a pre-NFL signal that fades for vets."
-        ),
-    },
-    "cfbd_breakouts": {
-        "blurb": "Engineered college signals: Breakout Age + Best College Dominator Rating.",
-        "type": "Analytics model (college production)",
-        "strength": (
-            "The two highest-signal college production metrics in the public literature. Breakout Age "
-            "shows r ≈ 0.43 with NFL fantasy points at WR; College Dominator captures 'was this guy his "
-            "college team's go-to player?'. Together they replicate ~80% of PlayerProfiler's paid signal."
-        ),
-        "weakness": (
-            "Requires a local CSV at data/cfbd/breakouts.csv with pre-computed features. Live CFBD API "
-            "integration is a planned follow-up."
-        ),
-        "weight_justification": (
-            "Default weight 0.9. Position modifier 1.5x at WR, 1.3x at TE, 1.0x at RB, 0.4x at QB. "
-            "Like RAS, decays with years-pro because actual NFL production should dominate vets."
-        ),
-    },
-    "similarity_career_arc": {
-        "blurb": "KNN comparables over the PFR / nflverse player-season corpus (1999–2024). "
-                 "For each active NFL player, the top 20 historical seasons at the same "
-                 "position and age are aggregated into a projected remaining-career value "
-                 "(time-discounted 5%/yr).",
-        "type": "Analytics model (similarity engine)",
-        "strength": (
-            "Encodes both current skill (via per-game production / efficiency / usage "
-            "features) and longevity (via comp future careers). Surfaces the \"young "
-            "players are more valuable\" principle directly: a 22yo whose comps averaged "
-            "8 productive seasons after their comp year scores far above a 32yo with the "
-            "same current production whose comps averaged 2."
-        ),
-        "weakness": (
-            "Only covers active NFL players (rookies still rely on draft capital + CFBD "
-            "breakouts in v0.14; a college→NFL similarity chain is planned for PR #15). "
-            "Comps with sparse age windows (e.g. very young or very old players) get "
-            "smaller pools."
-        ),
-        "weight_justification": (
-            "Default weight 1.8 — the DOMINANT signal in the v0.14 composite per Phil's "
-            "directive to put similarity scores at the heart of the model."
-        ),
-    },
-    "nfl_impact": {
-        "blurb": "DARKO-style current-skill signal: per-position efficiency formulas "
-                 "computed from the PFR / nflverse corpus, normalized 0–100 within position.",
-        "type": "Analytics model (current skill)",
-        "strength": (
-            "Independent of any market signal — derived purely from on-field production "
-            "and efficiency. ANY/A + TD%-INT% + sack rate for QBs; yards-per-touch + TD "
-            "rate + target share for RBs; YPRR proxy + aDOT + TD rate for WR/TE."
-        ),
-        "weakness": (
-            "Single-season snapshot. The similarity engine carries the longevity weight "
-            "(NFL Impact is the 'how good are they right now' signal)."
-        ),
-        "weight_justification": (
-            "Default weight 0.8. Strong but not dominant — paired with the similarity "
-            "engine (1.8) which encodes longevity."
-        ),
-    },
-    "rookie_similarity_chain": {
-        "blurb": "College→NFL similarity chain: for each rookie/draft prospect, finds "
-                 "the top 20 college-comparable seasons at the same position/class, "
-                 "resolves each to its realized NFL career via the ncaa_to_nfl bridge, "
-                 "and aggregates a time-discounted lifetime projection.",
-        "type": "Analytics model (rookie similarity)",
-        "strength": (
-            "Extends the similarity engine to incoming draft classes — the half of the "
-            "player universe that PR #14's NFL-only engine couldn't cover. Conference "
-            "strength multipliers (P5=1.0, top-G5=0.85, lower-G5=0.75, FCS=0.65) "
-            "discount stat-line inflation against weak schedules."
-        ),
-        "weakness": (
-            "NCAA corpus coverage starts 2014 (cfbfastR-data limit); pre-2014 college "
-            "careers are not in the comp pool, so rookies whose closest comps played "
-            "before 2014 don't surface. Bridge coverage to NFL is ~80% of post-2017 "
-            "FBS rookies; the rest fall through as 'no NFL bridge available' and "
-            "contribute zero NFL longevity."
-        ),
-        "weight_justification": (
-            "Default weight 1.6 — just below similarity_career_arc (1.8) since the "
-            "college→NFL bridge adds one layer of indirection. Blends 50/50 with the "
-            "NFL similarity value for players with exactly 1 NFL season; pure rookie "
-            "value for 0-NFL-season prospects."
-        ),
-    },
+POSITION_COLOR = {
+    "QB": "#e74c3c",
+    "RB": "#27ae60",
+    "WR": "#3498db",
+    "TE": "#f39c12",
 }
-
-# Categories of evaluators you should add via CSV import (paywalled sources)
-EVALUATOR_RECOMMENDATIONS = [
-    {
-        "name": "Matt Harmon — Reception Perception",
-        "url": "https://receptionperception.com/",
-        "scope": "Wide receivers",
-        "why": "Charts every WR's route success rate against man/zone — methodology is transparent and has a public stacked-rankings history going back to 2021, which means you can backtest him directly. Behind a PRIME-tier paywall.",
-        "import_as": "matt_harmon",
-        "suggested_weight": 1.3,
-    },
-    {
-        "name": "Matt Waldman — Rookie Scouting Portfolio",
-        "url": "https://mattwaldmanrsp.com/",
-        "scope": "All skill positions, rookies only",
-        "why": "21st year. Famously identified Puka Nacua as WR12 in 2023. Skill-position film grades only — adds an independent voice not blended into consensus. Pre-draft PDF (~$25).",
-        "import_as": "matt_waldman_rsp",
-        "suggested_weight": 1.2,
-    },
-    {
-        "name": "Dane Brugler — The Beast (The Athletic)",
-        "url": "https://theathletic.com/",
-        "scope": "All NFL Draft prospects",
-        "why": "400+ scouting reports per year. Closest thing to an NFL-quality scouting reference in public media. Behind The Athletic paywall.",
-        "import_as": "brugler_beast",
-        "suggested_weight": 1.1,
-    },
-    {
-        "name": "Hayden Winks — Underdog Fantasy",
-        "url": "https://underdognetwork.com/",
-        "scope": "All offensive positions, model-driven",
-        "why": "Athletic-comp model with public methodology. Strong on RBs in particular. Behind Underdog paywall.",
-        "import_as": "hayden_winks",
-        "suggested_weight": 1.1,
-    },
-    {
-        "name": "PlayerProfiler",
-        "url": "https://www.playerprofiler.com/",
-        "scope": "All offensive positions, metric-driven",
-        "why": "Breakout Age, College Dominator, SPARQ-x — published metrics-based prospect model. Won FantasyPros accuracy in 2021. Free articles; full data paid.",
-        "import_as": "playerprofiler",
-        "suggested_weight": 1.1,
-    },
-]
-
-
-# --------------------------------------------------------------------------
-# Utilities
-# --------------------------------------------------------------------------
-
-def _slugify(name: str, player_id: int) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return f"{s}-{player_id}"
 
 
 def _esc(s) -> str:
-    """HTML-escape, with None tolerance."""
-    if s is None:
-        return ""
-    return (str(s)
-            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            .replace('"', "&quot;").replace("'", "&#39;"))
+    return html.escape(str(s)) if s is not None else ""
 
 
-POS_COLORS = {
-    "QB": "#e74c3c", "RB": "#27ae60", "WR": "#3498db", "TE": "#f39c12",
-    "K": "#95a5a6", "DEF": "#7f8c8d",
-}
+def _slug(name: str, pid: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return f"{s}-{pid.replace('-', '')[-6:]}"
 
 
-def _pos_badge(pos: str | None) -> str:
-    pos = pos or "—"
-    color = POS_COLORS.get(pos, "#888")
+def _pos_badge(pos: str) -> str:
+    color = POSITION_COLOR.get(pos, "#9ca3af")
     return f'<span class="pos-badge" style="background:{color}">{_esc(pos)}</span>'
 
 
-def _divergence_chip(div: int | None) -> str:
-    """Visual indicator for consensus delta. Positive = model higher; negative = lower."""
-    if div is None:
-        return '<span class="div-chip div-none">no consensus</span>'
-    if div == 0:
-        return '<span class="div-chip div-flat">aligned</span>'
-    if div > 0:
-        cls = "div-up-big" if div >= 10 else "div-up"
-        return f'<span class="div-chip {cls}">model +{div}</span>'
-    cls = "div-down-big" if div <= -10 else "div-down"
-    return f'<span class="div-chip {cls}">model {div}</span>'
-
-
-# --------------------------------------------------------------------------
-# Shared HTML scaffolding
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Shared CSS (mirrors basketball model exactly, with football accent colour)
+# ---------------------------------------------------------------------------
 
 def _shared_css() -> str:
     return """
 :root {
-  --bg: #fafbfc; --card: #fff; --border: #e1e4e8; --text: #1a1f24;
-  --muted: #6a737d; --accent: #0a3d62; --accent-light: #1e5a8e;
-  --hover: #f6f8fa; --up: #16a34a; --down: #dc2626; --flat: #6b7280;
-  --warn-bg: #fef3c7; --warn-border: #fbbf24; --warn-text: #92400e;
+  --bg: #ffffff; --card: #ffffff; --border: #e5e7eb; --text: #0f172a;
+  --muted: #64748b; --accent: #1d4ed8; --accent-dark: #1e3a8a;
+  --hover: #eff6ff; --header-bg: #0f172a; --header-text: #f8fafc;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -371,45 +67,53 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 header.site {
-  background: linear-gradient(135deg, var(--accent), var(--accent-light));
-  color: white; padding: 24px 40px;
+  background: var(--header-bg);
+  color: var(--header-text); padding: 20px 36px;
+  border-bottom: 3px solid var(--accent);
 }
 header.site .row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-header.site h1 { margin: 0; font-size: 22px; font-weight: 700; }
-header.site h1 a { color: white; }
+header.site h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+header.site h1 a { color: var(--header-text); }
+header.site h1 .accent { color: var(--accent); }
 header.site nav a {
-  color: white; opacity: 0.85; margin-left: 18px; font-size: 14px; font-weight: 500;
+  color: var(--header-text); opacity: 0.75; margin-left: 22px; font-size: 14px; font-weight: 500;
 }
 header.site nav a:hover { opacity: 1; text-decoration: none; }
-header.site .meta { opacity: 0.75; font-size: 12px; margin-top: 4px; }
-.container { max-width: 1280px; margin: 0 auto; padding: 24px 40px; }
-.container.narrow { max-width: 920px; }
-h2 { color: var(--accent); font-size: 22px; margin-top: 32px; }
-h3 { color: var(--accent); font-size: 17px; margin-top: 24px; }
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; }
-.card.tight { padding: 14px 18px; }
-.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 18px; font-size: 14px; }
-.kv dt { color: var(--muted); }
-.kv dd { margin: 0; font-weight: 500; }
+header.site nav a.active { opacity: 1; border-bottom: 2px solid var(--accent); padding-bottom: 4px; }
+header.site .meta { opacity: 0.6; font-size: 12px; margin-top: 4px; }
+.container { max-width: 1240px; margin: 0 auto; padding: 28px 36px; }
+.container.narrow { max-width: 900px; }
+h2 { color: var(--text); font-size: 22px; margin-top: 32px; font-weight: 600; }
+h2 .accent { color: var(--accent); }
+h3 { color: var(--text); font-size: 16px; margin-top: 22px; font-weight: 600; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 18px; }
+.lede { font-size: 15px; color: var(--muted); margin: 8px 0 18px 0; max-width: 720px; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.kpi { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; }
+.kpi .num { font-size: 24px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 table { width: 100%; background: var(--card); border-collapse: collapse;
   border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-th { background: #f6f8fa; padding: 11px 14px; text-align: left;
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
-  color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600; }
+th { background: #f8fafc; padding: 11px 14px; text-align: left;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 700; }
 td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 tr.player-row:hover { background: var(--hover); cursor: pointer; }
 td.rank { font-weight: 700; color: var(--accent); width: 50px; }
 td.name { font-weight: 600; }
-td.score { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
-td.tier, td.pos-rank, td.team, td.consensus { color: var(--muted); font-variant-numeric: tabular-nums; }
+td.score { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; color: var(--accent); }
+td.years, td.team, td.tier, td.consensus { color: var(--muted); font-variant-numeric: tabular-nums; }
 .pos-badge { display: inline-block; color: white; padding: 3px 8px; border-radius: 4px;
   font-size: 11px; font-weight: 700; min-width: 32px; text-align: center; }
 .controls { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-  padding: 14px 18px; margin-bottom: 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  padding: 14px 18px; margin-bottom: 18px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .controls input, .controls select { font: inherit; padding: 7px 11px;
   border: 1px solid var(--border); border-radius: 6px; background: white; }
 .controls input { flex: 1; min-width: 220px; }
+.controls button { font: inherit; padding: 8px 16px; border: 0; border-radius: 6px;
+  background: var(--accent); color: white; font-weight: 600; cursor: pointer; }
+.controls button:hover { background: var(--accent-dark); }
 .stats { color: var(--muted); font-size: 13px; margin-left: auto; }
 .div-chip { display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px;
   font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -417,1862 +121,646 @@ td.tier, td.pos-rank, td.team, td.consensus { color: var(--muted); font-variant-
 .div-up-big { background: #16a34a; color: white; }
 .div-down { background: #fef2f2; color: #b91c1c; }
 .div-down-big { background: #dc2626; color: white; }
-.div-flat { background: #f3f4f6; color: var(--flat); }
+.div-flat { background: #f3f4f6; color: #6b7280; }
 .div-none { background: #f3f4f6; color: var(--muted); font-style: italic; }
-.callout { background: var(--warn-bg); border: 1px solid var(--warn-border);
-  border-left: 4px solid var(--warn-border); border-radius: 6px; padding: 14px 18px;
-  color: var(--warn-text); margin: 16px 0; font-size: 14px; }
-.callout strong { color: #78350f; }
-.breakdown-table { font-size: 13px; }
-.breakdown-table .source-name { font-weight: 600; }
-.weight-bar { display: inline-block; height: 6px; background: var(--accent);
-  border-radius: 3px; vertical-align: middle; margin-right: 8px; min-width: 4px; }
-.player-header { background: linear-gradient(135deg, var(--accent), var(--accent-light));
-  color: white; padding: 28px 40px; }
-.player-header h1 { margin: 0; font-size: 30px; }
-.player-header .sub { opacity: 0.85; font-size: 15px; margin-top: 4px; }
-.player-header .metrics { display: flex; gap: 32px; margin-top: 18px; }
-.player-header .metric { }
-.player-header .metric .num { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.player-header .metric .label { opacity: 0.75; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-.divergence-section .div-explanation { font-size: 14px; margin: 12px 0 18px 0; padding: 12px 16px;
-  background: var(--hover); border-radius: 6px; border-left: 3px solid var(--accent); }
-.steps { counter-reset: step; padding: 0; list-style: none; }
-.steps li { counter-increment: step; padding: 12px 0 12px 44px; position: relative; border-bottom: 1px solid var(--border); }
-.steps li:last-child { border-bottom: none; }
-.steps li::before { content: counter(step); position: absolute; left: 0; top: 14px;
-  background: var(--accent); color: white; width: 28px; height: 28px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
-.steps li strong { color: var(--accent); }
+.callout { background: #eff6ff; border: 1px solid #93c5fd;
+  border-left: 4px solid var(--accent); border-radius: 6px; padding: 14px 18px;
+  color: #1e3a8a; margin: 16px 0; font-size: 14px; }
+.callout strong { color: var(--accent-dark); }
+.player-header { background: var(--header-bg); color: var(--header-text); padding: 28px 36px; border-bottom: 3px solid var(--accent); }
+.player-header h1 { margin: 0; font-size: 28px; }
+.player-header .sub { opacity: 0.75; font-size: 14px; margin-top: 4px; }
+.player-header .metrics { display: flex; gap: 28px; margin-top: 18px; flex-wrap: wrap; }
+.player-header .metric .num { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.player-header .metric .label { opacity: 0.75; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 footer { color: var(--muted); font-size: 12px; padding: 32px 40px; text-align: center; border-top: 1px solid var(--border); margin-top: 40px; }
 .tag { display: inline-block; padding: 2px 9px; border-radius: 10px;
   font-size: 11px; font-weight: 600; background: #eef2ff; color: #4338ca; }
-.tag.tag-market { background: #ecfdf5; color: #065f46; }
-.tag.tag-aggregator { background: #eff6ff; color: #1d4ed8; }
-.tag.tag-expert { background: #fef3c7; color: #92400e; }
-.tag.tag-model { background: #fae8ff; color: #86198f; }
+.tag.tag-retired { background: #fef3c7; color: #92400e; }
+.tag.tag-prospect { background: #fdf4ff; color: #86198f; }
+.comp-tier-elite { color: #b45309; font-weight: 600; }
+.comp-tier-above-avg { color: #047857; font-weight: 600; }
+.comp-tier-starter { color: #1d4ed8; }
+.comp-tier-deep { color: var(--muted); }
 """
 
 
-# Map of league_format -> (filename_suffix, display_label)
-FORMAT_PAGE_INFO: dict[str, tuple[str, str]] = {
-    "sf_ppr": ("", "Superflex PPR"),
-    "1qb_ppr": ("_1qb_ppr", "1QB PPR"),
-}
-
-
-def _rankings_href(league_format: str) -> str:
-    suffix, _ = FORMAT_PAGE_INFO.get(league_format, ("", league_format))
-    return f"rankings{suffix}.html"
-
-
-def _site_header(
-    active: str,
-    latest_ts: datetime | None,
-    league_format: str,
-    formats_available: tuple[str, ...] = ("sf_ppr",),
-) -> str:
-    league_label = FORMAT_PAGE_INFO.get(
-        league_format, ("", league_format)
-    )[1]
-    ts = latest_ts.strftime("%B %d, %Y at %I:%M %p") if latest_ts else "—"
+def _site_header(active: str, latest_ts: Optional[datetime], league_label: str) -> str:
+    ts = latest_ts.strftime("%B %d, %Y at %I:%M %p UTC") if latest_ts else "—"
 
     def link(href, label, key):
-        cls = ' style="opacity:1;text-decoration:underline"' if key == active else ""
+        cls = ' class="active"' if key == active else ""
         return f'<a href="{href}"{cls}>{label}</a>'
-
-    # v0.15.0 — format toggle. We render an inline <select> that
-    # navigates to the rankings page for the chosen format (the
-    # client-side hop is enough; the format-specific pages share
-    # all other navigation).
-    fmt_options = ""
-    if len(formats_available) > 1:
-        opts = []
-        for f in formats_available:
-            label = FORMAT_PAGE_INFO.get(f, ("", f))[1]
-            sel = " selected" if f == league_format else ""
-            opts.append(
-                f'<option value="{_esc(_rankings_href(f))}"{sel}>{_esc(label)}</option>'
-            )
-        fmt_options = (
-            '<select id="format-toggle" aria-label="League format" '
-            'style="margin-left:10px;font-size:13px;padding:2px 6px;" '
-            "onchange=\"window.location.href=this.value\">"
-            + "".join(opts)
-            + "</select>"
-        )
 
     return f"""<header class="site">
   <div class="row">
     <div>
-      <h1><a href="index.html">Dynasty Model</a></h1>
-      <div class="meta">{league_label} · Last updated {ts}{fmt_options}</div>
+      <h1><a href="rankings.html">Dynasty Football <span class="accent">Model</span></a></h1>
+      <div class="meta">Similarity-driven dynasty rankings · Updated {_esc(ts)} · Default format: {_esc(league_label)}</div>
     </div>
     <nav>
-      {link("index.html", "Overview", "index")}
-      {link(_rankings_href(league_format), "Rankings", "rankings")}
-      {link("league.html", "Rate My League", "league")}
-      {link("sources.html", "Sources", "sources")}
+      {link("rankings.html", "Rankings", "rankings")}
+      {link("league.html", "League Overlay", "league")}
       {link("methodology.html", "Methodology", "methodology")}
+      {link("sources.html", "Sources", "sources")}
+      {link("prospects.html", "Prospects", "prospects")}
     </nav>
   </div>
 </header>"""
 
 
 def _footer() -> str:
-    return '<footer>Generated locally by the Dynasty Model. All data sourced respectfully.</footer>'
+    return (
+        '<footer>'
+        'Dynasty Football Model · open source on '
+        '<a href="https://github.com/pstiehl/Dynasty-Football-Model">GitHub</a> · '
+        'Stats: <a href="https://github.com/nflverse/nflverse-data">nflverse</a> + Pro-Football-Reference'
+        '</footer>'
+    )
 
 
-def _page(title: str, header_html: str, body_html: str) -> str:
-    return f"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+def _page(title: str, header_html: str, body_html: str, css_href: str = "assets/style.css") -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)}</title>
-<link rel="stylesheet" href="assets/style.css">
-</head><body>
+<link rel="stylesheet" href="{css_href}">
+</head>
+<body>
 {header_html}
 {body_html}
 {_footer()}
-</body></html>"""
+</body>
+</html>"""
 
 
-# --------------------------------------------------------------------------
-# Data fetching
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Rankings page
+# ---------------------------------------------------------------------------
 
-def _latest_composite(session, league_format: str, limit: int = 300):
-    latest_ts = session.execute(
-        select(func.max(CompositeScore.generated_at))
-        .where(CompositeScore.league_format == league_format)
-    ).scalar_one_or_none()
-    if latest_ts is None:
-        return None, []
-    rows = session.execute(
-        select(CompositeScore, Player)
-        .join(Player, CompositeScore.player_id == Player.id)
-        .where(CompositeScore.league_format == league_format)
-        .where(CompositeScore.generated_at == latest_ts)
-        .order_by(CompositeScore.overall_rank)
-        .limit(limit)
-    ).all()
-    return latest_ts, rows
+def _comp_tier_class(comp_tier: str) -> str:
+    if not comp_tier:
+        return "comp-tier-deep"
+    for k in ("elite", "above-avg", "starter", "deep"):
+        if comp_tier.startswith(k):
+            return f"comp-tier-{k}"
+    return "comp-tier-deep"
 
 
-def _all_sources(session):
-    return list(session.execute(select(Source).order_by(Source.slug)).scalars().all())
-
-
-# --------------------------------------------------------------------------
-# Page: index.html — landing page with methodology + divergence highlights
-# --------------------------------------------------------------------------
-
-def _build_index(rows, sources, latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
-    # Compute divergence highlights
-    rows_with_div = [(cs, p) for cs, p in rows if cs.rank_divergence is not None]
-    biggest_buys = sorted(rows_with_div, key=lambda x: -x[0].rank_divergence)[:8]
-    biggest_sells = sorted(rows_with_div, key=lambda x: x[0].rank_divergence)[:8]
-
-    consensus_sources = [s for s in sources if s.category in ("market", "aggregator") and s.last_synced_at]
-    evaluator_sources = [s for s in sources if s.category in ("expert", "model") and s.last_synced_at]
-
-    def _div_table(items, label):
-        if not items:
-            return '<p style="color:var(--muted);font-style:italic">None yet — add evaluator sources to see divergence.</p>'
-        rows_html = ""
-        for cs, p in items:
-            slug = _slugify(p.full_name, p.id)
-            rows_html += f"""<tr class="player-row" onclick="location='players/{slug}.html'">
-<td class="rank">{cs.overall_rank}</td>
-<td class="name">{_esc(p.full_name)}</td>
-<td>{_pos_badge(p.position)}</td>
-<td class="team">{_esc(p.nfl_team or '—')}</td>
-<td class="consensus">{cs.consensus_rank if cs.consensus_rank else '—'}</td>
-<td>{_divergence_chip(cs.rank_divergence)}</td>
-</tr>"""
-        return f"""<table>
-<thead><tr><th>Model #</th><th>Player</th><th>Pos</th><th>Team</th><th>Consensus</th><th>Delta</th></tr></thead>
-<tbody>{rows_html}</tbody></table>"""
-
-    # Status callout reflecting current model state
-    eval_count = len(evaluator_sources)
-    if eval_count == 0:
-        callout_html = """<div class="callout">
-<strong>Consensus-only mode:</strong> only market/aggregator sources are active right now.
-Add evaluator sources (Brainy Ballers, PFF, Lance Zierlein, etc.) to see meaningful
-divergence from consensus.
-</div>"""
-    else:
-        eval_names = ", ".join(s.name.split(" — ")[0] for s in evaluator_sources[:5])
-        callout_html = f"""<div class="callout" style="background:#ecfdf5;border-color:#10b981;color:#065f46;border-left-color:#10b981">
-<strong>{eval_count} evaluator source{'' if eval_count == 1 else 's'} active</strong> alongside
-{len(consensus_sources)} consensus source{'' if len(consensus_sources) == 1 else 's'}: {_esc(eval_names)}.
-The "biggest buys / sells" tables below show where the model's evaluator-weighted ranking
-diverges from the market consensus.
-</div>"""
-
-    sources_summary_html = ""
-    for s in sources:
-        desc = SOURCE_DESCRIPTIONS.get(s.slug, {})
-        blurb = desc.get("blurb", s.notes or "")
-        cat_tag = f'<span class="tag tag-{s.category}">{s.category}</span>'
-        status = s.last_synced_at.strftime("%Y-%m-%d") if s.last_synced_at else "not yet synced"
-        sources_summary_html += f"""<tr>
-<td><strong>{_esc(s.name)}</strong><div style="color:var(--muted);font-size:13px;margin-top:2px">{_esc(blurb)}</div></td>
-<td>{cat_tag}</td>
-<td style="text-align:right;font-variant-numeric:tabular-nums">{s.default_weight:.2f}</td>
-<td style="color:var(--muted);font-size:13px">{status}</td>
-</tr>"""
-
-    return _page(
-        f"Dynasty Model — Overview",
-        _site_header("index", latest_ts, league_format, formats_available),
-        f"""<div class="container narrow">
-
-<div class="card">
-<h2 style="margin-top:0">What this is</h2>
-<p>This is a dynasty fantasy football ranking model that aggregates multiple sources
-into a single composite ranking, weighted by each source's measured accuracy at
-predicting actual NFL fantasy production. It is designed to surface where the
-model <em>disagrees</em> with the consensus market — those gaps are where
-edge lives.</p>
-</div>
-
-{callout_html}
-
-<div class="card">
-<h2 style="margin-top:0">How the model works</h2>
-<ol class="steps">
-<li><strong>Collect rankings from every source</strong> and store them as a time series — never overwrite, always append. This means we can backtest historical rankings against actual outcomes later, and detect movement.</li>
-<li><strong>Normalize each source to a 0–100 scale.</strong> If the source publishes market values (FantasyCalc), use those directly. Otherwise convert the player's rank position to a score so the depth-1 player gets ~100 and depth-300 gets ~0.</li>
-<li><strong>Weight each source two ways:</strong> first by a default weight reflecting its category (evaluators with strong methodology get more), then by a track-record multiplier from backtested accuracy (Spearman correlation between the source's pre-NFL-Draft rankings and actual production over the player's first three NFL seasons).</li>
-<li><strong>Compute the weighted average</strong> per player — that's the model score, sorted into the overall ranking.</li>
-<li><strong>Compute consensus rank separately</strong> using <em>only</em> market and aggregator sources — that represents where the broader fantasy community has the player.</li>
-<li><strong>Compute divergence = consensus_rank − model_rank.</strong> Positive numbers mean the model rates the player higher than consensus (a "buy" signal); negative means lower (a "sell" signal).</li>
-</ol>
-</div>
-
-<h2>Where the model disagrees with consensus</h2>
-<p>The interesting players aren't the ones everyone agrees on. They're the ones where the model and the market diverge.</p>
-
-<h3 style="margin-top:18px">Model is higher than consensus (buys)</h3>
-{_div_table(biggest_buys, "buys")}
-
-<h3 style="margin-top:30px">Model is lower than consensus (sells)</h3>
-{_div_table(biggest_sells, "sells")}
-
-<h2>Sources contributing to today's rankings</h2>
-<table>
-<thead><tr><th>Source</th><th>Type</th><th style="text-align:right">Weight</th><th>Last Sync</th></tr></thead>
-<tbody>{sources_summary_html}</tbody>
-</table>
-<p style="margin-top:12px"><a href="sources.html">View detailed source-by-source methodology →</a></p>
-
-</div>""")
-
-
-# --------------------------------------------------------------------------
-# Page: rankings.html — full top-300
-# --------------------------------------------------------------------------
-
-def _build_rankings(
-    rows, latest_ts, league_format: str,
-    comps_cache: dict | None = None,
-    rookie_comps_cache: dict | None = None,
-    formats_available: tuple[str, ...] = ("sf_ppr",),
-) -> str:
+def _build_rankings(engine: EngineResult, latest_ts: datetime, league_label: str,
+                    team_lookup: Dict[str, str], limit: int = 300) -> str:
     rows_html = ""
-    comps_cache = comps_cache or {}
-    rookie_comps_cache = rookie_comps_cache or {}
-    # Build a name-keyed lookup so we can flag rookie rows in the table.
-    rookie_names = {
-        (e.get("player_name") or "").lower()
-        for e in rookie_comps_cache.values()
-    }
-    for cs, p in rows:
-        slug = _slugify(p.full_name, p.id)
-        pos_rank_str = f'{p.position}{cs.position_rank}' if cs.position_rank else '—'
-        cons_str = str(cs.consensus_rank) if cs.consensus_rank else '—'
-        # v0.14.0: hover tooltip showing the top 3 historical comps
-        title = ""
-        ce = comps_cache.get(p.gsis_id) if p.gsis_id else None
-        if ce and ce.get("comparables"):
-            top = ce["comparables"][:3]
-            title = "Most similar: " + "; ".join(
-                f"{c.get('name', '')} ({c.get('season', '')}, sim {c.get('similarity', 0):.2f})"
-                for c in top
-            )
-        title_attr = f' title="{_esc(title)}"' if title else ""
-        is_rookie = "1" if (p.full_name or "").lower() in rookie_names else "0"
-        rows_html += f"""<tr class="player-row"{title_attr} data-name="{_esc(p.full_name.lower())}" data-position="{_esc(p.position or '')}" data-rookie="{is_rookie}" onclick="location='players/{slug}.html'">
-<td class="rank">{cs.overall_rank}</td>
-<td class="name">{_esc(p.full_name)}</td>
-<td>{_pos_badge(p.position)}</td>
-<td class="team">{_esc(p.nfl_team or '—')}</td>
-<td class="pos-rank">{pos_rank_str}</td>
-<td class="tier">T{cs.tier or '—'}</td>
-<td class="consensus">{cons_str}</td>
-<td>{_divergence_chip(cs.rank_divergence)}</td>
-<td class="score">{cs.score:.1f}</td>
+    for row in engine.rankings[:limit]:
+        slug = _slug(row["name"], row["player_id"])
+        comp_class = _comp_tier_class(row["comp_tier"])
+        team = team_lookup.get(row["player_id"], "—")
+        rows_html += f"""<tr class="player-row" data-name="{_esc(row['name'].lower())}" data-position="{_esc(row['position'])}" onclick="location='players/{slug}.html'">
+<td class="rank">{row['overall_rank']}</td>
+<td class="name">{_esc(row['name'])}</td>
+<td>{_pos_badge(row['position'])}</td>
+<td class="team">{_esc(team)}</td>
+<td class="years">{row['age']}</td>
+<td class="years">{row['projected_years_remaining']:.1f}</td>
+<td class="tier">T{row['tier']}</td>
+<td class="years"><span class="{comp_class}">{_esc(row['comp_tier'])}</span></td>
+<td class="score">{row['production_score']:.0f}</td>
 </tr>"""
 
-    return _page(
-        "Dynasty Model — Rankings",
-        _site_header("rankings", latest_ts, league_format, formats_available),
-        f"""<div class="container">
+    body = f"""<div class="container">
+
+<h2>Dynasty Football <span class="accent">Rankings</span></h2>
+<p class="lede">A clean, similarity-driven dynasty NFL ranking. Each active
+player is matched against <strong>retired</strong> NFL players (last season ≤ 2022)
+with similar production shape at the same career age. Their realised
+remaining careers are then projected forward through modern era-pace
+multipliers and scored under {_esc(league_label)} scoring.</p>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="num">{len(engine.rankings):,}</div><div class="label">Active players ranked</div></div>
+  <div class="kpi"><div class="num">{len(engine.retired_corpus):,}</div><div class="label">Retired comp pool</div></div>
+  <div class="kpi"><div class="num">1</div><div class="label">Engine · v1.0 (no composite)</div></div>
+</div>
+
+<div class="callout"><strong>One engine, one source of truth.</strong> v1.0
+strips the v0.x composite of 10+ ranking sources and replaces it with a single
+similarity engine. See <a href="methodology.html">Methodology</a>.</div>
 
 <div class="controls">
-  <input type="text" id="search" placeholder="Search by player name…">
-  <select id="pos-filter">
+  <input id="q" placeholder="Search by player name…" type="search">
+  <select id="pos">
     <option value="">All positions</option>
     <option value="QB">QB</option><option value="RB">RB</option>
     <option value="WR">WR</option><option value="TE">TE</option>
   </select>
-  <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">
-    <input type="checkbox" id="rookie-filter"> Rookies / prospects only
-  </label>
-  <span class="stats" id="stats">{len(rows)} players</span>
-  <span style="margin-left:auto;font-size:13px;color:var(--muted)">
-    Hover a row for top historical comps ·
-    <a href="methodology.html">customize overlays →</a>
-  </span>
+  <span class="stats" id="stats"></span>
 </div>
 
 <table>
 <thead><tr>
   <th>#</th><th>Player</th><th>Pos</th><th>Team</th>
-  <th>Pos Rank</th><th>Tier</th><th>Consensus</th><th>Delta</th>
-  <th style="text-align:right">Score</th>
+  <th>Age</th><th>Yrs Left</th><th>Tier</th>
+  <th>Comp Tier</th>
+  <th style="text-align:right">Value</th>
 </tr></thead>
 <tbody>{rows_html}</tbody>
 </table>
 
-<p style="color:var(--muted);font-size:13px;margin-top:14px">
-Click any row to see how the model arrived at this player's ranking, including
-per-source contributions and where it diverges from consensus.
-</p>
-
-</div>
 <script>
-const search = document.getElementById('search');
-const posFilter = document.getElementById('pos-filter');
-const rows = document.querySelectorAll('.player-row');
+const q = document.getElementById('q');
+const pos = document.getElementById('pos');
 const stats = document.getElementById('stats');
-const rookieFilter = document.getElementById('rookie-filter');
-function apply() {{
-  const q = search.value.toLowerCase().trim();
-  const pos = posFilter.value;
-  const rookieOnly = rookieFilter && rookieFilter.checked;
-  let n = 0;
+const rows = document.querySelectorAll('.player-row');
+function update() {{
+  const qv = (q.value || '').toLowerCase();
+  const pv = pos.value || '';
+  let shown = 0;
   rows.forEach(r => {{
-    const matchName = !q || r.dataset.name.includes(q);
-    const matchPos = !pos || r.dataset.position === pos;
-    const matchRookie = !rookieOnly || r.dataset.rookie === '1';
-    const show = matchName && matchPos && matchRookie;
-    r.style.display = show ? '' : 'none';
-    if (show) n++;
+    const ok = (!qv || r.dataset.name.includes(qv)) && (!pv || r.dataset.position === pv);
+    r.style.display = ok ? '' : 'none';
+    if (ok) shown++;
   }});
-  stats.textContent = n + ' players';
+  stats.textContent = shown + ' / ' + rows.length + ' players';
 }}
-search.addEventListener('input', apply);
-posFilter.addEventListener('change', apply);
-if (rookieFilter) rookieFilter.addEventListener('change', apply);
-</script>""")
+q.addEventListener('input', update); pos.addEventListener('change', update); update();
+</script>
 
-
-# --------------------------------------------------------------------------
-# Page: sources.html — methodology and how to add evaluators
-# --------------------------------------------------------------------------
-
-def _build_sources_page(sources, latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
-    active_sources_html = ""
-    for s in sources:
-        desc = SOURCE_DESCRIPTIONS.get(s.slug, {})
-        status = s.last_synced_at.strftime("%Y-%m-%d %H:%M") if s.last_synced_at else "—"
-        wjust = desc.get("weight_justification", "")
-        active_sources_html += f"""<div class="card">
-<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
-  <div>
-    <h3 style="margin:0">{_esc(s.name)} <span class="tag tag-{s.category}">{s.category}</span></h3>
-    <div style="color:var(--muted);font-size:13px;margin-top:4px">Last synced: {status} · Weight: <strong>{s.default_weight:.2f}</strong></div>
-  </div>
-  {f'<a href="{_esc(s.url)}" target="_blank" style="font-size:13px">visit →</a>' if s.url else ''}
-</div>
-<p style="margin:14px 0 8px 0">{_esc(desc.get('blurb', s.notes or ''))}</p>
-{f'<p style="font-size:13px;margin:4px 0"><strong style="color:var(--accent)">Strength:</strong> {_esc(desc.get("strength", ""))}</p>' if desc.get("strength") else ''}
-{f'<p style="font-size:13px;margin:4px 0"><strong style="color:#b91c1c">Limitation:</strong> {_esc(desc.get("weakness", ""))}</p>' if desc.get("weakness") else ''}
-{f'<p style="font-size:13px;margin:10px 0 4px 0;padding:10px 12px;background:var(--hover);border-radius:6px;border-left:3px solid var(--accent)"><strong>Why this weight:</strong> {_esc(wjust)}</p>' if wjust else ''}
-</div>"""
-
-    eval_html = ""
-    for ev in EVALUATOR_RECOMMENDATIONS:
-        sw = ev.get("suggested_weight")
-        eval_html += f"""<div class="card">
-<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
-  <h3 style="margin:0">{_esc(ev['name'])}</h3>
-  <a href="{_esc(ev['url'])}" target="_blank" style="font-size:13px">visit →</a>
-</div>
-<div style="color:var(--muted);font-size:13px;margin-top:2px">Scope: {_esc(ev['scope'])}{f' · Suggested weight: <strong>{sw:.1f}</strong>' if sw else ''}</div>
-<p style="margin:12px 0">{_esc(ev['why'])}</p>
-<div style="background:var(--hover);padding:10px 14px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--accent)">
-Import as: <strong>{_esc(ev['import_as'])}</strong>
-</div>
 </div>"""
 
     return _page(
-        "Dynasty Model — Sources & Methodology",
-        _site_header("sources", latest_ts, league_format, formats_available),
-        f"""<div class="container narrow">
+        "Dynasty Football Model — Rankings",
+        _site_header("rankings", latest_ts, league_label),
+        body,
+    )
 
-<div class="card">
-<h2 style="margin-top:0">Source weighting</h2>
-<p>Each source contributes to the composite score through a weight calculated as:</p>
-<pre style="background:var(--hover);padding:14px;border-radius:6px;font-size:13px;overflow:auto">effective_weight = default_weight × track_record_multiplier</pre>
-<p><strong>Default weight</strong> is set per source based on documented evidence of historical accuracy. The weighting hierarchy:</p>
-<ul>
-<li><strong>1.4</strong> — Documented top performer in independent multi-year accuracy studies (e.g., Lance Zierlein in the Hogs Haven wAV correlation study)</li>
-<li><strong>1.3</strong> — Transparent algorithmic models with published methodology and verifiable hit-rate curves (e.g., PFF, Brainy Ballers SPS)</li>
-<li><strong>1.1–1.2</strong> — Strong evaluators with measured industry-level accuracy (e.g., Daniel Jeremiah, Matt Harmon's Reception Perception)</li>
-<li><strong>1.0</strong> — Consensus aggregators (FantasyCalc, DynastyProcess, FantasyPros ECR)</li>
-<li><strong>0.6–0.9</strong> — Sources with documented underperformance in independent studies</li>
-</ul>
-<p><strong>Track-record multiplier</strong> is computed from backtest results once you load historical pre-NFL-Draft rankings and actual fantasy production. Multiplier mapping:</p>
-<ul>
-<li><code>|spearman_corr| ≥ 0.7</code> → multiplier <strong>1.5</strong> (proven elite evaluator)</li>
-<li><code>|spearman_corr| ≥ 0.5</code> → multiplier <strong>1.2</strong> (above-average)</li>
-<li><code>|spearman_corr| ≥ 0.3</code> → multiplier <strong>1.0</strong> (baseline)</li>
-<li><code>|spearman_corr| &lt; 0.3</code> → multiplier <strong>0.6</strong> (de-weighted)</li>
-<li>No backtest yet → multiplier <strong>1.0</strong> (neutral)</li>
-</ul>
-<p>Sources with proven accuracy thus compound their influence over time, while sources that have systematically been wrong get progressively de-weighted as backtest data accumulates.</p>
+
+# ---------------------------------------------------------------------------
+# League overlay page
+# ---------------------------------------------------------------------------
+
+def _build_league(overlays: Dict[str, OverlayResult], latest_ts: datetime,
+                  league_label: str, team_lookup: Dict[str, str]) -> str:
+    # Precompute overlay data for every preset, embed as JSON.
+    overlay_payload = {}
+    for fmt, ov in overlays.items():
+        overlay_payload[fmt] = {
+            "label": ov.label,
+            "rankings": [
+                {
+                    "name": r["name"],
+                    "pos": r["position"],
+                    "age": r["age"],
+                    "team": team_lookup.get(r["player_id"], "—"),
+                    "value": r["league_value"],
+                    "delta": r["vs_default_delta"],
+                }
+                for r in ov.rankings[:300]
+            ],
+        }
+    payload_json = json.dumps(overlay_payload)
+
+    preset_buttons = "".join(
+        f'<button onclick="setFormat(\'{fmt}\')" id="btn-{fmt}">{_esc(PRESETS[fmt]["label"])}</button> '
+        for fmt in PRESETS
+    )
+
+    body = f"""<div class="container">
+
+<h2>League <span class="accent">Format Overlay</span></h2>
+<p class="lede">Re-rank the engine's projections under your league's exact
+scoring + roster rules. Switching format does NOT change which retired comps
+each active player has — it just re-scores those comps' careers under your
+settings and recomputes positional VORP.</p>
+
+<div class="callout"><strong>Tip.</strong> Compare the <em>vs default</em> column
+to see who's overvalued/undervalued in your league relative to the default
+Superflex PPR ranking.</div>
+
+<div class="controls">
+  Preset: {preset_buttons}
+  <span class="stats" id="ov-stats"></span>
 </div>
 
-<div class="card">
-<h2 style="margin-top:0">Research backing the default weights</h2>
-<p>The default weights aren't arbitrary. They're grounded in publicly-available accuracy research:</p>
-<ul>
-<li><strong>Hogs Haven (2022 study)</strong> — correlated draft analysts' pre-NFL-Draft rankings against Weighted Career Approximate Value (wAV) for the 2018-2020 drafts. Lance Zierlein and Mel Kiper led; PFF and CBS trailed for draft-order prediction.</li>
-<li><strong>Inside The Star 2025 mock-draft accuracy review</strong> — Jeremiah edged out Kiper and McShay for Round 1 prediction accuracy.</li>
-<li><strong>FantasyPros Most Accurate Expert Awards</strong> — multi-year industry-standard accuracy scoring across all rankings. Cited where applicable on individual source pages.</li>
-<li><strong>PFF's own published prospect score-to-outcome curves</strong> — they publish hit-rate buckets by prospect-model-score band, making their model uniquely auditable among major analytics services.</li>
-<li><strong>Brainy Ballers SPS</strong> — publicly cited successes on Jaxson Dart, JSN, Trey McBride, Saquon, Kelce, McCaffrey. Featured on Pat McAfee, Forbes, Barstool. Independent backtest pending in this model.</li>
-</ul>
-<p style="color:var(--muted);font-size:13px;margin-top:14px"><em>Important caveat:</em> the default weights are starting points. The track-record multiplier will dominate them once you backtest each source against actual NFL outcomes using <code>cli.py backtest</code>. Self-reported accuracy claims (including from highly-cited sources) get scrutinized by the backtest like any other.</p>
-</div>
-
-<h2>Active sources</h2>
-{active_sources_html}
-
-<h2>Add these evaluators to expand model coverage</h2>
-<div class="callout">
-<strong>Beyond what's already loaded:</strong> these evaluators have strong track records but
-publish behind paywalls. If you subscribe to any of them, you can export their rankings
-to a CSV and import them here. See the README for the exact <code>manual_import.import_csv</code>
-command. Each evaluator below shows a suggested weight based on their documented track record.
-</div>
-
-{eval_html}
-
-</div>""")
-
-
-# --------------------------------------------------------------------------
-# Page: league.html — client-side Sleeper league evaluator
-# --------------------------------------------------------------------------
-
-def _build_league_page(latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
-    import os
-    title = "Dynasty Model — Rate My League"
-    header = _site_header("league", latest_ts, league_format, formats_available)
-    # PROXY_URL is the deployed Cloudflare Worker URL (see
-    # scripts/cf-worker/README.md). When set at build time, the MFL form
-    # on the page actually works against the user's league. When unset,
-    # the form switches to "add to leagues.json" guidance.
-    raw_proxy = os.environ.get("PROXY_URL", "").rstrip("/")
-    # Defensive sanitization: only pass through a simple https URL.
-    import re as _re
-    if _re.match(r"^https?://[A-Za-z0-9.\-_/]+$", raw_proxy):
-        proxy_url = raw_proxy
-    else:
-        proxy_url = ""
-    body = """<div class="container narrow">
-<h1>Rate My League</h1>
-<p>Two ways in:</p>
-<ul style="margin:0 0 24px 0;padding-left:24px">
-  <li><strong>Pre-fetched leagues</strong> below (Sleeper + MFL) — includes manager skill rankings from draft + trade history.</li>
-  <li><strong>Any Sleeper league</strong> by ID using the form below the pre-fetched section (live, team rankings only).</li>
-</ul>
-
-<div id="prefetched-section" style="margin:24px 0"></div>
-
-<h2 style="margin-top:48px">Evaluate any league</h2>
-
-<form id="league-form" onsubmit="return evalLeague(event)" style="margin:24px 0" data-proxy-url="__PROXY_URL__">
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:stretch">
-    <select id="platform" onchange="onPlatformChange()"
-            style="padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px;background:white">
-      <option value="sleeper">Sleeper</option>
-      <option value="mfl">MyFantasyLeague</option>
-    </select>
-    <input id="league-id" type="text" placeholder="e.g. 968712712272838656"
-           style="flex:1;min-width:240px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px"
-           required>
-    <input id="mfl-year" type="number" placeholder="Year" min="2000" max="2099"
-           style="width:90px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:15px;display:none">
-    <button type="submit"
-            style="padding:10px 18px;background:#1d4ed8;color:white;border:0;border-radius:6px;font-weight:600;font-size:15px;cursor:pointer">
-      Evaluate league
-    </button>
-  </div>
-  <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted);margin-bottom:16px">
-    <input id="include-managers" type="checkbox" checked>
-    <span>Also compute manager skill rankings from draft + trade history (slower — ~20 API calls)</span>
-  </label>
-  <div id="mfl-proxy-warning" style="display:none;font-size:13px;padding:12px;border-radius:6px;background:#fef3c7;border:1px solid #fde68a;color:#92400e;margin-bottom:16px"></div>
-
-  <details style="margin:8px 0 0 0;padding:14px;border:1px solid var(--border);border-radius:6px">
-    <summary style="cursor:pointer;font-weight:600">League settings (optional)</summary>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px">
-      <label>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">QB format</div>
-        <select id="qb-format" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px">
-          <option value="auto" selected>Auto-detect from league</option>
-          <option value="1qb">1QB</option>
-          <option value="sf">Superflex (1QB + 1 SF)</option>
-          <option value="2qb">2QB (two QB starting spots)</option>
-        </select>
-      </label>
-      <label>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">TE premium</div>
-        <select id="te-prem" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px">
-          <option value="auto" selected>Auto-detect from league</option>
-          <option value="none">No TE premium (1.0 PPR)</option>
-          <option value="low">Light TE premium (1.25 PPR)</option>
-          <option value="high">Heavy TE premium (1.5 PPR)</option>
-        </select>
-      </label>
-      <label>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Scoring</div>
-        <select id="ppr" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px">
-          <option value="auto" selected>Auto-detect from league</option>
-          <option value="full">Full PPR (1.0)</option>
-          <option value="half">Half PPR (0.5)</option>
-          <option value="standard">Standard / non-PPR</option>
-        </select>
-      </label>
-    </div>
-    <p style="margin:14px 0 0 0;color:var(--muted);font-size:12px">
-      The base model rates players for <strong>Superflex full-PPR</strong>. These settings apply
-      position-value multipliers on top so the team totals and weakness flags match your league's actual
-      scarcity. Auto-detect reads <code>roster_positions</code> and <code>scoring_settings</code> from
-      the Sleeper league response.
-    </p>
-  </details>
-</form>
-
-<div class="callout" style="font-size:13px">
-<strong>Where to find your league ID:</strong>
-<ul style="margin:6px 0 0 0;padding-left:20px">
-  <li><strong>Sleeper:</strong> open your league → the long number after <code>/leagues/</code> in the URL
-      (e.g. <code>sleeper.com/leagues/<strong>968712712272838656</strong>/team</code>).</li>
-  <li><strong>MFL:</strong> the 5-digit number in the URL after <code>/YYYY/home/</code>
-      (e.g. <code>www48.myfantasyleague.com/2026/home/<strong>12345</strong></code>).</li>
-</ul>
-</div>
-
-<div id="detected-settings" style="margin:12px 0;font-size:13px;color:var(--muted)"></div>
-<div id="league-status" style="margin:16px 0;color:var(--muted);font-size:14px"></div>
-<div id="league-results"></div>
-
-<p style="margin-top:40px;color:var(--muted);font-size:13px">
-For MFL leagues, the live API has no CORS so the browser can't reach it directly. Add the league to
-<code>leagues.json</code> in the repo and it'll appear in the pre-fetched section after the next
-daily build.
-</p>
-</div>
+<table>
+<thead><tr>
+  <th>#</th><th>Player</th><th>Pos</th><th>Team</th>
+  <th>Age</th>
+  <th style="text-align:right">vs default</th>
+  <th style="text-align:right">League value</th>
+</tr></thead>
+<tbody id="ov-body"></tbody>
+</table>
 
 <script>
-const STARTING_POSITIONS = ["QB", "RB", "WR", "TE"];
-const WEAKNESS_TIER_THRESHOLD = 3;
-let MODEL = null;
+const OVERLAY = {payload_json};
+function chip(d) {{
+  if (d > 10) return '<span class="div-chip div-up-big">+'+d+'</span>';
+  if (d > 0)  return '<span class="div-chip div-up">+'+d+'</span>';
+  if (d < -10) return '<span class="div-chip div-down-big">'+d+'</span>';
+  if (d < 0)  return '<span class="div-chip div-down">'+d+'</span>';
+  return '<span class="div-chip div-flat">0</span>';
+}}
+function posBadge(p) {{
+  const colors = {{ QB: '#e74c3c', RB: '#27ae60', WR: '#3498db', TE: '#f39c12' }};
+  const c = colors[p] || '#9ca3af';
+  return '<span class="pos-badge" style="background:'+c+'">'+p+'</span>';
+}}
+function setFormat(fmt) {{
+  const data = OVERLAY[fmt];
+  const body = document.getElementById('ov-body');
+  body.innerHTML = data.rankings.map((r, i) =>
+    '<tr class="player-row"><td class="rank">'+(i+1)+'</td>'+
+    '<td class="name">'+r.name+'</td>'+
+    '<td>'+posBadge(r.pos)+'</td>'+
+    '<td class="team">'+r.team+'</td>'+
+    '<td class="years">'+r.age+'</td>'+
+    '<td class="years" style="text-align:right">'+chip(r.delta)+'</td>'+
+    '<td class="score">'+r.value.toFixed(0)+'</td></tr>'
+  ).join('');
+  document.getElementById('ov-stats').textContent = data.label + ' · ' + data.rankings.length + ' players';
+  Object.keys(OVERLAY).forEach(k => {{
+    const b = document.getElementById('btn-'+k);
+    if (b) b.style.opacity = (k === fmt) ? '1' : '0.55';
+  }});
+}}
+setFormat('sf_ppr');
+</script>
 
-// Position-value multipliers for league-settings adjustments. Applied to each
-// player's base score before computing team totals. These are industry
-// conventions, not backtested — if you want precision, run the CLI which has
-// access to the full composite model + backtest history.
-const QB_MULT  = {"1qb":{"QB":0.65,"RB":1.0,"WR":1.0,"TE":1.0},
-                  "sf": {"QB":1.0, "RB":1.0,"WR":1.0,"TE":1.0},
-                  "2qb":{"QB":1.25,"RB":0.95,"WR":0.95,"TE":0.95}};
-const TE_MULT  = {"none":1.0,"low":1.15,"high":1.25};
-const PPR_MULT = {"full":  {"QB":1.0,"RB":1.0, "WR":1.0, "TE":1.0},
-                  "half":  {"QB":1.0,"RB":0.97,"WR":0.95,"TE":0.92},
-                  "standard":{"QB":1.0,"RB":0.93,"WR":0.88,"TE":0.82}};
+</div>"""
 
-async function loadModel() {
-  if (MODEL) return MODEL;
-  const resp = await fetch("assets/model_scores.json");
-  if (!resp.ok) throw new Error("Could not load model scores (assets/model_scores.json)");
-  MODEL = await resp.json();
-  return MODEL;
-}
-
-function detectFromLeague(league) {
-  // QB format: count QB-slot starters vs SF slots in roster_positions.
-  const rp = league.roster_positions || [];
-  const qbCount = rp.filter(p => p === "QB").length;
-  const sfCount = rp.filter(p => p === "SUPER_FLEX" || p === "SF").length;
-  let qb;
-  if (qbCount >= 2) qb = "2qb";
-  else if (sfCount >= 1) qb = "sf";
-  else qb = "1qb";
-
-  // TE premium: scoring_settings.bonus_rec_te (extra points-per-reception
-  // for TEs above the base WR rate).
-  const ss = league.scoring_settings || {};
-  const bonusTE = (ss.bonus_rec_te || 0) + 0;
-  let te;
-  if (bonusTE >= 0.5) te = "high";
-  else if (bonusTE >= 0.25) te = "low";
-  else te = "none";
-
-  // PPR: scoring_settings.rec (points per reception).
-  const recPts = (ss.rec || 0) + 0;
-  let ppr;
-  if (recPts >= 0.9) ppr = "full";
-  else if (recPts >= 0.4) ppr = "half";
-  else ppr = "standard";
-
-  return { qb, te, ppr, qbCount, sfCount, bonusTE, recPts };
-}
-
-function effectiveSettings(detected) {
-  const get = (id, fallback) => {
-    const v = document.getElementById(id).value;
-    return v === "auto" ? fallback : v;
-  };
-  return {
-    qb:  get("qb-format", detected.qb),
-    te:  get("te-prem",   detected.te),
-    ppr: get("ppr",       detected.ppr),
-  };
-}
-
-function positionMultiplier(pos, settings) {
-  const p = (pos || "").toUpperCase();
-  const qbm  = (QB_MULT[settings.qb]  || QB_MULT.sf)[p]  || 1.0;
-  const pprm = (PPR_MULT[settings.ppr] || PPR_MULT.full)[p] || 1.0;
-  const tem  = p === "TE" ? (TE_MULT[settings.te] || 1.0) : 1.0;
-  return qbm * pprm * tem;
-}
-
-function getProxyUrl() {
-  const form = document.getElementById("league-form");
-  const u = (form && form.dataset.proxyUrl) || "";
-  return u && u !== "__PROXY_URL__" ? u.replace(/\/$/, "") : "";
-}
-
-function onPlatformChange() {
-  const plat = document.getElementById("platform").value;
-  const yearInput = document.getElementById("mfl-year");
-  const warning = document.getElementById("mfl-proxy-warning");
-  const idInput = document.getElementById("league-id");
-  if (plat === "mfl") {
-    yearInput.style.display = "";
-    yearInput.value = yearInput.value || String(new Date().getFullYear());
-    idInput.placeholder = "e.g. 12345";
-    const proxy = getProxyUrl();
-    if (!proxy) {
-      warning.style.display = "";
-      warning.innerHTML = `
-        <strong>MFL leagues require a proxy worker.</strong>
-        MFL's API doesn't allow direct fetches from <code>github.io</code>.
-        Deploy the proxy (see <code>scripts/cf-worker/README.md</code>) and set
-        <code>PROXY_URL</code> in the build environment.
-        <br><br>
-        In the meantime, add your MFL league to <code>leagues.json</code> and it'll appear
-        in the pre-fetched section after the next daily build.
-      `;
-    } else {
-      warning.style.display = "none";
-    }
-  } else {
-    yearInput.style.display = "none";
-    warning.style.display = "none";
-    idInput.placeholder = "e.g. 968712712272838656";
-  }
-}
-
-// Routed fetcher: routes Sleeper directly (CORS-friendly) and MFL through
-// the configured proxy worker (required because MFL's CORS blocks GH Pages).
-async function platformFetch(platform, path, params) {
-  const proxy = getProxyUrl();
-  if (platform === "sleeper") {
-    // Always direct for Sleeper. Proxy is only useful for edge caching.
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return fetch(`https://api.sleeper.app${path}${qs}`);
-  }
-  if (platform === "mfl") {
-    if (!proxy) throw new Error("MFL proxy not configured. See scripts/cf-worker/README.md.");
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return fetch(`${proxy}${path}${qs}`);
-  }
-  throw new Error("unknown platform: " + platform);
-}
-
-async function evalLeague(ev) {
-  ev.preventDefault();
-  const platform = document.getElementById("platform").value;
-  const leagueId = document.getElementById("league-id").value.trim();
-  const year = (document.getElementById("mfl-year").value || new Date().getFullYear()).toString();
-  const includeManagers = document.getElementById("include-managers").checked;
-  const status = document.getElementById("league-status");
-  const detectedDiv = document.getElementById("detected-settings");
-  const results = document.getElementById("league-results");
-  results.innerHTML = "";
-  detectedDiv.innerHTML = "";
-  status.textContent = `Loading model + ${platform.toUpperCase()} league data...`;
-
-  try {
-    if (platform === "sleeper") {
-      await evalSleeperLeague(leagueId, includeManagers, { status, detectedDiv, results });
-    } else if (platform === "mfl") {
-      await evalMflLeague(leagueId, year, includeManagers, { status, detectedDiv, results });
-    } else {
-      throw new Error("unknown platform: " + platform);
-    }
-  } catch (err) {
-    status.textContent = "";
-    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${escapeHtml(err.message)}</div>`;
-  }
-  return false;
-}
-
-async function evalSleeperLeague(leagueId, includeManagers, { status, detectedDiv, results }) {
-  const [model, leagueResp, usersResp, rostersResp] = await Promise.all([
-    loadModel(),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}`),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`),
-  ]);
-  if (!leagueResp.ok) throw new Error("Sleeper league not found. Double-check the league ID.");
-  const [league, users, rosters] = await Promise.all([
-    leagueResp.json(), usersResp.json(), rostersResp.json(),
-  ]);
-
-  const detected = detectFromLeague(league);
-  const settings = effectiveSettings(detected);
-  detectedDiv.innerHTML = renderDetected(detected, settings);
-
-  const userById = {};
-  (users || []).forEach(u => { userById[u.user_id] = u.display_name || u.username || u.user_id; });
-  const franchiseNames = {};
-  (rosters || []).forEach(r => {
-    franchiseNames[String(r.roster_id)] = userById[r.owner_id] || ("Team " + r.roster_id);
-  });
-
-  const teams = (rosters || []).map(r => evaluateTeam(r, userById, model, settings));
-  const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
-  teams.forEach(t => { t.vsAvg = t.total - leagueAvg; });
-  const sorted = [...teams].sort((a, b) => b.total - a.total);
-  status.textContent = `${league.name || "Sleeper league " + leagueId} — ${teams.length} teams — league avg ${leagueAvg.toFixed(1)} (settings-adjusted)`;
-  results.innerHTML = renderResults(league.name, sorted);
-
-  if (includeManagers) {
-    status.textContent = status.textContent + " — fetching draft + trade history...";
-    const mgr = await computeSleeperManagerReport(leagueId, franchiseNames, model);
-    results.innerHTML += renderManagerReport(mgr);
-    status.textContent = `${league.name || "Sleeper league " + leagueId} — ${teams.length} teams — ${mgr.managers.length} managers ranked`;
-  }
-}
-
-async function evalMflLeague(leagueId, year, includeManagers, { status, detectedDiv, results }) {
-  const proxy = getProxyUrl();
-  if (!proxy) {
-    throw new Error("MFL leagues require a proxy worker. See scripts/cf-worker/README.md, or add the league to leagues.json for the next daily build.");
-  }
-  const model = await loadModel();
-  const leagueResp = await fetch(`${proxy}/mfl/${year}/export?TYPE=league&L=${leagueId}&JSON=1`);
-  if (!leagueResp.ok) throw new Error("MFL league not found. Check league ID + year.");
-  const leaguePayload = await leagueResp.json();
-  const league = (leaguePayload && leaguePayload.league) || {};
-  const franchisesMeta = ((league.franchises || {}).franchise) || [];
-  const franchiseArr = Array.isArray(franchisesMeta) ? franchisesMeta : [franchisesMeta];
-  const franchiseNames = {};
-  franchiseArr.forEach(f => { franchiseNames[String(f.id)] = f.name || String(f.id); });
-
-  const rostersResp = await fetch(`${proxy}/mfl/${year}/export?TYPE=rosters&L=${leagueId}&JSON=1`);
-  const rostersPayload = await rostersResp.json();
-  const franchisesEntry = ((rostersPayload.rosters || {}).franchise) || [];
-  const franchisesList = Array.isArray(franchisesEntry) ? franchisesEntry : [franchisesEntry];
-
-  // Build pseudo-Sleeper-shaped rosters so we can reuse evaluateTeam().
-  const fakeRosters = franchisesList.map(f => {
-    let playerEntry = f.player || [];
-    if (!Array.isArray(playerEntry)) playerEntry = [playerEntry];
-    return {
-      roster_id: f.id,
-      owner_id: f.id,
-      players: playerEntry.map(p => String(p.id)).filter(Boolean),
-    };
-  });
-
-  // MFL rosters use mfl_id which our model_scores.json doesn't index. We need
-  // an mfl_id -> entry lookup. Since our pre-built model JSON is keyed by
-  // sleeper_id, MFL evaluations only work for players who happen to ALSO have
-  // a sleeper_id match. To avoid an extra build artifact for now, we attempt
-  // a Sleeper crosswalk: walk the model and build {mfl_id_normalized: entry}.
-  // The mfl_id correspondence isn't trivially available client-side, so the
-  // first cut here matches by NAME+POSITION (which the pre-fetcher path
-  // already does server-side via Player.mfl_id). It's a known limitation;
-  // surfaced in the status text below.
-  // TODO(v2): emit a separate assets/mfl_scores.json keyed by mfl_id.
-  const nameLookup = {};
-  Object.values(model).forEach(p => {
-    const key = (p.name || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
-    if (key) nameLookup[key] = p;
-  });
-
-  // For each MFL player_id in rosters, attempt to look up the player's name
-  // via MFL's player export (one shot for the whole league).
-  const playersResp = await fetch(`${proxy}/mfl/${year}/export?TYPE=players&L=${leagueId}&JSON=1`);
-  const playersPayload = await playersResp.json();
-  let mflPlayers = ((playersPayload.players || {}).player) || [];
-  if (!Array.isArray(mflPlayers)) mflPlayers = [mflPlayers];
-  const mflIdToEntry = {};
-  let matched = 0;
-  mflPlayers.forEach(mp => {
-    if (!mp.id) return;
-    // MFL name format: "Last, First". Flip it to match our "First Last".
-    let n = mp.name || "";
-    if (n.includes(",")) {
-      const [last, first] = n.split(",").map(s => s.trim());
-      n = `${first} ${last}`;
-    }
-    const key = n.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
-    const hit = nameLookup[key];
-    if (hit) { mflIdToEntry[String(mp.id)] = hit; matched++; }
-  });
-  status.textContent = `${league.name || "MFL league " + leagueId} (\u00a7${year}) — ${fakeRosters.length} teams — ${matched} of ${mflPlayers.length} MFL players matched to model`;
-
-  // Now evaluate each franchise using mflIdToEntry as the model lookup.
-  const detected = { qb: "sf", te: "none", ppr: "full", qbCount: 0, sfCount: 0, bonusTE: 0, recPts: 1 };
-  const settings = effectiveSettings(detected);
-  detectedDiv.innerHTML = `<em>Settings auto-detect not yet wired for MFL — using Superflex / full PPR / no TE premium defaults. Use the dropdowns above to override.</em>`;
-
-  const teams = fakeRosters.map(r => evaluateTeam(r, franchiseNames, mflIdToEntry, settings));
-  const leagueAvg = teams.length ? teams.reduce((a, t) => a + t.total, 0) / teams.length : 0;
-  teams.forEach(t => { t.vsAvg = t.total - leagueAvg; });
-  const sorted = [...teams].sort((a, b) => b.total - a.total);
-  results.innerHTML = renderResults(league.name, sorted);
-
-  if (includeManagers) {
-    status.textContent += " — fetching draft + trade history...";
-    const mgr = await computeMflManagerReport(leagueId, year, franchiseNames, mflIdToEntry, proxy);
-    results.innerHTML += renderManagerReport(mgr);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Client-side manager-rankings port. Mirrors src/dynasty/manager.py.
-// ---------------------------------------------------------------------------
-
-function expectedScoreAtPick(pick) {
-  if (pick <= 0) return 100.0;
-  if (pick > 250) return 0.0;
-  return Math.max(0.0, 100.0 * (1.0 - (pick - 1) / 250.0));
-}
-
-function zscore(value, pool) {
-  if (!pool || pool.length < 2) return 0.0;
-  const mu = pool.reduce((a, b) => a + b, 0) / pool.length;
-  const variance = pool.reduce((a, b) => a + (b - mu) * (b - mu), 0) / pool.length;
-  const sd = Math.sqrt(variance) || 1.0;
-  return (value - mu) / sd;
-}
-
-function computeManagerTable(franchiseNames, picks, trades, scoreLookup) {
-  const byId = {};
-  function ensure(fid) {
-    if (!byId[fid]) {
-      byId[fid] = {
-        franchise_id: fid,
-        display_name: franchiseNames[fid] || `Franchise ${fid}`,
-        n_picks: 0, draft_delta_total: 0, draft_delta_avg: 0,
-        n_trades: 0, trade_delta_total: 0,
-        z_draft: 0, z_trade: 0, skill_score: 0, skill_rank: 0,
-        notes: [],
-      };
-    }
-    return byId[fid];
-  }
-  // Pre-populate so every franchise appears even with zero activity.
-  Object.keys(franchiseNames).forEach(fid => ensure(fid));
-
-  picks.forEach(p => {
-    const info = scoreLookup[p.player_ext_id];
-    if (!info) return;
-    if (!p.franchise_id || p.franchise_id === "?") return;
-    const m = ensure(p.franchise_id);
-    const expected = expectedScoreAtPick(p.pick_no);
-    m.n_picks++;
-    m.draft_delta_total += (info.score - expected);
-  });
-  Object.values(byId).forEach(m => {
-    m.draft_delta_avg = m.n_picks ? (m.draft_delta_total / m.n_picks) : 0;
-  });
-
-  trades.forEach(tx => {
-    const sideValues = {};
-    Object.keys(tx.sides).forEach(fid => {
-      sideValues[fid] = tx.sides[fid].reduce((a, pid) => a + (scoreLookup[pid] ? scoreLookup[pid].score : 0), 0);
-    });
-    Object.keys(tx.sides).forEach(fid => {
-      const received = sideValues[fid] || 0;
-      const given = Object.keys(sideValues).filter(o => o !== fid).reduce((a, o) => a + sideValues[o], 0);
-      const m = ensure(fid);
-      m.n_trades++;
-      m.trade_delta_total += (received - given);
-    });
-  });
-
-  const draftPool = Object.values(byId).filter(m => m.n_picks).map(m => m.draft_delta_avg);
-  const tradePool = Object.values(byId).filter(m => m.n_trades).map(m => m.trade_delta_total);
-
-  Object.values(byId).forEach(m => {
-    m.z_draft = m.n_picks ? zscore(m.draft_delta_avg, draftPool) : 0;
-    m.z_trade = m.n_trades ? zscore(m.trade_delta_total, tradePool) : 0;
-    m.skill_score = (m.z_draft + m.z_trade) / 2.0;
-    if (!m.n_trades) m.notes.push("no trades on record");
-    if (m.n_picks > 0 && m.n_picks < 5) m.notes.push(`only ${m.n_picks} rated draft picks (low sample)`);
-    else if (m.n_picks === 0) m.notes.push("no rated draft picks");
-  });
-
-  const ranked = Object.values(byId).sort((a, b) => b.skill_score - a.skill_score);
-  ranked.forEach((m, i) => { m.skill_rank = i + 1; });
-  return { n_picks: picks.length, n_trades: trades.length, managers: ranked };
-}
-
-async function computeSleeperManagerReport(leagueId, franchiseNames, model) {
-  // Drafts -> picks.
-  const draftsResp = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
-  const drafts = (await draftsResp.json()) || [];
-  const allPicks = [];
-  for (const d of drafts) {
-    const did = d.draft_id || d.id;
-    if (!did) continue;
-    try {
-      const r = await fetch(`https://api.sleeper.app/v1/draft/${did}/picks`);
-      const rows = (await r.json()) || [];
-      rows.forEach(row => {
-        allPicks.push({
-          pick_no: Number(row.pick_no) || 0,
-          round_no: Number(row.round) || 0,
-          franchise_id: String(row.roster_id || row.picked_by || "?"),
-          player_ext_id: String(row.player_id || ""),
-        });
-      });
-    } catch (e) { /* skip */ }
-  }
-
-  // Transactions per week (0..18).
-  const allTrades = [];
-  const weekFetches = [];
-  for (let w = 0; w <= 18; w++) {
-    weekFetches.push(
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
-        .then(r => r.ok ? r.json() : [])
-        .catch(() => [])
-    );
-  }
-  const weekResults = await Promise.all(weekFetches);
-  weekResults.forEach(rows => {
-    (rows || []).forEach(tx => {
-      if (tx.type !== "trade" || tx.status !== "complete") return;
-      const adds = tx.adds || {};
-      const sides = {};
-      Object.keys(adds).forEach(pid => {
-        const fid = String(adds[pid]);
-        if (!sides[fid]) sides[fid] = [];
-        sides[fid].push(String(pid));
-      });
-      if (!Object.keys(sides).length) return;
-      allTrades.push({ transaction_id: String(tx.transaction_id || tx.id || ""), sides });
-    });
-  });
-
-  return computeManagerTable(franchiseNames, allPicks, allTrades, model);
-}
-
-async function computeMflManagerReport(leagueId, year, franchiseNames, mflIdLookup, proxy) {
-  // Drafts.
-  const allPicks = [];
-  try {
-    const r = await fetch(`${proxy}/mfl/${year}/export?TYPE=draftResults&L=${leagueId}&JSON=1`);
-    const payload = await r.json();
-    let units = ((payload.draftResults || {}).draftUnit) || [];
-    if (!Array.isArray(units)) units = [units];
-    units.forEach(unit => {
-      let picks = unit.draftPick || [];
-      if (!Array.isArray(picks)) picks = [picks];
-      picks.forEach(p => {
-        allPicks.push({
-          pick_no: (Number(p.pick) || 0) + 1,
-          round_no: (Number(p.round) || 0) + 1,
-          franchise_id: String(p.franchise || ""),
-          player_ext_id: String(p.player || ""),
-        });
-      });
-    });
-  } catch (e) { /* skip */ }
-
-  // Trades.
-  const allTrades = [];
-  try {
-    const r = await fetch(`${proxy}/mfl/${year}/export?TYPE=transactions&L=${leagueId}&JSON=1&TRANS_TYPE=TRADE`);
-    const payload = await r.json();
-    let txs = ((payload.transactions || {}).transaction) || [];
-    if (!Array.isArray(txs)) txs = [txs];
-    txs.forEach(tx => {
-      if (tx.type !== "TRADE") return;
-      const f1 = tx.franchise || tx.franchise1;
-      const f2 = tx.franchise2;
-      const split = blob => (blob || "").split(",").map(s => s.trim()).filter(s => s && !s.startsWith("DP_") && !s.startsWith("FP_") && !s.startsWith("BB_"));
-      const side1 = split(tx.franchise1_gave_up);
-      const side2 = split(tx.franchise2_gave_up);
-      const sides = {};
-      if (f1) sides[String(f1)] = side2;
-      if (f2) sides[String(f2)] = side1;
-      if (Object.keys(sides).length) allTrades.push({ transaction_id: String(tx.transaction_id || tx.timestamp || ""), sides });
-    });
-  } catch (e) { /* skip */ }
-
-  return computeManagerTable(franchiseNames, allPicks, allTrades, mflIdLookup);
-}
-
-function renderDetected(d, s) {
-  const qbLabel = {"1qb":"1QB","sf":"Superflex","2qb":"2QB"}[s.qb];
-  const teLabel = {"none":"no TE premium","low":"1.25 PPR TE","high":"1.5 PPR TE"}[s.te];
-  const pprLabel = {"full":"full PPR","half":"half PPR","standard":"standard scoring"}[s.ppr];
-  return `<strong>Settings:</strong> ${qbLabel} · ${teLabel} · ${pprLabel} ` +
-         `<span style="color:var(--muted);font-size:12px">(detected from Sleeper: ${d.qbCount}×QB+${d.sfCount}×SF, bonus_rec_te=${d.bonusTE}, rec=${d.recPts})</span>`;
-}
-
-function evaluateTeam(roster, userById, model, settings) {
-  const ownerName = userById[roster.owner_id] || ("Team " + roster.roster_id);
-  const playerIds = roster.players || [];
-  let total = 0;
-  let evaluated = 0;
-  let unrated = 0;
-  const playerRows = [];
-  const bestAtPos = {};
-  for (const pid of playerIds) {
-    const entry = model[String(pid)];
-    if (!entry) { unrated++; continue; }
-    evaluated++;
-    const mult = positionMultiplier(entry.position, settings);
-    const adjScore = entry.score * mult;
-    const row = Object.assign({}, entry, { adjScore, mult });
-    total += adjScore;
-    playerRows.push(row);
-    const pos = entry.position;
-    if (!bestAtPos[pos] || adjScore > bestAtPos[pos].adjScore) bestAtPos[pos] = row;
-  }
-  playerRows.sort((a, b) => b.adjScore - a.adjScore);
-  const weaknesses = [];
-  for (const pos of STARTING_POSITIONS) {
-    const best = bestAtPos[pos];
-    if (!best) weaknesses.push(`no rated ${pos} on roster`);
-    else if ((best.tier || 99) > WEAKNESS_TIER_THRESHOLD) {
-      weaknesses.push(`weak ${pos}: best is ${best.name} (Tier ${best.tier}, rank ${best.rank})`);
-    }
-  }
-  return {
-    teamId: roster.roster_id,
-    name: ownerName,
-    total,
-    avg: evaluated ? total / evaluated : 0,
-    evaluated,
-    unrated,
-    topAssets: playerRows.slice(0, 5),
-    weaknesses,
-  };
-}
-
-function renderResults(leagueName, sorted) {
-  let html = `<h2 style="margin-top:32px">Power rankings</h2>`;
-  html += `<table style="width:100%;border-collapse:collapse">`;
-  html += `<thead><tr><th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">#</th>`;
-  html += `<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Team</th>`;
-  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">Total</th>`;
-  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">vs Avg</th></tr></thead><tbody>`;
-  sorted.forEach((t, i) => {
-    const diff = t.vsAvg >= 0 ? `+${t.vsAvg.toFixed(1)}` : t.vsAvg.toFixed(1);
-    const diffColor = t.vsAvg >= 0 ? "#065f46" : "#991b1b";
-    html += `<tr><td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${i + 1}</td>`;
-    html += `<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>${escapeHtml(t.name)}</strong></td>`;
-    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${t.total.toFixed(1)}</td>`;
-    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:${diffColor}">${diff}</td></tr>`;
-  });
-  html += `</tbody></table>`;
-  html += `<h2 style="margin-top:48px">Team breakdowns</h2>`;
-  sorted.forEach(t => {
-    html += `<div style="margin:24px 0;padding:16px;border:1px solid var(--border);border-radius:8px">`;
-    html += `<h3 style="margin:0 0 8px 0">${escapeHtml(t.name)}</h3>`;
-    html += `<div style="color:var(--muted);font-size:14px;margin-bottom:12px">total=${t.total.toFixed(1)} avg=${t.avg.toFixed(1)} rated=${t.evaluated} unrated=${t.unrated}</div>`;
-    if (t.topAssets.length) {
-      html += `<div style="font-weight:600;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Top 5 assets (settings-adjusted)</div>`;
-      html += `<ul style="margin:0 0 12px 0;padding-left:20px">`;
-      t.topAssets.forEach(a => {
-        const adj = a.adjScore.toFixed(1);
-        const base = a.score.toFixed(1);
-        const multNote = a.mult === 1.0 ? "" : ` <span style="color:var(--muted);font-size:12px">(×${a.mult.toFixed(2)})</span>`;
-        html += `<li>${escapeHtml(a.name)} <span style="color:var(--muted)">(${a.position}, rank ${a.rank}, Tier ${a.tier}) base ${base} → ${adj}${multNote}</span></li>`;
-      });
-      html += `</ul>`;
-    }
-    if (t.weaknesses.length) {
-      html += `<div style="font-weight:600;font-size:13px;color:#92400e;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Weaknesses</div>`;
-      html += `<ul style="margin:0;padding-left:20px;color:#92400e">`;
-      t.weaknesses.forEach(w => { html += `<li>${escapeHtml(w)}</li>`; });
-      html += `</ul>`;
-    }
-    html += `</div>`;
-  });
-  return html;
-}
-
-function escapeHtml(s) {
-  if (s == null) return "";
-  return String(s).replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
-
-// ---------------------------------------------------------------------------
-// Pre-fetched leagues (Sleeper + MFL pre-baked into the site at build time).
-// ---------------------------------------------------------------------------
-
-async function loadPrefetchedIndex() {
-  const section = document.getElementById("prefetched-section");
-  try {
-    const resp = await fetch("leagues/index.json");
-    if (!resp.ok) throw new Error("no index");
-    const idx = await resp.json();
-    const leagues = idx.leagues || [];
-    if (!leagues.length) {
-      section.innerHTML = `<div class="callout" style="font-size:13px">No leagues are pre-fetched yet. Use the form below to evaluate any Sleeper league live (with manager rankings if the checkbox is on). MFL leagues need either a proxy worker (see <code>scripts/cf-worker/README.md</code>) or an entry in <code>leagues.json</code> for the next daily build.</div>`;
-      return;
-    }
-    let html = `<h2 style="margin-top:0">Pre-fetched leagues</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">`;
-    leagues.forEach(L => {
-      const yearTag = L.year ? ` ${L.year}` : "";
-      html += `<button class="prefetched-card" onclick="loadPrefetched('${L.slug}')" style="text-align:left;padding:14px 16px;border:1px solid var(--border);border-radius:6px;background:white;cursor:pointer">`;
-      html += `<div style="font-weight:600;font-size:15px">${escapeHtml(L.name)}</div>`;
-      html += `<div style="font-size:12px;color:var(--muted);margin-top:4px">${escapeHtml(L.platform.toUpperCase())}${yearTag} · ${L.n_teams} teams · ${L.n_managers} managers</div>`;
-      html += `</button>`;
-    });
-    html += `</div>`;
-    section.innerHTML = html;
-  } catch (err) {
-    section.innerHTML = `<div style="font-size:13px;color:var(--muted)">(No pre-fetched leagues available.)</div>`;
-  }
-}
-
-async function loadPrefetched(slug) {
-  const status = document.getElementById("league-status");
-  const results = document.getElementById("league-results");
-  status.textContent = `Loading ${slug}...`;
-  results.innerHTML = "";
-  try {
-    const resp = await fetch(`leagues/${slug}.json`);
-    if (!resp.ok) throw new Error("could not load " + slug);
-    const payload = await resp.json();
-    const team = payload.team_report || {};
-    const mgr = payload.manager_report || {};
-    status.textContent = `${team.name || slug} — pre-fetched ${payload.fetched_at || ""} · ${(team.teams || []).length} teams`;
-    results.innerHTML = renderPrefetchedReport(team, mgr);
-  } catch (err) {
-    status.textContent = "";
-    results.innerHTML = `<div class="callout" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">${err.message}</div>`;
-  }
-}
-
-function renderPrefetchedReport(team, mgr) {
-  let html = renderTeamReport(team);
-  html += renderManagerReport(mgr);
-  return html;
-}
-
-function renderTeamReport(team) {
-  const power = team.power_rankings || [];
-  const teams = team.teams || [];
-  if (!teams.length) return "<p>No team data in pre-fetched report.</p>";
-  let html = `<h2 style="margin-top:32px">Power rankings <span style="color:var(--muted);font-size:13px;font-weight:normal">(pre-fetched, base scores)</span></h2>`;
-  html += `<table style="width:100%;border-collapse:collapse">`;
-  html += `<thead><tr><th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">#</th>`;
-  html += `<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Team</th>`;
-  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">Total</th>`;
-  html += `<th style="text-align:right;padding:8px;border-bottom:2px solid var(--border)">vs Avg</th></tr></thead><tbody>`;
-  power.forEach((row, i) => {
-    const diff = row.vs_league_avg >= 0 ? `+${row.vs_league_avg.toFixed(1)}` : row.vs_league_avg.toFixed(1);
-    const diffColor = row.vs_league_avg >= 0 ? "#065f46" : "#991b1b";
-    html += `<tr><td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${row.rank}</td>`;
-    html += `<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>${escapeHtml(row.display_name)}</strong></td>`;
-    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border)">${row.total_score.toFixed(1)}</td>`;
-    html += `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:${diffColor}">${diff}</td></tr>`;
-  });
-  html += `</tbody></table>`;
-  return html;
-}
-
-function renderManagerReport(mgr) {
-  const managers = mgr.managers || [];
-  if (!managers.length) return "";
-  let html = `<h2 style="margin-top:48px">Manager skill rankings</h2>`;
-  html += `<p style="color:var(--muted);font-size:13px">Per-manager skill score (z-score blend of draft delta + trade delta). `;
-  html += `Picks=${mgr.n_picks||0}, trades=${mgr.n_trades||0}. Uses current composite values — rewards picks that aged well.</p>`;
-  html += `<table style="width:100%;border-collapse:collapse;font-size:14px">`;
-  html += `<thead><tr>`;
-  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">#</th>`;
-  html += `<th style="text-align:left;padding:6px;border-bottom:2px solid var(--border)">Manager</th>`;
-  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Skill</th>`;
-  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Picks</th>`;
-  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Draft Δ</th>`;
-  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Trades</th>`;
-  html += `<th style="text-align:right;padding:6px;border-bottom:2px solid var(--border)">Trade Δ</th>`;
-  html += `<th style="text-align:left;padding:6px;border-bottom:2px solid var(--border)">Notes</th>`;
-  html += `</tr></thead><tbody>`;
-  managers.forEach(m => {
-    const skill = m.skill_score >= 0 ? `+${m.skill_score.toFixed(2)}` : m.skill_score.toFixed(2);
-    const skillColor = m.skill_score >= 0 ? "#065f46" : "#991b1b";
-    const dDelta = m.n_picks ? (m.draft_delta_avg >= 0 ? `+${m.draft_delta_avg.toFixed(1)}` : m.draft_delta_avg.toFixed(1)) : "—";
-    const tDelta = m.n_trades ? (m.trade_delta_total >= 0 ? `+${m.trade_delta_total.toFixed(1)}` : m.trade_delta_total.toFixed(1)) : "—";
-    const notes = (m.notes || []).join(", ");
-    html += `<tr>`;
-    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${m.skill_rank}</td>`;
-    html += `<td style="padding:6px;border-bottom:1px solid var(--border)"><strong>${escapeHtml(m.display_name)}</strong></td>`;
-    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:${skillColor};font-weight:600">${skill}</td>`;
-    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${m.n_picks}</td>`;
-    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${dDelta}</td>`;
-    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${m.n_trades}</td>`;
-    html += `<td style="text-align:right;padding:6px;border-bottom:1px solid var(--border)">${tDelta}</td>`;
-    html += `<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px">${escapeHtml(notes)}</td>`;
-    html += `</tr>`;
-  });
-  html += `</tbody></table>`;
-  return html;
-}
-
-// Auto-load the prefetched index on page load.
-loadPrefetchedIndex();
-// Initial UI sync for platform selector visibility.
-onPlatformChange();
-</script>"""
-    body = body.replace("__PROXY_URL__", proxy_url)
-    return _page(title, header, body)
+    return _page(
+        "Dynasty Football Model — League Overlay",
+        _site_header("league", latest_ts, league_label),
+        body,
+    )
 
 
-# --------------------------------------------------------------------------
-# Page: players/<slug>.html — individual player detail
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Methodology page
+# ---------------------------------------------------------------------------
 
-def _similar_players_card(comp_entry: dict) -> str:
-    """Render the top-5 historical comparables for a player.
-
-    ``comp_entry`` comes from ``data/similarity_comps_cache.json`` and has
-    the shape produced by ``similarity_career_arc._build_comps_cache``.
-    """
-    comps = comp_entry.get("comparables") or []
-    if not comps:
-        return ""
-    age = comp_entry.get("query_age")
-    proj_yrs = comp_entry.get("projected_remaining_years")
-    proj_ppr = comp_entry.get("projected_total_remaining_ppr")
-    n_comps = comp_entry.get("n_comps", 0)
-    avg_sim = comp_entry.get("avg_similarity", 0)
-
-    rows = []
-    for c in comps[:5]:
-        sim = c.get("similarity", 0)
-        yrs = c.get("years_played_after", 0)
-        rows.append(
-            f"<tr><td class='source-name'>{_esc(c.get('name', ''))}</td>"
-            f"<td>{c.get('season', '')}</td>"
-            f"<td>{c.get('team_or_school', '')}</td>"
-            f"<td style='text-align:right'>{c.get('age', '—')}</td>"
-            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{sim:.2f}</td>"
-            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>+{yrs}</td></tr>"
-        )
-    return f"""<div class="card">
-<h2 style="margin-top:0">Most similar historical players</h2>
-<p style="color:var(--muted);font-size:14px">
-  At age <strong>{age}</strong> and position, this player’s nearest historical
-  neighbors (by per-game production, efficiency, and usage — z-score normalized
-  within position). The similarity engine averages their realized future careers,
-  time-discounted 5%/yr, to project this player’s remaining dynasty value.
-</p>
-<p style="font-size:14px">
-  <strong>Projected remaining years:</strong> {proj_yrs} ·
-  <strong>Projected total remaining fantasy PPR:</strong> {proj_ppr:.0f} ·
-  <strong>Comp pool:</strong> top {n_comps} (avg similarity {avg_sim:.2f})
-</p>
-<table class="breakdown-table">
-<thead><tr>
-<th>Player</th><th>Season</th><th>Team</th><th style="text-align:right">Age</th>
-<th style="text-align:right">Similarity</th><th style="text-align:right">Years after</th>
-</tr></thead>
-<tbody>{''.join(rows)}</tbody>
-</table>
-</div>
-"""
-
-
-def _vorp_diagnostics_html(vorp_debug: dict, formats_available: tuple[str, ...]) -> str:
-    """Render the per-format VORP / scarcity-multiplier table."""
-    if not vorp_debug:
-        return (
-            "<p style='color:var(--muted);font-size:13px'>"
-            "VORP diagnostics not yet generated. Run the launcher to populate."
-            "</p>"
-        )
-    blocks: list[str] = []
-    for fmt in formats_available:
-        info = vorp_debug.get(fmt)
-        if not info:
-            continue
-        label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))[1]
-        rows = []
-        for pos in ("QB", "RB", "WR", "TE"):
-            d = info.get("per_position", {}).get(pos, {})
-            base = d.get("replacement_baseline", 0.0)
-            mult = d.get("scarcity_multiplier", 1.0)
-            n = d.get("n_players", 0)
-            rows.append(
-                f"<tr><td><strong>{pos}</strong></td>"
-                f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{base:.0f}</td>"
-                f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{mult:.2f}</td>"
-                f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{n}</td></tr>"
+def _build_methodology(engine: EngineResult, latest_ts: datetime,
+                       league_label: str) -> str:
+    # Render era-pace multiplier table from corpus values.
+    eras = (1, 2, 3, 4)
+    pace = engine.era_pace
+    rows = ""
+    for pos in ("QB", "RB", "WR", "TE"):
+        stats_for_pos = sorted(pace.multipliers.get(pos, {}).keys())
+        for stat in stats_for_pos:
+            cells = "".join(
+                f"<td class='years'>{pace.get(pos, stat, e):.2f}×</td>"
+                for e in eras
             )
-        blocks.append(
-            f"<h3 style='margin-top:18px;margin-bottom:6px'>{_esc(label)}</h3>"
-            "<table class='breakdown-table'>"
-            "<thead><tr><th>Pos</th><th style='text-align:right'>Replacement (lifetime pts)</th>"
-            "<th style='text-align:right'>Scarcity mult</th>"
-            "<th style='text-align:right'># players</th></tr></thead>"
-            f"<tbody>{''.join(rows)}</tbody></table>"
-        )
-    return "\n".join(blocks) or (
-        "<p style='color:var(--muted);font-size:13px'>No VORP data available.</p>"
-    )
-
-
-def _composite_overrides_table_html(overrides: list) -> str:
-    """Render the per-(format, position, source) composite weight overrides."""
-    if not overrides:
-        return ""
-    rows = []
-    for fmt, pos, slug, mult in overrides:
-        label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))[1]
-        rows.append(
-            f"<tr><td>{_esc(label)}</td><td>{_esc(pos)}</td>"
-            f"<td class='source-name'>{_esc(slug)}</td>"
-            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>× {mult:.3f}</td></tr>"
-        )
-    return (
-        "<table class='breakdown-table'>"
-        "<thead><tr><th>Format</th><th>Position</th><th>Source</th>"
-        "<th style='text-align:right'>Multiplier</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-    )
-
-
-def _build_methodology_page(latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
-    """v0.14.0 — methodology page explaining the similarity engine + overlays.
-    v0.15.0 — adds the VORP / positional-scarcity card with per-format
-    replacement baselines and scarcity multipliers.
-    """
-    from .overlays import load_correlation_table
-    from .sources.similarity_career_arc import load_vorp_debug
-    from .composite_weights import explain_overrides
-    table = load_correlation_table()
-    ras = table.get("ras", {})
-    srs = table.get("brainy_ballers_srs", {})
-    methodology = table.get("methodology", "")
-    vorp_debug = load_vorp_debug()
-
-    def _row(pos: str) -> str:
-        ras_v = float(ras.get(pos, 0.0))
-        srs_v = float(srs.get(pos, 0.0))
-        return (
-            f"<tr><td><strong>{pos}</strong></td>"
-            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{ras_v:+.3f}</td>"
-            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{srs_v:+.3f}</td></tr>"
-        )
+            rows += f"<tr><td class='name'>{pos}</td><td>{_esc(stat)}</td>{cells}</tr>"
 
     body = f"""<div class="container narrow">
-<h1>Methodology</h1>
-<p style="color:var(--muted)">v0.14.0 — similarity-based career arc overhaul.</p>
 
-<div class="card">
-<h2 style="margin-top:0">Similarity engine</h2>
-<p>For each NFL player we vectorize their most recent productive season into
-per-game production, efficiency, and usage features (z-score normalized within
-position). We then KNN-search the historical corpus (1999–2024 · nflverse /
-PFR) for the 20 nearest neighbors at the same position and age (±1 year).</p>
-<p>For each comp we know their realized future career, so the weighted
-aggregate becomes a projection of this player’s remaining dynasty value:</p>
-<ul>
-  <li><strong>Projected remaining years</strong> — weighted median of comp careers</li>
-  <li><strong>Projected remaining PPR</strong> — weighted average of comp future totals</li>
-  <li><strong>Time discount</strong> — 5% per year (dynasty owners value sooner production)</li>
-  <li><strong>Dynasty value</strong> — rescaled 0–100 within position</li>
-</ul>
-<p>This is the dominant weight in the v0.14 composite (1.8). It encodes
-both current skill (via the vector) and longevity (via the comps’ careers).</p>
-</div>
+<h2>v1.0 <span class="accent">Methodology</span></h2>
 
-<div class="card">
-<h2 style="margin-top:0">Coverage penalty + Bayesian prior</h2>
-<p>The v0.13 model could vault a player to #1 on a single source’s max value
-(see: Luke Grimm). v0.14 applies a quadratic coverage penalty
-(composite × (min(n_sources/3, 1))²) and pulls low-coverage players toward a
-position-tier baseline (Bayesian prior). Players with 3+ qualifying sources are
-unaffected; single-source entries are crushed to ~11% of raw plus a baseline
-pull.</p>
-</div>
+<p class="lede">The Dynasty Football Model v1.0 is a deliberate rewrite. v0.x
+composed 10+ ranking sources with hand-tuned weights and overlays. v1.0 is
+a single engine: era-adjusted similarity to retired NFL players, projected
+forward through modern era-pace multipliers, scored under your league
+format.</p>
 
-<div class="card">
-<h2 style="margin-top:0">Overlays — RAS &amp; Brainy Ballers SRS</h2>
-<p>RAS and Brainy Ballers’ Star-Predictor Score now sit OUTSIDE the composite
-as user-toggleable overlays. The default slider value is the historical Pearson
-correlation between the signal and a player’s first 3 NFL seasons of
-fantasy PPR.</p>
-<table class="breakdown-table">
-<thead><tr><th>Position</th><th style="text-align:right">RAS × first-3yr PPR</th>
-<th style="text-align:right">SRS × first-3yr PPR</th></tr></thead>
-<tbody>
-{_row('QB')}{_row('RB')}{_row('WR')}{_row('TE')}
-</tbody>
+<h3>1 · The retired corpus</h3>
+<p>The comp pool is restricted to players whose final NFL season is on or before
+2022 (3+ years inactive). This avoids comparing active players to in-progress
+careers and keeps the projection honest: every comp has a fully realised
+remaining career we can re-score and average.</p>
+<p>Per the brief: Puka Nacua should be compared to retired greats like Calvin
+Johnson and Randy Moss, not to peers like Justin Jefferson whose career is
+still being written.</p>
+
+<h3>2 · Era buckets</h3>
+<p>Every player-season is bucketed into one of four eras. The brief specified
+1980-1994 / 1995-2004 / 2005-2014 / 2015-present; the on-disk corpus
+(nflverse player_stats_season) starts in 1999, so Era 1 here effectively
+covers 1999-2004. The conceptual structure is unchanged: monotonically
+inflating passing volume and rising QB rushing usage across the four
+buckets.</p>
+
+<h3>3 · Era-normalised similarity</h3>
+<p>For each (position, era, stat), we compute mean + std of the per-game rate
+across qualifying seasons. A player's career vector is the games-weighted
+average of their per-season era z-scores across the position's feature set
+(QB: passing yds/TDs, INTs, rushing yds/TDs; RB: rushing + receiving;
+WR/TE: receiving). Similarity is cosine distance between vectors.</p>
+<p>A 2010 Peyton Manning at 285 yds/game looks era-elite (top 5% of Era-3
+QBs); a 2024 Justin Herbert at 285 yds/game looks era-average (top 50% of
+Era-4 QBs). The engine sees them differently.</p>
+
+<h3>4 · Era-pace projection</h3>
+<p>To project a retired comp's post-age career forward to modern NFL pace,
+every season's stats are multiplied by an empirically-calibrated
+position+stat+era_from→Era-4 ratio. The full table for this build:</p>
+
+<table style="margin-top:8px">
+<thead><tr><th>Pos</th><th>Stat</th><th>Era 1→4</th><th>Era 2→4</th><th>Era 3→4</th><th>Era 4→4</th></tr></thead>
+<tbody>{rows}</tbody>
 </table>
-<p style="color:var(--muted);font-size:13px;margin-top:8px"><em>{_esc(methodology)}</em></p>
-<p style="font-size:14px">RAS correlates ~0.23 with RB first-3-year production and ~0.14 with WR,
-so enabling the RAS overlay for RBs will meaningfully reshuffle your rankings;
-for QBs it’s closer to noise. Brainy Ballers’ SRS uses a low-confidence prior
-until a historical archive becomes available.</p>
-</div>
+<p class="lede" style="margin-top:8px">Source: <code>{_esc(engine.era_pace.source)}</code> ·
+multipliers derived from the median per-game rate within each era × position × stat cell,
+clamped to [0.6, 2.0] to avoid one-off outlier seasons distorting the projection.</p>
 
-<div class="card">
-<h2 style="margin-top:0">Positional VORP &amp; format-aware scoring (v0.15.0)</h2>
-<p>Raw projected lifetime fantasy points don’t answer the question every dynasty
-GM actually has: <em>how much better is this player than the next-best one I could
-start in their slot?</em> v0.15 fixes that with three changes:</p>
+<h3>5 · Projection pipeline</h3>
 <ol>
-  <li><strong>Format-aware comp re-scoring.</strong> When projecting a player’s remaining
-  career, we re-score every historical comp season under the active format’s
-  rules (PPR / pass-TD value / etc.) rather than using the comp’s raw
-  era-of-the-time fantasy points.</li>
-  <li><strong>Positional VORP.</strong> We compute the per-position replacement
-  baseline (Nth-best projected lifetime points where N = starters × 12 teams),
-  then subtract it. In SF, replacement-QB is QB24; in 1QB it’s QB12. That gap
-  is precisely the SF QB premium.</li>
-  <li><strong>Scarcity-cliff multiplier.</strong> For each position we compare
-  the top-N starters’ average to the next 6 below replacement. A steep cliff
-  yields a multiplier &gt; 1 (capped at 1.5). QBs in SF show a much steeper
-  cliff than RB/WR — that’s the math behind “start QBs early.”</li>
+  <li>For an active player at age <em>A</em> with <em>N</em> seasons, find the top-{20}
+      retired comps at the same position, same age (±1), highest era-normalised
+      cosine similarity.</li>
+  <li>For each comp, take their realised seasons from age <em>A+1</em> onward.</li>
+  <li>Re-score each comp season by era-pace multiplier × your league's scoring
+      table.</li>
+  <li>Time-discount future seasons by 5%/year (present value).</li>
+  <li>Aggregate similarity-weighted projected fantasy points → production_score.</li>
 </ol>
-{_vorp_diagnostics_html(vorp_debug, formats_available)}
-</div>
 
-<div class="card">
-<h2 style="margin-top:0">Format-aware composite weight overrides (v0.15.0)</h2>
-<p>On top of VORP, the composite scorer multiplies the
-<code>similarity_career_arc</code> and <code>nfl_impact</code> weights by a
-per-(format, position) factor so that the QB premium also shows up in the
-composite mixing, not just the dynasty-value scale.</p>
-{_composite_overrides_table_html(explain_overrides())}
-</div>
+<h3>6 · Format overlay</h3>
+<p>The base <a href="rankings.html">Rankings</a> page uses Superflex PPR as
+the default scoring. The <a href="league.html">League Overlay</a> page lets
+you switch presets (1QB, 2QB, SF TE-Premium) and re-applies the same
+comp-projection pipeline under the new scoring + roster rules. The
+positional VORP baseline is recomputed from the overlay's own
+projections — small leagues / superflex / 2QB all reshape who's "above
+replacement" differently.</p>
 
-<div class="card">
-<h2 style="margin-top:0">Source weights (v0.14.0 baseline)</h2>
-<table class="breakdown-table">
-<thead><tr><th>Source</th><th>Category</th><th style="text-align:right">Default weight</th></tr></thead>
+<h3>7 · Prospects (separate page)</h3>
+<p><a href="prospects.html">Prospects</a> is a deliberately decoupled page.
+Rookies and college players don't share an engine with NFL veterans — the
+similarity model needs NFL production data, and prospects don't have any
+yet. The prospects view exists for completeness but does not feed the
+main rankings.</p>
+
+<h3>Known limitations</h3>
+<ul>
+  <li>Corpus starts in 1999. Players who retired before then (Jim Brown, OJ
+      Simpson) are not in the comp pool. Era 1 → 4 multipliers for pre-1999
+      seasons fall back to the documented table when corpus medians are
+      unavailable.</li>
+  <li>Mobile-QB comps lean on Daunte Culpepper / Cam Newton / Steve McNair /
+      Donovan McNabb / Randall Cunningham. The pocket-passer greats
+      (Brady, Manning, Brees, Favre) score lower on dual-threat z-scores
+      and may not surface as top-5 comps for runners like Josh Allen,
+      Jalen Hurts, or Lamar Jackson. This is the engine reflecting reality:
+      rushing QBs <em>are</em> a different production shape.</li>
+  <li>Birth dates are missing for some retired players. We fall back to
+      <em>rookie_season + 22</em> as an age estimate. This affects ~2% of
+      the corpus.</li>
+</ul>
+
+</div>"""
+
+    return _page(
+        "Dynasty Football Model — Methodology",
+        _site_header("methodology", latest_ts, league_label),
+        body,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sources page (slim)
+# ---------------------------------------------------------------------------
+
+def _build_sources(latest_ts: datetime, league_label: str) -> str:
+    body = """<div class="container narrow">
+
+<h2>Data <span class="accent">Sources</span></h2>
+<p class="lede">v1.0 runs on one primary data source. Auxiliary sources from
+the v0.x composite are still synced for metadata but no longer feed the
+ranking.</p>
+
+<table>
+<thead><tr><th>Source</th><th>Role</th><th>Where it's used</th></tr></thead>
 <tbody>
-<tr><td class="source-name">Similarity Career Arc</td><td>model</td><td style="text-align:right">1.8</td></tr>
-<tr><td class="source-name">NFL Impact (DARKO)</td><td>model</td><td style="text-align:right">0.8</td></tr>
-<tr><td class="source-name">FantasyCalc</td><td>market</td><td style="text-align:right">0.6</td></tr>
-<tr><td class="source-name">FFC ADP</td><td>market</td><td style="text-align:right">0.4</td></tr>
-<tr><td class="source-name">FantasyPros</td><td>expert</td><td style="text-align:right">0.4</td></tr>
-<tr><td class="source-name">PFF</td><td>expert</td><td style="text-align:right">0.4</td></tr>
-<tr><td class="source-name">NFL Draft Capital</td><td>model</td><td style="text-align:right">1.5 (rookies)</td></tr>
-<tr><td class="source-name">CFBD Breakouts</td><td>model</td><td style="text-align:right">0.9 (rookies)</td></tr>
-<tr><td class="source-name">DynastyProcess</td><td>aggregator</td><td style="text-align:right">0.3</td></tr>
-<tr><td class="source-name">RAS</td><td>overlay</td><td style="text-align:right">overlay only</td></tr>
-<tr><td class="source-name">Brainy Ballers SRS</td><td>overlay</td><td style="text-align:right">overlay only</td></tr>
+<tr><td class="name">nflverse · player_stats_season</td>
+    <td><span class="tag">primary</span></td>
+    <td>Every per-season stat line for every NFL skill player back to 1999. The
+    retired-only similarity corpus and the era-pace calibration are built
+    entirely from this file.</td></tr>
+<tr><td class="name">nflverse · players</td>
+    <td><span class="tag">primary</span></td>
+    <td>Player metadata: positions, birth dates, rookie/last seasons, draft
+    info. Used to filter to skill positions and to compute age.</td></tr>
+<tr><td class="name">Sleeper API</td>
+    <td><span class="tag">metadata</span></td>
+    <td>Current roster + team for active players. Powers the team column on
+    the rankings page and the league-import flow on
+    <a href="league.html">/league.html</a>.</td></tr>
+<tr><td class="name">MyFantasyLeague API</td>
+    <td><span class="tag">metadata</span></td>
+    <td>League-import for MFL leagues. Same overlay engine, just different
+    roster-fetch path.</td></tr>
+<tr><td class="name">NFL Draft history</td>
+    <td><span class="tag">metadata</span></td>
+    <td>Draft round/pick for current players (shown on player pages). Not in
+    the composite.</td></tr>
 </tbody>
 </table>
-</div>
 
-</div>
-"""
+<p class="lede" style="margin-top:18px">v0.x sources (FantasyCalc,
+DynastyProcess, FantasyPros, Brainy Ballers, FFC ADP, PFF, RAS, NFL Impact,
+DynastyProcess, etc.) have been removed from the composite. The engine no
+longer blends external opinions — it produces its own ranking from raw
+production history. See <a href="methodology.html">Methodology</a>.</p>
+
+</div>"""
     return _page(
-        "Methodology — Dynasty Model v0.14",
-        _site_header("methodology", latest_ts, league_format, formats_available),
+        "Dynasty Football Model — Sources",
+        _site_header("sources", latest_ts, league_label),
         body,
     )
 
 
-def _college_comps_card(rookie_entry: dict) -> str:
-    """Render the top-5 college comparables for a rookie/prospect.
+# ---------------------------------------------------------------------------
+# Prospects page (decoupled)
+# ---------------------------------------------------------------------------
 
-    ``rookie_entry`` comes from ``data/rookie_similarity_comps_cache.json``
-    (shape produced by ``rookie_similarity_chain._build_comps_cache``).
-    """
-    comps = rookie_entry.get("comparables_top5") or []
-    if not comps:
-        return ""
-    school = rookie_entry.get("school", "")
-    class_year = rookie_entry.get("class_year", "") or "—"
-    season = rookie_entry.get("query_season", "")
-    proj_yrs = rookie_entry.get("projected_career_seasons", 0)
-    proj_ppr = rookie_entry.get("projected_lifetime_fantasy_points", 0)
-    hit_rate = rookie_entry.get("nfl_hit_rate", 0)
-    n_comps = rookie_entry.get("n_comps", 0)
-    n_with_nfl = rookie_entry.get("n_comps_with_nfl", 0)
-    avg_sim = rookie_entry.get("avg_similarity", 0)
+def _build_prospects(latest_ts: datetime, league_label: str) -> str:
+    body = """<div class="container narrow">
 
-    rows = []
-    for c in comps[:5]:
-        sim = c.get("similarity", 0)
-        nfl_name = c.get("nfl_display_name")
-        nfl_seasons = c.get("realized_nfl_seasons", 0)
-        nfl_ppr = c.get("realized_career_ppr", 0.0)
-        if nfl_name:
-            outcome = (
-                f"→ NFL: <strong>{_esc(nfl_name)}</strong> "
-                f"({nfl_seasons} seasons, {nfl_ppr:.0f} career PPR)"
-            )
-        else:
-            outcome = "<span style='color:var(--muted)'>did not reach NFL</span>"
-        rows.append(
-            f"<tr><td class='source-name'>{_esc(c.get('name', ''))}</td>"
-            f"<td>{c.get('season', '')}</td>"
-            f"<td>{_esc(c.get('school', ''))}</td>"
-            f"<td>{_esc(c.get('class_year') or '—')}</td>"
-            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{sim:.2f}</td>"
-            f"<td>{outcome}</td></tr>"
+<h2>Draft <span class="accent">Prospects</span></h2>
+<p class="lede">Prospects are evaluated separately from the main rankings.
+NFL veterans have production data the engine can compare against; prospects
+don't, so they live here on their own page.</p>
+
+<div class="callout"><strong>v1.0 note.</strong> The college→NFL similarity
+chain shipped in v0.16 is intentionally <em>not</em> wired into the v1.0
+launcher — it depended on the old composite pipeline. A clean prospects
+engine that mirrors the basketball model's rookie page is on the v1.1
+roadmap. For now this page is a placeholder so the IA matches the
+basketball model.</p>
+
+<p class="lede" style="margin-top:18px">If you're looking for veteran NFL
+rankings, head back to <a href="rankings.html">Rankings</a>. If you want to
+rank players under your specific league's scoring, the
+<a href="league.html">League Overlay</a> has presets for SF, 1QB, 2QB, and
+SF TE-Premium plus a delta column showing how your format reshuffles
+things.</p>
+
+</div>"""
+    return _page(
+        "Dynasty Football Model — Prospects",
+        _site_header("prospects", latest_ts, league_label),
+        body,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Player pages
+# ---------------------------------------------------------------------------
+
+def _player_header(row: Dict, team: str, league_label: str) -> str:
+    return f"""<div class="player-header">
+  <h1>{_esc(row['name'])}</h1>
+  <div class="sub">{_pos_badge(row['position'])} · {_esc(team)} · Rank #{row['overall_rank']} · Tier T{row['tier']}</div>
+  <div class="metrics">
+    <div class="metric"><div class="num">{row['production_score']:.0f}</div><div class="label">Production score</div></div>
+    <div class="metric"><div class="num">{row['age']}</div><div class="label">Age</div></div>
+    <div class="metric"><div class="num">{row['projected_years_remaining']:.1f}</div><div class="label">Yrs remaining</div></div>
+    <div class="metric"><div class="num">{row['n_comps']}</div><div class="label">Retired comps</div></div>
+  </div>
+  <div style="margin-top:14px"><a href="../rankings.html" style="color:var(--header-text);opacity:0.8;font-size:13px">← back to rankings</a></div>
+</div>"""
+
+
+def _build_player_page(row: Dict, comps: List[Dict], team: str,
+                       league_label: str, latest_ts: datetime) -> str:
+    comp_rows = ""
+    for c in comps[:10]:
+        comp_rows += (
+            f"<tr>"
+            f"<td class='name'>{_esc(c['name'])}</td>"
+            f"<td>{_pos_badge(c['position'])}</td>"
+            f"<td class='years'>{c['last_season']}</td>"
+            f"<td class='score'>{c['similarity']:.3f}</td>"
+            f"<td class='years'>{c['post_age_seasons']}</td>"
+            f"<td class='years'>{c['career_ppr']:.0f}</td>"
+            f"<td class='score'>{c['post_age_projected_pts']:.0f}</td>"
+            f"</tr>"
         )
-    return f"""<div class="card">
-<h2 style="margin-top:0">Top 5 college comparables with realized NFL careers</h2>
-<p style="color:var(--muted);font-size:14px">
-  At <strong>{_esc(school)}</strong> as a <strong>{_esc(class_year)}</strong>
-  in {season}, this prospect's nearest college peers (z-score per-position,
-  conference-strength-adjusted), each resolved through the
-  <code>ncaa_to_nfl</code> bridge to their realized NFL career.
-</p>
-<p style="font-size:14px">
-  <strong>Projected NFL career:</strong> {proj_yrs} seasons ·
-  <strong>Projected lifetime PPR:</strong> {proj_ppr:.0f} ·
-  <strong>NFL hit rate (comp-weighted):</strong> {hit_rate*100:.0f}% ·
-  <strong>Comp pool:</strong> top {n_comps} ({n_with_nfl} reached NFL,
-  avg similarity {avg_sim:.2f})
-</p>
-<table class="breakdown-table">
+
+    body = f"""<div class="container">
+
+<h2>Career-Arc <span class="accent">Comparables</span></h2>
+<p class="lede">The top-10 most similar <em>retired</em> NFL players at this
+career stage, by era-normalised production shape. Each row's
+"Projected pts" is what their post-age-{row['age']} career
+would have looked like under modern era-pace and {_esc(league_label)} scoring,
+time-discounted 5%/year. The player's production score is the
+similarity-weighted average across all {row['n_comps']} comps.</p>
+
+<table>
 <thead><tr>
-<th>College player</th><th>Season</th><th>School</th><th>Class</th>
-<th style="text-align:right">Similarity</th><th>NFL outcome</th>
+  <th>Comparable</th><th>Pos</th><th>Last season</th>
+  <th style="text-align:right">Similarity</th>
+  <th>Their post-age seasons</th>
+  <th>Their career PPR</th>
+  <th style="text-align:right">Projected pts</th>
 </tr></thead>
-<tbody>{''.join(rows)}</tbody>
+<tbody>{comp_rows}</tbody>
 </table>
-</div>
-"""
 
-
-def _build_player_page(
-    cs, p, all_sources, latest_ts, league_format: str,
-    comps_cache: dict | None = None,
-    rookie_comps_cache: dict | None = None,
-    formats_available: tuple[str, ...] = ("sf_ppr",),
-) -> str:
-    try:
-        breakdown = json.loads(cs.breakdown_json) if cs.breakdown_json else {}
-    except Exception:
-        breakdown = {}
-    comps_cache = comps_cache or {}
-    rookie_comps_cache = rookie_comps_cache or {}
-    comp_entry = comps_cache.get(p.gsis_id) if p.gsis_id else None
-    # Match rookie cache by gsis_id reverse-lookup through the bridge —
-    # the rookie cache is keyed by cfb_player_id, so we look up matches
-    # by NFL gsis_id when available, or by name as a fallback.
-    rookie_entry = None
-    if rookie_comps_cache:
-        # Build a one-shot lookup by gsis_id by walking the cache; cheap
-        # enough since this is per-player-page rendering and the cache
-        # is small.
-        for entry in rookie_comps_cache.values():
-            # The rookie cache doesn't carry the NFL gsis_id directly;
-            # the bridge does. The composite-row p.gsis_id should map
-            # via the source's `gsis_id` field on the emitted ranking,
-            # but we keep the lookup simple here using player name as a
-            # last-resort match.
-            if entry.get("player_name") and entry["player_name"].lower() == (p.full_name or "").lower():
-                rookie_entry = entry
-                break
-
-    # Build breakdown rows, sorted by weight (highest contribution first)
-    sources_by_slug = {s.slug: s for s in all_sources}
-    items = []
-    # v0.14.0: skip the internal _meta block (coverage / prior diagnostics)
-    # — it's not a source contribution.
-    coverage_meta = breakdown.get("_meta") if isinstance(breakdown.get("_meta"), dict) else None
-    breakdown_rows = {k: v for k, v in breakdown.items() if k != "_meta"}
-    total_w = sum(b.get("weight", 0) for b in breakdown_rows.values())
-    for slug, b in breakdown_rows.items():
-        items.append({
-            "slug": slug,
-            "name": sources_by_slug.get(slug).name if slug in sources_by_slug else slug,
-            "category": b.get("category", sources_by_slug.get(slug).category if slug in sources_by_slug else "—"),
-            "score": b.get("score"),
-            "raw_rank": b.get("raw_rank"),
-            "weight": b.get("weight", 0),
-            "pct": (b.get("weight", 0) / total_w * 100) if total_w else 0,
-        })
-    items.sort(key=lambda x: -x["weight"])
-
-    breakdown_html = ""
-    for it in items:
-        bar_width = min(220, it["pct"] * 2.2)
-        rank_str = f"#{it['raw_rank']}" if it["raw_rank"] else "—"
-        score_val = it["score"] if it["score"] is not None else 0.0
-        breakdown_html += f"""<tr>
-<td class="source-name">{_esc(it['name'])}</td>
-<td><span class="tag tag-{it['category']}">{it['category']}</span></td>
-<td style="text-align:right;font-variant-numeric:tabular-nums">{rank_str}</td>
-<td style="text-align:right;font-variant-numeric:tabular-nums">{score_val:.1f}</td>
-<td style="text-align:right;font-variant-numeric:tabular-nums"><span class="weight-bar" style="width:{bar_width}px"></span>{it['weight']:.2f}</td>
-<td style="text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)">{it['pct']:.0f}%</td>
-</tr>"""
-
-    # Build the "why model diverges" explanation
-    div_explanation = ""
-    if cs.rank_divergence is None:
-        div_explanation = "<p style='color:var(--muted)'>No consensus rank available for this player — likely outside the depth that market/aggregator sources cover.</p>"
-    elif cs.rank_divergence == 0:
-        div_explanation = "<p>The model and consensus are aligned on this player.</p>"
-    else:
-        direction = "higher" if cs.rank_divergence > 0 else "lower"
-        magnitude_word = "significantly" if abs(cs.rank_divergence) >= 10 else "modestly"
-        # Identify which non-consensus sources are pulling the model
-        non_consensus = [it for it in items if it["category"] not in ("market", "aggregator")]
-        consensus_items = [it for it in items if it["category"] in ("market", "aggregator")]
-
-        explanation_parts = [
-            f"The model ranks this player <strong>{magnitude_word} {direction}</strong> than consensus "
-            f"(model #{cs.overall_rank} vs consensus #{cs.consensus_rank})."
-        ]
-        if non_consensus:
-            sn = ", ".join(it["name"] for it in non_consensus[:3])
-            explanation_parts.append(
-                f"This divergence is driven by evaluator sources outside the consensus stream: <em>{sn}</em>."
-            )
-        else:
-            explanation_parts.append(
-                "<strong>No evaluator sources are currently active</strong> — the divergence here is small "
-                "and only reflects modest differences between the consensus aggregators themselves. To see meaningful "
-                "model-vs-consensus signal, add evaluator sources (see the Sources page)."
-            )
-        div_explanation = "<p>" + " ".join(explanation_parts) + "</p>"
-
-    # Header metrics
-    metrics_html = f"""<div class="metrics">
-<div class="metric"><div class="num">#{cs.overall_rank}</div><div class="label">Model Rank</div></div>
-<div class="metric"><div class="num">{f'#{cs.consensus_rank}' if cs.consensus_rank else '—'}</div><div class="label">Consensus</div></div>
-<div class="metric"><div class="num">{cs.score:.1f}</div><div class="label">Score</div></div>
-<div class="metric"><div class="num">T{cs.tier}</div><div class="label">Tier</div></div>
-{f'<div class="metric"><div class="num">{p.position}{cs.position_rank}</div><div class="label">Pos Rank</div></div>' if cs.position_rank else ''}
-</div>"""
-
-    body = f"""<div class="player-header">
-<a href="../rankings.html" style="color:white;opacity:0.8;font-size:13px">← back to rankings</a>
-<h1 style="margin-top:8px">{_esc(p.full_name)} {_pos_badge(p.position)}</h1>
-<div class="sub">{_esc(p.nfl_team or 'Free agent')} · {_esc(p.position or '—')}</div>
-{metrics_html}
-</div>
-
-<div class="container narrow">
-
-<div class="card divergence-section">
-<h2 style="margin-top:0">Model vs. Consensus</h2>
-<div style="display:flex;gap:16px;align-items:center;margin:10px 0">
-<div style="font-size:32px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums">#{cs.overall_rank}</div>
-<div style="color:var(--muted)">model</div>
-<div style="font-size:24px;color:var(--muted);margin:0 8px">vs</div>
-<div style="font-size:32px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums">{f'#{cs.consensus_rank}' if cs.consensus_rank else '—'}</div>
-<div style="color:var(--muted)">consensus</div>
-<div style="margin-left:auto;font-size:18px">{_divergence_chip(cs.rank_divergence)}</div>
-</div>
-<div class="div-explanation">{div_explanation}</div>
-</div>
-
-{_similar_players_card(comp_entry) if comp_entry else ''}
-{_college_comps_card(rookie_entry) if rookie_entry else ''}
-
-<div class="card">
-<h2 style="margin-top:0">Source breakdown</h2>
-<p style="color:var(--muted);font-size:14px">How each source contributed to this player's composite score. Sources with higher weights drive more of the final ranking.</p>
-<table class="breakdown-table">
-<thead><tr>
-<th>Source</th><th>Type</th><th style="text-align:right">Their Rank</th>
-<th style="text-align:right">Score</th><th style="text-align:right">Weight</th><th style="text-align:right">% of Total</th>
-</tr></thead>
-<tbody>{breakdown_html}</tbody>
-</table>
-</div>
+<p class="lede" style="margin-top:24px">Want this player ranked under your
+league's specific scoring + roster rules? Head to
+<a href="../league.html">League Overlay</a>.</p>
 
 </div>"""
 
     return _page(
-        f"{p.full_name} — Dynasty Model",
-        _site_header("rankings", latest_ts, league_format, formats_available),
+        f"Dynasty Football Model — {row['name']}",
+        _site_header("rankings", latest_ts, league_label),
         body,
+        css_href="../assets/style.css",
     )
 
 
-# --------------------------------------------------------------------------
-# Top-level entry point
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+def _load_sleeper_teams() -> Dict[str, str]:
+    """Pull current Sleeper player → team map, keyed by GSIS id where possible.
+
+    Falls back to an empty map if the DB isn't initialised or the Player table
+    doesn't carry a GSIS-id column. Team rendering degrades to "—".
+    """
+    try:
+        from .db.session import get_session
+        from .db.models import Player
+        from sqlalchemy import select
+        out: Dict[str, str] = {}
+        with get_session() as session:
+            for p in session.execute(select(Player)).scalars():
+                gsis = getattr(p, "gsis_id", None) or getattr(p, "pfr_id", None)
+                team = getattr(p, "team", None) or getattr(p, "nfl_team", None)
+                if gsis and team:
+                    out[gsis] = team
+        return out
+    except Exception:
+        return {}
+
 
 def generate_site(
     output_dir: str = "dynasty_site",
     league_format: str = "sf_ppr",
     limit: int = 300,
-    additional_formats: tuple[str, ...] = (),
+    additional_formats=None,    # kept for backwards-compat; ignored in v1
+    engine: Optional[EngineResult] = None,
 ) -> str:
-    """Generate the multi-page site. Returns the absolute path to index.html.
-
-    v0.15.0: ``additional_formats`` enables the SF/1QB toggle. For each
-    extra format we emit ``rankings<suffix>.html`` and corresponding
-    ``assets/model_scores<suffix>.json`` so the rate-my-league client
-    can switch formats too. The primary ``league_format`` still
-    governs the index / methodology / per-player pages (those use the
-    primary format's composite scores).
-    """
-    out_root = Path(output_dir).resolve()
+    out_root = Path(output_dir)
     out_root.mkdir(parents=True, exist_ok=True)
-    (out_root / "assets").mkdir(exist_ok=True)
-    (out_root / "players").mkdir(exist_ok=True)
+    (out_root / "assets").mkdir(parents=True, exist_ok=True)
+    (out_root / "players").mkdir(parents=True, exist_ok=True)
 
-    # Shared CSS
+    latest_ts = datetime.now(timezone.utc)
+
+    if engine is None:
+        engine = run_engine(persist=True)
+
+    overlays = all_format_overlays(engine)
+    team_lookup = _load_sleeper_teams()
+
+    label = PRESETS.get(league_format, PRESETS["sf_ppr"])["label"]
+
     (out_root / "assets" / "style.css").write_text(_shared_css(), encoding="utf-8")
 
-    formats_available: tuple[str, ...] = (league_format, *additional_formats)
+    # rankings.html — primary landing page (no index.html distinction needed)
+    rankings_html = _build_rankings(engine, latest_ts, label, team_lookup, limit=limit)
+    (out_root / "rankings.html").write_text(rankings_html, encoding="utf-8")
+    (out_root / "index.html").write_text(rankings_html, encoding="utf-8")
 
-    with get_session() as session:
-        latest_ts, rows = _latest_composite(session, league_format, limit)
-        sources = _all_sources(session)
+    (out_root / "league.html").write_text(
+        _build_league(overlays, latest_ts, label, team_lookup),
+        encoding="utf-8",
+    )
+    (out_root / "methodology.html").write_text(
+        _build_methodology(engine, latest_ts, label),
+        encoding="utf-8",
+    )
+    (out_root / "sources.html").write_text(
+        _build_sources(latest_ts, label),
+        encoding="utf-8",
+    )
+    (out_root / "prospects.html").write_text(
+        _build_prospects(latest_ts, label),
+        encoding="utf-8",
+    )
 
-        if not rows:
-            (out_root / "index.html").write_text(_page(
-                "Dynasty Model — No Data",
-                _site_header("index", None, league_format, formats_available),
-                """<div class="container narrow">
-<div class="callout"><strong>No rankings have been generated yet.</strong>
-Run the launcher again — make sure the sync step completes successfully.</div>
-</div>""",
-            ), encoding="utf-8")
-            return str(out_root / "index.html")
+    # Per-player pages.
+    for row in engine.rankings[:limit]:
+        slug = _slug(row["name"], row["player_id"])
+        comps = engine.comps.get(row["player_id"], [])
+        team = team_lookup.get(row["player_id"], "—")
+        page = _build_player_page(row, comps, team, label, latest_ts)
+        (out_root / "players" / f"{slug}.html").write_text(page, encoding="utf-8")
 
-        # Landing page (uses primary format's composite scores)
-        (out_root / "index.html").write_text(
-            _build_index(rows, sources, latest_ts, league_format, formats_available),
-            encoding="utf-8",
-        )
+    # Also drop the engine's master rankings JSON next to the site so the
+    # league-import flow can consume it without re-running the engine.
+    (out_root / "engine_rankings.json").write_text(
+        json.dumps([dict(r) for r in engine.rankings], indent=2, default=float),
+        encoding="utf-8",
+    )
 
-        # v0.14.0: surface comparables from the similarity engine. Loaded
-        # once here, used for both rankings hover tooltips and per-player
-        # pages below.
-        comps_cache = load_comps_cache()
-        # v0.16.0: rookie college→NFL comparables (PR #16).
-        rookie_comps_cache = load_rookie_comps_cache()
-
-        # Sources & methodology + league + per-player pages render once
-        # against the primary format. The format toggle in the header
-        # is for rankings specifically.
-        (out_root / "sources.html").write_text(
-            _build_sources_page(sources, latest_ts, league_format, formats_available),
-            encoding="utf-8",
-        )
-        (out_root / "methodology.html").write_text(
-            _build_methodology_page(latest_ts, league_format, formats_available),
-            encoding="utf-8",
-        )
-
-        # Per-format outputs: rankings page + model_scores.json + league page.
-        for fmt in formats_available:
-            fmt_ts, fmt_rows = _latest_composite(session, fmt, limit)
-            if not fmt_rows:
-                # Skip formats that have no composite scores yet.
-                continue
-            suffix, _label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))
-
-            (out_root / f"rankings{suffix}.html").write_text(
-                _build_rankings(
-                    fmt_rows, fmt_ts, fmt,
-                    comps_cache=comps_cache,
-                    rookie_comps_cache=rookie_comps_cache,
-                    formats_available=formats_available,
-                ),
-                encoding="utf-8",
-            )
-
-            # Rate-My-League JSON (per-format)
-            all_rows_for_json = session.execute(
-                select(CompositeScore, Player)
-                .join(Player, CompositeScore.player_id == Player.id)
-                .where(CompositeScore.league_format == fmt)
-                .where(CompositeScore.generated_at == fmt_ts)
-                .order_by(CompositeScore.overall_rank)
-            ).all()
-            scores_lookup: dict[str, dict] = {}
-            for cs, p in all_rows_for_json:
-                if not p.sleeper_id:
-                    continue
-                scores_lookup[str(p.sleeper_id)] = {
-                    "name": p.full_name,
-                    "position": p.position,
-                    "team": p.nfl_team,
-                    "score": round(cs.score, 2),
-                    "rank": cs.overall_rank,
-                    "tier": cs.tier,
-                    "position_rank": cs.position_rank,
-                }
-            scores_filename = f"model_scores{suffix}.json" if suffix else "model_scores.json"
-            (out_root / "assets" / scores_filename).write_text(
-                json.dumps(scores_lookup, separators=(",", ":")), encoding="utf-8"
-            )
-
-        # League page (uses primary format)
-        (out_root / "league.html").write_text(
-            _build_league_page(latest_ts, league_format, formats_available),
-            encoding="utf-8",
-        )
-
-        # Per-player pages (primary format only — the page surfaces
-        # composite breakdown details which are format-specific).
-        for cs, p in rows:
-            slug = _slugify(p.full_name, p.id)
-            (out_root / "players" / f"{slug}.html").write_text(
-                _build_player_page(
-                    cs, p, sources, latest_ts, league_format,
-                    comps_cache=comps_cache,
-                    rookie_comps_cache=rookie_comps_cache,
-                    formats_available=formats_available,
-                ),
-                encoding="utf-8"
-            )
-
-    return str(out_root / "index.html")
-
-
-# Backwards-compat: keep the old single-file generator as a thin wrapper.
-def generate_report(output_path: str = "dynasty_rankings.html",
-                    league_format: str = "sf_ppr", limit: int = 300) -> str:
-    """Legacy single-file output. Calls generate_site under a parent dir."""
-    out_dir = Path(output_path).resolve().parent / "dynasty_site"
-    return generate_site(str(out_dir), league_format, limit)
+    return str(out_root.resolve())

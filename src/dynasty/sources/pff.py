@@ -1,37 +1,21 @@
-"""PFF adapter — STUB.
+"""pff adapter — stubbed in v1.0.
 
-PFF doesn't expose a free public API. To enable this:
-
-  1. Acquire API access from PFF (paid partnership) OR
-  2. Use authenticated session cookies from a paid account (legality varies by
-     ToS — read PFF's Terms before doing this in production).
-
-This stub shows the adapter pattern. Fill in `fetch()` once you have credentials.
-The rest of the pipeline (player resolution, time-series storage, composite
-scoring, backtest weighting) is already wired up.
+Removed from the ranking composite. Kept as a no-op import target so any
+external code referencing this module still loads cleanly. See
+``docs/CHANGELOG-model.md`` v1.0 for the rewrite rationale.
 """
 from __future__ import annotations
 from typing import Iterator
 from .base import BaseSource, RankingRecord
-from ..config import settings
 
 
-class PFF(BaseSource):
+class _Stub(BaseSource):
     slug = "pff"
-    name = "Pro Football Focus — dynasty rankings & prospect model"
-    category = "model"
-    update_frequency = "weekly"
-    tos_compliant = True  # via API only; do NOT scrape without partnership
-    default_weight = 0.4  # v0.14.0: similarity engine carries the heavier evaluator signal
-    homepage = "https://www.pff.com/"
-    notes = "Requires paid API access; stub only."
+    name = "pff (removed in v1.0)"
 
     def fetch(self) -> Iterator[RankingRecord]:
-        if not settings.pff_api_key:
-            # No credentials — yield nothing. CLI shows the source but no rows.
-            return iter([])
-        # TODO: implement PFF API calls
-        # resp = self._client.get(URL, headers={"Authorization": f"Bearer {settings.pff_api_key}"})
-        # for row in resp.json():
-        #     yield RankingRecord(source_slug=self.slug, ...)
-        return iter([])
+        return iter(())
+
+
+# Preserve historical class names for any code that imports them directly.
+PFF = _Stub

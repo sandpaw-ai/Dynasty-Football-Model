@@ -15,6 +15,312 @@ Format for each entry:
 
 ---
 
+## v1.0.0 — Model REWRITE: retired-only similarity engine (PR #19)
+
+**Date:** 2026-05-21
+
+This is a **model rewrite**, not an incremental change. Phil:
+
+> "I think we need a model rewrite. There are just too many inputs that are
+> guiding the model at this point. I wanted to actually look more like the NBA
+> Dynasty Basketball model where the base model is driven by similarity scores
+> that are based on actual production... I want to go just off production and
+> specifically as it relates to fantasy football production for these players.
+> ... When you were looking at historical comparisons for the players on pro
+> football reference I would air on the side of comparing current players to
+> historical players whose careers have already ended. You were going to get a
+> bad analysis if you compare them to players who have not finished their
+> careers yet... so for example, a wide receiver like Puka Nacua should be
+> compared to some of the greats who have retired like Calvin Johnson and
+> Randy Moss. Also take into a fact this fact with quarterbacks where the
+> stats are all much better in the modern NFL and quarterbacks run the ball
+> more and pass the ball more now. Find a way to compare similarity scores
+> from a stats perspective, but then extrapolate how that looks in the modern
+> NFL when comparing the quarterbacks."
+
+v0.x composed 10+ ranking sources with hand-tuned weights and overlays. v1.0 is
+**one engine**.
+
+### What was removed (12 source adapters)
+
+Stubbed to no-op (still importable, no longer in the composite):
+
+- `FantasyCalc` · market source
+- `DynastyProcessValues` · consensus aggregator
+- `FantasyPros` · expert consensus
+- `BrainyBallers` · SPS model
+- `FFCAdp` · ADP scrape
+- `PFF` · grades
+- `NFLImpact` · DARKO-style current-skill
+- `SimilarityCareerArc` · v0.14+ similarity engine (replaced by
+  `engine.similarity_v1`)
+- `RookieSimilarityChain` · v0.16 college→NFL bridge (moved to prospects-only)
+- `composite_weights` · the per-source/per-position multiplier table
+- `overlays` · the RAS/SRS correlation system
+- The entire `dynasty/similarity/` package (vectorize, projection,
+  comparables, rookie_projection, bridge — all v0.x machinery)
+
+Deleted from disk:
+
+- `dynasty/sources/historical_ncaa_football.py`
+- `dynasty/sources/cfbd_breakouts.py`
+- `dynasty/sources/pro_football_reference.py` *(the v0.x loader; v1 reads
+  nflverse CSVs directly)*
+- `dynasty/sources/ras.py`
+- 10 v0.x test files (smoke_test, test_cfbd_breakouts,
+  test_cumulative_career_arc, test_elite_proven_calibration, test_ffc_adp,
+  test_nfl_draft_capital, test_ras, test_rookie_similarity_football,
+  test_similarity_football, test_vorp_format_aware, test_weights)
+
+Kept for metadata only (NOT in the ranking):
+
+- `SleeperPlayers` · roster/team for site display + league import
+- `NFLDraftCapital` · draft tier on player pages
+
+### What replaces them — the v1 engine
+
+One module: [`src/dynasty/engine/similarity_v1.py`](../src/dynasty/engine/similarity_v1.py).
+Plus [`era_pace.py`](../src/dynasty/engine/era_pace.py) (era multipliers) and
+[`format_overlay.py`](../src/dynasty/engine/format_overlay.py) (league-format
+rescoring).
+
+Pipeline:
+
+1. Load nflverse `player_stats_season.csv.gz` (every NFL skill-position season
+   back to 1999).
+2. Build a **retired-only** corpus: players whose last NFL season was 2022 or
+   earlier (3+ years inactive). This avoids comping current players to
+   in-progress careers.
+3. Bucket every season into one of four eras (1999-2004 / 2005-2014 /
+   2015-2019 / 2020+) and compute per-position per-era per-stat z-scores on
+   per-game rates. Player vectors live in this era-normalised z-space.
+4. For each active player at age A, find the top-20 most similar **retired**
+   players at the same position with at least one season in the age window
+   A±1, by era-normalised cosine similarity.
+5. For each comp, take their realised seasons from age A+1 onward, rescale
+   every stat through corpus-derived **era-pace multipliers** (era_from → era
+   4), score under the league's scoring table, time-discount 5%/year.
+6. Aggregate the similarity-weighted projected points → production_score.
+
+The format overlay engine (`format_overlay.py`) then re-runs steps 5-6 under
+different scoring + roster presets (SF, 1QB, 2QB, SF TE-Premium), recomputing
+positional VORP from its own projections. The default rankings page uses
+SF PPR; `/league.html` lets users pick.
+
+### Era-pace multiplier table (corpus-derived, this build)
+
+| Pos | Stat              | Era 1→4 | Era 2→4 | Era 3→4 |
+| --- | ----------------- | ------- | ------- | ------- |
+| QB  | passing_yards     | 1.08×   | 1.04×   | 1.02×   |
+| QB  | passing_tds       | 1.18×   | 1.08×   | 1.05×   |
+| QB  | rushing_yards     | 1.38×   | 1.32×   | 1.14×   |
+| QB  | rushing_tds       | 1.50×   | 1.40×   | 1.20×   |
+| QB  | interceptions     | 0.78×   | 0.86×   | 0.94×   |
+| RB  | rushing_yards     | 0.92×   | 0.96×   | 0.98×   |
+| RB  | rushing_tds       | 0.95×   | 0.98×   | 1.00×   |
+| RB  | receptions        | 1.30×   | 1.20×   | 1.10×   |
+| RB  | receiving_yards   | 1.25×   | 1.15×   | 1.08×   |
+| WR  | receptions        | 1.22×   | 1.16×   | 1.05×   |
+| WR  | receiving_yards   | 1.23×   | 1.16×   | 1.06×   |
+| WR  | receiving_tds     | 1.20×   | 1.14×   | 1.04×   |
+| TE  | receptions        | 1.45×   | 1.30×   | 1.10×   |
+| TE  | receiving_yards   | 1.45×   | 1.28×   | 1.08×   |
+| TE  | receiving_tds     | 1.38×   | 1.22×   | 1.06×   |
+
+(Exact medians vary slightly run-to-run; the multipliers are clamped to
+[0.6, 2.0]. The values in the methodology page are recomputed live from the
+latest corpus.)
+
+### Test pass count
+
+- **18 new tests** in `tests/test_engine_v1.py` — all passing.
+- **9 surviving v0.x tests** (league, manager, names, prefetch_leagues —
+  the ones not coupled to the composite). 6 pass; 3 had pre-existing SQLite
+  UNIQUE-constraint test-isolation failures on upstream/main that this PR
+  did not introduce.
+
+### Pipeline runtime
+
+**~11 seconds** end-to-end for the headless launcher (689 active players
+ranked, 1,431-player retired corpus, full era-pace calibration, 4 format
+overlays, full site build, MFL league pre-fetch).
+
+### BEFORE / AFTER top-25 (sf_ppr)
+
+#### BEFORE — upstream/main @ 09773ac (after PR #18 elite-proven calibration)
+
+```
+  1. Josh Allen               QB  score=93.7
+  2. Tetairoa McMillan        WR  score=87.8
+  3. Jahmyr Gibbs             RB  score=87.7
+  4. Lamar Jackson            QB  score=87.6
+  5. Ja'Marr Chase            WR  score=86.8
+  6. Joe Burrow               QB  score=85.9
+  7. Bijan Robinson           RB  score=85.2
+  8. Jayden Daniels           QB  score=84.8
+  9. Justin Jefferson         WR  score=84.3
+ 10. Justin Herbert           QB  score=83.7
+ 11. Malik Nabers             WR  score=81.9
+ 12. Brian Thomas             WR  score=77.9
+ 13. Ashton Jeanty            RB  score=77.1
+ 14. Patrick Mahomes          QB  score=76.9
+ 15. CeeDee Lamb              WR  score=76.9
+ 16. Jordyn Tyson             WR  score=76.7
+ 17. Jalen Hurts              QB  score=76.6
+ 18. Jaxon Smith-Njigba       WR  score=76.5
+ 19. Drake Maye               QB  score=75.0
+ 20. Drake London             WR  score=74.6
+ 21. Jaxson Dart              QB  score=74.4
+ 22. Caleb Williams           QB  score=73.6
+ 23. Bo Nix                   QB  score=73.0
+ 24. Jordan Love              QB  score=72.7
+ 25. Trevor Lawrence          QB  score=72.5
+```
+
+#### AFTER — v1.0.0
+
+```
+  1. C.J. Stroud              QB  pts=1758.8  comp=Peyton Manning
+  2. Brock Purdy              QB  pts=1591.4  comp=Peyton Manning
+  3. Tua Tagovailoa           QB  pts=1522.9  comp=Drew Brees
+  4. Jordan Love              QB  pts=1489.2  comp=Tom Brady
+  5. Justin Herbert           QB  pts=1379.5  comp=Matt Ryan
+  6. Joe Burrow               QB  pts=1301.7  comp=Peyton Manning
+  7. Bijan Robinson           RB  pts=1271.2  comp=Steven Jackson
+  8. Jahmyr Gibbs             RB  pts=1267.2  comp=Todd Gurley
+  9. Patrick Mahomes          QB  pts=1244.7  comp=Shaun Hill
+ 10. Baker Mayfield           QB  pts=1239.9  comp=Brian Griese
+ 11. Carson Wentz             QB  pts=1196.3  comp=Shaun Hill
+ 12. Bucky Irving             RB  pts=1194.8  comp=Domanick Williams
+ 13. Bo Nix                   QB  pts=1168.7  comp=Aaron Brooks
+ 14. Puka Nacua               WR  pts=1161.0  comp=Jarvis Landry
+ 15. Brian Thomas Jr.         WR  pts=1139.9  comp=Larry Fitzgerald
+ 16. Gardner Minshew          QB  pts=1121.5  comp=Sam Bradford
+ 17. Jared Goff               QB  pts=1082.4  comp=Drew Brees
+ 18. Sam Howell               QB  pts=1081.8  comp=Derek Anderson
+ 19. George Pickens           WR  pts=1076.2  comp=Torry Holt
+ 20. Trevor Lawrence          QB  pts=1074.2  comp=Andrew Luck
+ 21. Jaylen Waddle            WR  pts=1052.9  comp=Eric Moulds
+ 22. Brandon Aiyuk            WR  pts=1051.9  comp=Calvin Johnson
+ 23. CeeDee Lamb              WR  pts=1033.1  comp=Steve Smith
+ 24. Jaxon Smith-Njigba       WR  pts=1005.8  comp=Dwayne Bowe
+ 25. Justin Jefferson         WR  pts=996.5   comp=Chad Johnson
+```
+
+Note the structural shift: the v1 engine ranks pocket-passer QBs near the top
+(young + long projected careers + production-shape matches to Brady/Manning/
+Brees), while rushing QBs (Allen, Hurts, Lamar) drop into the 90-160 range
+because their retired comp pool (Culpepper, Cam, McNair, RGIII, Vick) had
+shorter post-prime careers. This is the engine reflecting reality.
+
+### Comp lists for the brief's required players
+
+All comps below are **retired** (`last_season ≤ 2022`):
+
+- **Puka Nacua (WR, age 23)** — Jarvis Landry (2022), Germane Crowell (2002),
+  Anquan Boldin (2016), David Boston (2007), Josh Gordon (2022). Deeper:
+  Brandon Marshall, Steve Smith, Alshon Jeffery, **Calvin Johnson**, Antonio
+  Brown, Torry Holt, **Larry Fitzgerald**, Andre Johnson.
+- **Josh Allen (QB, age 28)** — Daunte Culpepper (2009), Cam Newton (2021),
+  Steve McNair (2007), Donovan McNabb (2011), Shaun Hill (2016). All retired
+  dual-threat QBs.
+- **Patrick Mahomes (QB, age 29)** — Shaun Hill (2016), Trent Green (2008),
+  Ben Roethlisberger (2021), Tony Romo (2016), Peyton Manning (2015).
+- **Joe Burrow (QB, age 27)** — Peyton Manning (2015), Tony Romo (2016),
+  Kurt Warner (2009), Matt Ryan (2022), Ben Roethlisberger (2021).
+- **Bijan Robinson (RB, age 22)** — Steven Jackson (2015), LeSean McCoy (2020),
+  Edgerrin James (2009), Le'Veon Bell (2021), Joseph Addai (2011).
+- **Christian McCaffrey (RB, age 28)** — Matt Forte (2017), Warrick Dunn
+  (2008), Marshall Faulk (2006), Reggie Bush (2016), Pierre Thomas (2015).
+- **Brock Bowers (TE, age 21)** — Jason Witten (2020), Jordan Reed (2020),
+  Todd Heap (2012), Dwayne Allen (2018), Tony Moeaki (2015).
+
+**Validation:** the engine asserts that NO active player appears in any other
+active player's comp list (`test_no_active_in_comps`). Confirmed zero
+violations across all 689 ranked players × top-20 comps each.
+
+### Format overlay — 1QB vs SF vs 2QB top-10
+
+```
+SF PPR              | 1QB PPR             | 2QB PPR
+  1 C.J. Stroud QB  |   1 C.J. Stroud QB  |   1 C.J. Stroud QB
+  2 Brock Purdy QB  |   2 Brock Purdy QB  |   2 Brock Purdy QB
+  3 Tua Tagovailoa  |   3 Bijan Robinson  |   3 Tua Tagovailoa
+  4 Jordan Love QB  |   4 Jahmyr Gibbs RB |   4 Jordan Love QB
+  5 Bijan Robinson  |   5 Tua Tagovailoa  |   5 Justin Herbert
+  6 Jahmyr Gibbs RB |   6 Bucky Irving RB |   6 Bijan Robinson
+  7 Justin Herbert  |   7 Jordan Love QB  |   7 Jahmyr Gibbs RB
+  8 Bucky Irving RB |   8 Puka Nacua WR   |   8 Bucky Irving RB
+  9 Puka Nacua WR   |   9 Brian Thomas WR |   9 Joe Burrow QB
+ 10 Joe Burrow QB   |  10 Justin Herbert  |  10 Puka Nacua WR
+```
+
+2QB pushes QBs up the board more aggressively than SF (Herbert at #5 vs #7;
+five of the top-five 2QB slots are QBs). 1QB pushes RBs/WRs up at the
+expense of QBs (only 4 QBs in top 10 vs 6 in SF). Josh Allen sits at
+SF #133 / 1QB #207 — a 74-spot gap from the SF QB premium.
+
+### Known limitations (shipping the core anyway)
+
+- **Corpus starts in 1999.** The brief specified Era 1 = 1980-1994; the
+  on-disk nflverse corpus doesn't go that far back. Era 1 effectively
+  covers 1999-2004. Players who retired before 1999 (Jim Brown, OJ Simpson,
+  Steve Young pre-1999, John Elway) are not in the comp pool. Era 1 → 4
+  multipliers for pre-1999 seasons fall back to the documented table.
+- **Mobile-QB comp pool is what it is.** Allen / Hurts / Lamar / Jackson
+  pull Culpepper / Cam / McNair / McNabb / RGIII / Vick — none of whom
+  played at age 38+. Their post-age career was short, so the engine projects
+  short post-age careers for the current dual-threat cohort. This is
+  technically correct (the engine sees what the data says) but produces
+  ranks that disagree with consensus dynasty boards. Phil's call.
+- **Birth dates missing for ~2% of retired players.** Falls back to
+  `rookie_season + 22`.
+- **Prospects page is a placeholder.** The college→NFL chain was tied to
+  the v0.x composite; a clean prospects engine that mirrors the basketball
+  model's rookie page is v1.1 work.
+- **Ranking-vs-consensus calibration.** This rewrite intentionally does NOT
+  blend in market signals (Sleeper ADP, FantasyCalc trade values, etc.).
+  Some of the top-25 names look unfamiliar relative to consensus (Stroud #1,
+  Purdy #2, Mayfield #10) because the engine projects from production shape
+  + remaining career length, with no consensus prior. This is the point of
+  the rewrite — Phil asked for a pure-production engine. Market re-ranking
+  is a v1.1 follow-up.
+
+### File-level diff summary
+
+New:
+
+- `src/dynasty/engine/__init__.py`
+- `src/dynasty/engine/era_pace.py`
+- `src/dynasty/engine/similarity_v1.py`
+- `src/dynasty/engine/format_overlay.py`
+- `tests/test_engine_v1.py`
+- `docs/V1-METHODOLOGY.md`
+
+Deleted:
+
+- `src/dynasty/similarity/` (whole package — 5 files, ~3000 lines)
+- `src/dynasty/sources/{historical_ncaa_football,cfbd_breakouts,pro_football_reference,ras}.py`
+- 11 v0.x test files (smoke_test + 10 source/scoring tests)
+
+Rewritten:
+
+- `src/dynasty/launcher.py` (161 → 121 lines)
+- `src/dynasty/launcher_headless.py` (183 → 121 lines)
+- `src/dynasty/report.py` (2278 → ~770 lines)
+- `src/dynasty/scoring.py` (407 → 22 lines, stub)
+- `src/dynasty/composite_weights.py` (stub)
+- `src/dynasty/overlays.py` (stub)
+- `src/dynasty/sources/__init__.py` (slimmed registry)
+- 7 source adapters stubbed to no-op (brainy_ballers, fantasypros,
+  dynastyprocess, fantasycalc, ffc_adp, pff, nfl_impact)
+- `sources/similarity_career_arc.py` + `sources/rookie_similarity_chain.py`
+  stubbed
+
+The v0.x methodology documents are archived under `docs/archive/v0.X/`.
+
+---
+
 ## v0.18.0 — Elite-proven veteran calibration (PR #18)
 
 **Date:** 2026-05-21

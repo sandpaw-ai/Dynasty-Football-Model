@@ -22,7 +22,7 @@ class FantasyPros(BaseSource):
     category = "aggregator"
     update_frequency = "daily"
     tos_compliant = True
-    default_weight = 1.2
+    default_weight = 0.4  # v0.14.0: similarity engine carries the heavier expert-style signal
     homepage = "https://www.fantasypros.com/"
     notes = "Paid API; stub only. See dynastyprocess.py for a free proxy."
 

@@ -19,6 +19,7 @@ from sqlalchemy import select, func
 
 from .db.session import get_session
 from .db.models import Player, CompositeScore, Source, Ranking
+from .sources.similarity_career_arc import load_comps_cache
 
 
 # --------------------------------------------------------------------------
@@ -188,6 +189,48 @@ SOURCE_DESCRIPTIONS = {
         "weight_justification": (
             "Default weight 0.9. Position modifier 1.5x at WR, 1.3x at TE, 1.0x at RB, 0.4x at QB. "
             "Like RAS, decays with years-pro because actual NFL production should dominate vets."
+        ),
+    },
+    "similarity_career_arc": {
+        "blurb": "KNN comparables over the PFR / nflverse player-season corpus (1999–2024). "
+                 "For each active NFL player, the top 20 historical seasons at the same "
+                 "position and age are aggregated into a projected remaining-career value "
+                 "(time-discounted 5%/yr).",
+        "type": "Analytics model (similarity engine)",
+        "strength": (
+            "Encodes both current skill (via per-game production / efficiency / usage "
+            "features) and longevity (via comp future careers). Surfaces the \"young "
+            "players are more valuable\" principle directly: a 22yo whose comps averaged "
+            "8 productive seasons after their comp year scores far above a 32yo with the "
+            "same current production whose comps averaged 2."
+        ),
+        "weakness": (
+            "Only covers active NFL players (rookies still rely on draft capital + CFBD "
+            "breakouts in v0.14; a college→NFL similarity chain is planned for PR #15). "
+            "Comps with sparse age windows (e.g. very young or very old players) get "
+            "smaller pools."
+        ),
+        "weight_justification": (
+            "Default weight 1.8 — the DOMINANT signal in the v0.14 composite per Phil's "
+            "directive to put similarity scores at the heart of the model."
+        ),
+    },
+    "nfl_impact": {
+        "blurb": "DARKO-style current-skill signal: per-position efficiency formulas "
+                 "computed from the PFR / nflverse corpus, normalized 0–100 within position.",
+        "type": "Analytics model (current skill)",
+        "strength": (
+            "Independent of any market signal — derived purely from on-field production "
+            "and efficiency. ANY/A + TD%-INT% + sack rate for QBs; yards-per-touch + TD "
+            "rate + target share for RBs; YPRR proxy + aDOT + TD rate for WR/TE."
+        ),
+        "weakness": (
+            "Single-season snapshot. The similarity engine carries the longevity weight "
+            "(NFL Impact is the 'how good are they right now' signal)."
+        ),
+        "weight_justification": (
+            "Default weight 0.8. Strong but not dominant — paired with the similarity "
+            "engine (1.8) which encodes longevity."
         ),
     },
 }
@@ -402,7 +445,8 @@ def _site_header(active: str, latest_ts: datetime | None, league_format: str) ->
       {link("index.html", "Overview", "index")}
       {link("rankings.html", "Rankings", "rankings")}
       {link("league.html", "Rate My League", "league")}
-      {link("sources.html", "Sources & Methodology", "sources")}
+      {link("sources.html", "Sources", "sources")}
+      {link("methodology.html", "Methodology", "methodology")}
     </nav>
   </div>
 </header>"""
@@ -563,13 +607,24 @@ edge lives.</p>
 # Page: rankings.html — full top-300
 # --------------------------------------------------------------------------
 
-def _build_rankings(rows, latest_ts, league_format: str) -> str:
+def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | None = None) -> str:
     rows_html = ""
+    comps_cache = comps_cache or {}
     for cs, p in rows:
         slug = _slugify(p.full_name, p.id)
         pos_rank_str = f'{p.position}{cs.position_rank}' if cs.position_rank else '—'
         cons_str = str(cs.consensus_rank) if cs.consensus_rank else '—'
-        rows_html += f"""<tr class="player-row" data-name="{_esc(p.full_name.lower())}" data-position="{_esc(p.position or '')}" onclick="location='players/{slug}.html'">
+        # v0.14.0: hover tooltip showing the top 3 historical comps
+        title = ""
+        ce = comps_cache.get(p.gsis_id) if p.gsis_id else None
+        if ce and ce.get("comparables"):
+            top = ce["comparables"][:3]
+            title = "Most similar: " + "; ".join(
+                f"{c.get('name', '')} ({c.get('season', '')}, sim {c.get('similarity', 0):.2f})"
+                for c in top
+            )
+        title_attr = f' title="{_esc(title)}"' if title else ""
+        rows_html += f"""<tr class="player-row"{title_attr} data-name="{_esc(p.full_name.lower())}" data-position="{_esc(p.position or '')}" onclick="location='players/{slug}.html'">
 <td class="rank">{cs.overall_rank}</td>
 <td class="name">{_esc(p.full_name)}</td>
 <td>{_pos_badge(p.position)}</td>
@@ -594,6 +649,10 @@ def _build_rankings(rows, latest_ts, league_format: str) -> str:
     <option value="WR">WR</option><option value="TE">TE</option>
   </select>
   <span class="stats" id="stats">{len(rows)} players</span>
+  <span style="margin-left:auto;font-size:13px;color:var(--muted)">
+    Hover a row for top historical comps ·
+    <a href="methodology.html">customize overlays →</a>
+  </span>
 </div>
 
 <table>
@@ -1528,17 +1587,172 @@ onPlatformChange();
 # Page: players/<slug>.html — individual player detail
 # --------------------------------------------------------------------------
 
-def _build_player_page(cs, p, all_sources, latest_ts, league_format: str) -> str:
+def _similar_players_card(comp_entry: dict) -> str:
+    """Render the top-5 historical comparables for a player.
+
+    ``comp_entry`` comes from ``data/similarity_comps_cache.json`` and has
+    the shape produced by ``similarity_career_arc._build_comps_cache``.
+    """
+    comps = comp_entry.get("comparables") or []
+    if not comps:
+        return ""
+    age = comp_entry.get("query_age")
+    proj_yrs = comp_entry.get("projected_remaining_years")
+    proj_ppr = comp_entry.get("projected_total_remaining_ppr")
+    n_comps = comp_entry.get("n_comps", 0)
+    avg_sim = comp_entry.get("avg_similarity", 0)
+
+    rows = []
+    for c in comps[:5]:
+        sim = c.get("similarity", 0)
+        yrs = c.get("years_played_after", 0)
+        rows.append(
+            f"<tr><td class='source-name'>{_esc(c.get('name', ''))}</td>"
+            f"<td>{c.get('season', '')}</td>"
+            f"<td>{c.get('team_or_school', '')}</td>"
+            f"<td style='text-align:right'>{c.get('age', '—')}</td>"
+            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{sim:.2f}</td>"
+            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>+{yrs}</td></tr>"
+        )
+    return f"""<div class="card">
+<h2 style="margin-top:0">Most similar historical players</h2>
+<p style="color:var(--muted);font-size:14px">
+  At age <strong>{age}</strong> and position, this player’s nearest historical
+  neighbors (by per-game production, efficiency, and usage — z-score normalized
+  within position). The similarity engine averages their realized future careers,
+  time-discounted 5%/yr, to project this player’s remaining dynasty value.
+</p>
+<p style="font-size:14px">
+  <strong>Projected remaining years:</strong> {proj_yrs} ·
+  <strong>Projected total remaining fantasy PPR:</strong> {proj_ppr:.0f} ·
+  <strong>Comp pool:</strong> top {n_comps} (avg similarity {avg_sim:.2f})
+</p>
+<table class="breakdown-table">
+<thead><tr>
+<th>Player</th><th>Season</th><th>Team</th><th style="text-align:right">Age</th>
+<th style="text-align:right">Similarity</th><th style="text-align:right">Years after</th>
+</tr></thead>
+<tbody>{''.join(rows)}</tbody>
+</table>
+</div>
+"""
+
+
+def _build_methodology_page(latest_ts, league_format: str) -> str:
+    """v0.14.0 — methodology page explaining the similarity engine + overlays."""
+    from .overlays import load_correlation_table
+    table = load_correlation_table()
+    ras = table.get("ras", {})
+    srs = table.get("brainy_ballers_srs", {})
+    methodology = table.get("methodology", "")
+
+    def _row(pos: str) -> str:
+        ras_v = float(ras.get(pos, 0.0))
+        srs_v = float(srs.get(pos, 0.0))
+        return (
+            f"<tr><td><strong>{pos}</strong></td>"
+            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{ras_v:+.3f}</td>"
+            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{srs_v:+.3f}</td></tr>"
+        )
+
+    body = f"""<div class="container narrow">
+<h1>Methodology</h1>
+<p style="color:var(--muted)">v0.14.0 — similarity-based career arc overhaul.</p>
+
+<div class="card">
+<h2 style="margin-top:0">Similarity engine</h2>
+<p>For each NFL player we vectorize their most recent productive season into
+per-game production, efficiency, and usage features (z-score normalized within
+position). We then KNN-search the historical corpus (1999–2024 · nflverse /
+PFR) for the 20 nearest neighbors at the same position and age (±1 year).</p>
+<p>For each comp we know their realized future career, so the weighted
+aggregate becomes a projection of this player’s remaining dynasty value:</p>
+<ul>
+  <li><strong>Projected remaining years</strong> — weighted median of comp careers</li>
+  <li><strong>Projected remaining PPR</strong> — weighted average of comp future totals</li>
+  <li><strong>Time discount</strong> — 5% per year (dynasty owners value sooner production)</li>
+  <li><strong>Dynasty value</strong> — rescaled 0–100 within position</li>
+</ul>
+<p>This is the dominant weight in the v0.14 composite (1.8). It encodes
+both current skill (via the vector) and longevity (via the comps’ careers).</p>
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Coverage penalty + Bayesian prior</h2>
+<p>The v0.13 model could vault a player to #1 on a single source’s max value
+(see: Luke Grimm). v0.14 applies a quadratic coverage penalty
+(composite × (min(n_sources/3, 1))²) and pulls low-coverage players toward a
+position-tier baseline (Bayesian prior). Players with 3+ qualifying sources are
+unaffected; single-source entries are crushed to ~11% of raw plus a baseline
+pull.</p>
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Overlays — RAS &amp; Brainy Ballers SRS</h2>
+<p>RAS and Brainy Ballers’ Star-Predictor Score now sit OUTSIDE the composite
+as user-toggleable overlays. The default slider value is the historical Pearson
+correlation between the signal and a player’s first 3 NFL seasons of
+fantasy PPR.</p>
+<table class="breakdown-table">
+<thead><tr><th>Position</th><th style="text-align:right">RAS × first-3yr PPR</th>
+<th style="text-align:right">SRS × first-3yr PPR</th></tr></thead>
+<tbody>
+{_row('QB')}{_row('RB')}{_row('WR')}{_row('TE')}
+</tbody>
+</table>
+<p style="color:var(--muted);font-size:13px;margin-top:8px"><em>{_esc(methodology)}</em></p>
+<p style="font-size:14px">RAS correlates ~0.23 with RB first-3-year production and ~0.14 with WR,
+so enabling the RAS overlay for RBs will meaningfully reshuffle your rankings;
+for QBs it’s closer to noise. Brainy Ballers’ SRS uses a low-confidence prior
+until a historical archive becomes available.</p>
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Source weights (v0.14.0)</h2>
+<table class="breakdown-table">
+<thead><tr><th>Source</th><th>Category</th><th style="text-align:right">Default weight</th></tr></thead>
+<tbody>
+<tr><td class="source-name">Similarity Career Arc</td><td>model</td><td style="text-align:right">1.8</td></tr>
+<tr><td class="source-name">NFL Impact (DARKO)</td><td>model</td><td style="text-align:right">0.8</td></tr>
+<tr><td class="source-name">FantasyCalc</td><td>market</td><td style="text-align:right">0.6</td></tr>
+<tr><td class="source-name">FFC ADP</td><td>market</td><td style="text-align:right">0.4</td></tr>
+<tr><td class="source-name">FantasyPros</td><td>expert</td><td style="text-align:right">0.4</td></tr>
+<tr><td class="source-name">PFF</td><td>expert</td><td style="text-align:right">0.4</td></tr>
+<tr><td class="source-name">NFL Draft Capital</td><td>model</td><td style="text-align:right">1.5 (rookies)</td></tr>
+<tr><td class="source-name">CFBD Breakouts</td><td>model</td><td style="text-align:right">0.9 (rookies)</td></tr>
+<tr><td class="source-name">DynastyProcess</td><td>aggregator</td><td style="text-align:right">0.3</td></tr>
+<tr><td class="source-name">RAS</td><td>overlay</td><td style="text-align:right">overlay only</td></tr>
+<tr><td class="source-name">Brainy Ballers SRS</td><td>overlay</td><td style="text-align:right">overlay only</td></tr>
+</tbody>
+</table>
+</div>
+
+</div>
+"""
+    return _page(
+        "Methodology — Dynasty Model v0.14",
+        _site_header("methodology", latest_ts, league_format),
+        body,
+    )
+
+
+def _build_player_page(cs, p, all_sources, latest_ts, league_format: str, comps_cache: dict | None = None) -> str:
     try:
         breakdown = json.loads(cs.breakdown_json) if cs.breakdown_json else {}
     except Exception:
         breakdown = {}
+    comps_cache = comps_cache or {}
+    comp_entry = comps_cache.get(p.gsis_id) if p.gsis_id else None
 
     # Build breakdown rows, sorted by weight (highest contribution first)
     sources_by_slug = {s.slug: s for s in all_sources}
     items = []
-    total_w = sum(b.get("weight", 0) for b in breakdown.values())
-    for slug, b in breakdown.items():
+    # v0.14.0: skip the internal _meta block (coverage / prior diagnostics)
+    # — it's not a source contribution.
+    coverage_meta = breakdown.get("_meta") if isinstance(breakdown.get("_meta"), dict) else None
+    breakdown_rows = {k: v for k, v in breakdown.items() if k != "_meta"}
+    total_w = sum(b.get("weight", 0) for b in breakdown_rows.values())
+    for slug, b in breakdown_rows.items():
         items.append({
             "slug": slug,
             "name": sources_by_slug.get(slug).name if slug in sources_by_slug else slug,
@@ -1554,11 +1768,12 @@ def _build_player_page(cs, p, all_sources, latest_ts, league_format: str) -> str
     for it in items:
         bar_width = min(220, it["pct"] * 2.2)
         rank_str = f"#{it['raw_rank']}" if it["raw_rank"] else "—"
+        score_val = it["score"] if it["score"] is not None else 0.0
         breakdown_html += f"""<tr>
 <td class="source-name">{_esc(it['name'])}</td>
 <td><span class="tag tag-{it['category']}">{it['category']}</span></td>
 <td style="text-align:right;font-variant-numeric:tabular-nums">{rank_str}</td>
-<td style="text-align:right;font-variant-numeric:tabular-nums">{it['score']:.1f}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums">{score_val:.1f}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums"><span class="weight-bar" style="width:{bar_width}px"></span>{it['weight']:.2f}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)">{it['pct']:.0f}%</td>
 </tr>"""
@@ -1624,6 +1839,8 @@ def _build_player_page(cs, p, all_sources, latest_ts, league_format: str) -> str
 <div class="div-explanation">{div_explanation}</div>
 </div>
 
+{_similar_players_card(comp_entry) if comp_entry else ''}
+
 <div class="card">
 <h2 style="margin-top:0">Source breakdown</h2>
 <p style="color:var(--muted);font-size:14px">How each source contributed to this player's composite score. Sources with higher weights drive more of the final ranking.</p>
@@ -1683,9 +1900,14 @@ Run the launcher again — make sure the sync step completes successfully.</div>
             _build_index(rows, sources, latest_ts, league_format), encoding="utf-8"
         )
 
+        # v0.14.0: surface comparables from the similarity engine. Loaded
+        # once here, used for both rankings hover tooltips and per-player
+        # pages below.
+        comps_cache = load_comps_cache()
+
         # Full rankings
         (out_root / "rankings.html").write_text(
-            _build_rankings(rows, latest_ts, league_format), encoding="utf-8"
+            _build_rankings(rows, latest_ts, league_format, comps_cache=comps_cache), encoding="utf-8"
         )
 
         # Sources & methodology
@@ -1725,11 +1947,16 @@ Run the launcher again — make sure the sync step completes successfully.</div>
             _build_league_page(latest_ts, league_format), encoding="utf-8"
         )
 
+        # Methodology page (v0.14.0)
+        (out_root / "methodology.html").write_text(
+            _build_methodology_page(latest_ts, league_format), encoding="utf-8"
+        )
+
         # Per-player pages
         for cs, p in rows:
             slug = _slugify(p.full_name, p.id)
             (out_root / "players" / f"{slug}.html").write_text(
-                _build_player_page(cs, p, sources, latest_ts, league_format),
+                _build_player_page(cs, p, sources, latest_ts, league_format, comps_cache=comps_cache),
                 encoding="utf-8"
             )
 

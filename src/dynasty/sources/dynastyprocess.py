@@ -22,7 +22,11 @@ class DynastyProcessValues(BaseSource):
     category = "aggregator"
     update_frequency = "weekly"
     tos_compliant = True
-    default_weight = 1.0
+    # v0.14.0: demoted from 1.0 → 0.3 — this aggregator caused the
+    # Luke Grimm bug (single-source max-value with no coverage penalty).
+    # Now a minor signal that's only meaningful when corroborated by
+    # other sources via the coverage gate.
+    default_weight = 0.3
     homepage = "https://dynastyprocess.com/"
     notes = "FantasyPros ECR repackaged as open CSV."
 

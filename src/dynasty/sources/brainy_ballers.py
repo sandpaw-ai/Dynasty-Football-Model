@@ -27,7 +27,10 @@ class BrainyBallers(BaseSource):
     category = "model"
     update_frequency = "weekly"
     tos_compliant = True
-    default_weight = 1.3
+    # v0.14.0: demoted from 1.3 → 0.0 — brainy_ballers is now a USER
+    # OVERLAY (see src/dynasty/overlays.py). Data still synced; weight is
+    # 0 in the composite so the overlay can apply it data-driven.
+    default_weight = 0.0
     homepage = "https://brainyballers.com/"
     notes = (
         "Top-500 dynasty rankings, primarily SPS (Star-Predictor Score) "

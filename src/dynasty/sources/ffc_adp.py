@@ -44,7 +44,7 @@ class FFCAdp(BaseSource):
     category = "market"
     update_frequency = "daily"  # continuous, but we'll sync daily
     tos_compliant = True
-    default_weight = 0.7
+    default_weight = 0.4  # v0.14.0: rebalanced — redraft-skewed user base
     homepage = "https://fantasyfootballcalculator.com/"
     notes = (
         "Free public REST API. Live ADP from real mock drafts. User base "

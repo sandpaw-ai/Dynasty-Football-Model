@@ -32,6 +32,11 @@ data/cfbd/*.csv
 data/cfbd/*.xlsx
 data/cfbd/*.tsv
 
+# v0.14.0: similarity comps cache is a build artifact — regenerated each
+# launcher run when the similarity_career_arc source syncs. Don't commit
+# (would just churn on every build).
+data/similarity_comps_cache.json
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

@@ -79,6 +79,11 @@ def main():
         # cleanly either way.
         ("ras", "RAS (Relative Athletic Score)"),
         ("cfbd_breakouts", "CFBD Breakouts (Breakout Age + Dominator)"),
+        # v0.14.0 — similarity engine + DARKO-style current-skill
+        # signal. Both read from the committed PFR / nflverse corpus
+        # under data/nflverse/, so no network call in CI.
+        ("nfl_impact", "NFL Impact (DARKO-style current-skill)"),
+        ("similarity_career_arc", "Similarity Career Arc"),
     ]
     for slug, label in sources_to_sync:
         try:

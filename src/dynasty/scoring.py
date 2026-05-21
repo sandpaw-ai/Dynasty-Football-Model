@@ -1,6 +1,6 @@
 """Composite scoring — blends source rankings into a single dynasty score.
 
-Approach:
+Approach (v0.14.0):
   1. For each source, pull its most-recent ranking per player at a given league_format.
   2. Convert each source's rank to a normalized 0..100 score:
         score_per_source = 100 * (1 - (rank - 1) / max_rank_for_normalization)
@@ -10,12 +10,21 @@ Approach:
      where the multiplier comes from `source_track_record.spearman_corr`
      (sources without a track record get 1.0).
   4. Composite = weighted average of per-source scores.
-  5. Compute a "consensus rank" using only market/aggregator sources
+  5. Apply a COVERAGE PENALTY:
+        composite *= min(num_qualifying_sources / COVERAGE_MIN_SOURCES, 1.0)
+     A player with 1 source caps at 1/3 of credit, 2 at 2/3, 3+ full. This
+     fixes the v0.13 'Luke Grimm' bug where a single source's max value
+     could vault a player to #1 with no corroboration.
+  6. Apply a BAYESIAN PRIOR pull toward position-tier baseline. Players
+     with low coverage are pulled toward the average expected score for
+     their position; well-covered players are not. Pull strength decays
+     to zero at 3+ qualifying sources.
+  7. Compute a "consensus rank" using only market/aggregator sources
      (representing where the broader fantasy community has the player).
-  6. Compute rank_divergence = consensus_rank - model_rank.
+  8. Compute rank_divergence = consensus_rank - model_rank.
      Positive = model is higher on the player than consensus (a "buy" signal).
      Negative = model is lower than consensus (a "sell" signal).
-  7. Write CompositeScore rows.
+  9. Write CompositeScore rows.
 
 Result is written to `composite_scores` as an append-only history.
 """
@@ -43,6 +52,34 @@ DEFAULT_NORMALIZATION_DEPTH = 300
 # Source categories that represent "consensus" / "the market".
 # Anything outside these is treated as an evaluator opinion.
 CONSENSUS_CATEGORIES = {"market", "aggregator"}
+
+# v0.14.0 — coverage penalty + Bayesian prior parameters.
+#
+# COVERAGE_MIN_SOURCES is the threshold above which we trust a player's
+# composite at face value. Below it, two things happen:
+#   (a) the composite is multiplied by (num_sources / COVERAGE_MIN_SOURCES),
+#       capping uncorroborated players' upside.
+#   (b) the composite is pulled toward a position-tier baseline at a rate
+#       that decays as coverage grows.
+#
+# We deliberately do NOT count sources whose default_weight has been
+# zeroed out (RAS, brainy_ballers are overlay-only in v0.14). Those
+# sources still emit RankingRecords for the overlay system, but they
+# don't count as "coverage" for the corroboration gate.
+COVERAGE_MIN_SOURCES = 3
+# Strength of the prior pull when a player has zero qualifying sources.
+# Tapers linearly to 0 at COVERAGE_MIN_SOURCES.
+BAYESIAN_PRIOR_STRENGTH = 0.6
+# Per-position baseline composite score (rough "average rosterable"
+# territory). Tuned so the prior pull doesn't dominate well-covered
+# players but does cap single-source noise.
+POSITION_BASELINE_SCORE = {
+    "QB": 20.0,
+    "RB": 22.0,
+    "WR": 22.0,
+    "TE": 18.0,
+}
+DEFAULT_BASELINE_SCORE = 20.0
 
 
 def _latest_rankings_by_source(
@@ -131,7 +168,7 @@ def _value_to_score(value: float | None, max_value: float) -> float | None:
 def compute_composite_scores(
     league_format: str = "sf_ppr",
     depth: int = DEFAULT_NORMALIZATION_DEPTH,
-    model_version: str = "0.3.0",
+    model_version: str = "0.14.0",
     score_year: int | None = None,
 ) -> int:
     """Run the scoring pipeline. Returns number of CompositeScore rows written."""
@@ -225,6 +262,12 @@ def compute_composite_scores(
                 if score is None:
                     continue
 
+                # v0.14.0: only contributions with strictly-positive
+                # weight count as "coverage". Sources whose
+                # default_weight has been zeroed (RAS, brainy_ballers —
+                # now overlays) are still recorded for the overlay
+                # system to consume, but they don't gate the
+                # corroboration penalty.
                 contribs[pid].append((src.slug, src.category, score, weight, ranking.overall_rank))
 
                 if sid in consensus_source_ids and ranking.overall_rank is not None:
@@ -251,10 +294,42 @@ def compute_composite_scores(
             if slugs_present and slugs_present.issubset(ROOKIE_SIGNAL_SOURCES):
                 continue
 
+            # v0.14.0: count sources with positive weight as "qualifying".
+            # Sources zeroed out for overlay use (RAS, brainy_ballers)
+            # don't count toward coverage.
+            qualifying_items = [it for it in items if it[3] > 0]
+            num_qualifying = len(qualifying_items)
+
             total_w = sum(w for _, _, _, w, _ in items)
             if total_w <= 0:
                 continue
-            score = sum(s * w for _, _, s, w, _ in items) / total_w
+            raw_score = sum(s * w for _, _, s, w, _ in items) / total_w
+
+            # --- COVERAGE PENALTY (v0.14.0) ---
+            # Quadratic penalty below COVERAGE_MIN_SOURCES so single-source
+            # entries are crushed even harder than the linear curve would
+            # imply. Linearly 1-source = 0.33; quadratic 1-source = 0.11.
+            # The Luke Grimm bug came from a single source emitting a max
+            # market value with no corroboration; this curve makes that
+            # bucket near-zero.
+            linear_coverage = min(
+                num_qualifying / float(COVERAGE_MIN_SOURCES), 1.0
+            )
+            coverage_mult = linear_coverage ** 2
+            penalized = raw_score * coverage_mult
+
+            # --- BAYESIAN PRIOR PULL (v0.14.0) ---
+            player = players_by_id.get(pid)
+            pos = player.position if player else None
+            baseline = POSITION_BASELINE_SCORE.get(
+                (pos or "").upper(), DEFAULT_BASELINE_SCORE
+            )
+            # Prior weight: full at zero coverage, zero at COVERAGE_MIN_SOURCES+.
+            prior_w = BAYESIAN_PRIOR_STRENGTH * max(
+                0.0,
+                1.0 - num_qualifying / float(COVERAGE_MIN_SOURCES),
+            )
+            score = (1.0 - prior_w) * penalized + prior_w * baseline
 
             # Build a richer breakdown: source -> {score, weight, raw_rank, category}
             breakdown = {
@@ -265,6 +340,15 @@ def compute_composite_scores(
                     "category": cat,
                 }
                 for slug, cat, s, w, rank in items
+            }
+            # v0.14.0: expose the coverage gate in the breakdown so the UI
+            # can show why a player's composite was attenuated.
+            breakdown["_meta"] = {
+                "qualifying_sources": num_qualifying,
+                "coverage_mult": round(coverage_mult, 3),
+                "raw_score": round(raw_score, 2),
+                "baseline_score": baseline,
+                "prior_weight": round(prior_w, 3),
             }
             results.append((pid, score, breakdown))
 

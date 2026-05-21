@@ -15,6 +15,204 @@ Format for each entry:
 
 ---
 
+## v0.14.0 — Similarity-based career arc overhaul (PR #14)
+
+**Date:** 2026-05-21
+
+A full architectural overhaul. Phil flagged in 2026-05-20: the v0.13 model
+had Luke Grimm at #1 because DynastyProcess returned `value_1qb=100` for him
+as his ONLY source contribution, and the composite had no coverage penalty.
+More broadly, the model had drifted into pure source-aggregation territory —
+13 PRs of adapters but no first-principles read on whether each player’s
+career arc supports the ranking.
+
+### Phil’s directive (verbatim, condensed)
+
+> Let’s make similarity scores the heart of the model, where college production
+> should be compared to historically similar college players and projected to
+> the pros. Use a DARKO-like methodology for pro football players. Compare
+> current NFL players to the most similar historical players and extrapolate
+> the rest of their careers. The dynasty rankings should be a reflection of
+> the idea that younger players are more valuable because they have many more
+> years of projectable production. List the similar players that are being
+> compared to create the model rankings. RAS can be an overlay where you are
+> overlaying athleticism to the model. Brainy Ballers can be another overlay.
+> Run the correlations and assign the model weight accordingly.
+
+### What changed
+
+**1. Similarity engine (the new dominant signal, weight 1.8)**
+
+- New `src/dynasty/sources/pro_football_reference.py` — ships the
+  player-season corpus from nflverse (1999–2024, 33K+ rows) as a
+  gzipped CSV cache under `data/nflverse/`. CI never hits the network;
+  one-time live refresh gated behind `DYNASTY_FB_PFR_LIVE=1`. We use
+  nflverse rather than scraping pro-football-reference.com directly
+  because nflverse republishes the same PFR-derived data with no rate
+  limit, MIT-licensed, in a stable schema (target_share, WOPR, EPA all
+  included).
+- New `src/dynasty/similarity/vectorize.py` — per-position feature
+  vectors of per-game production, efficiency, and usage. Z-score
+  normalized within position across the full historical corpus.
+- New `src/dynasty/similarity/comparables.py` — KNN comparable search:
+  same position, age ±1yr, top 20 nearest historical seasons by cosine
+  similarity.
+- New `src/dynasty/similarity/projection.py` — weighted aggregate of the
+  comps’ realized future careers, time-discounted at 5%/yr. Output:
+  projected_remaining_years + projected_total_remaining_ppr +
+  dynasty_value (rescaled 0–100 within position).
+- New `src/dynasty/sources/similarity_career_arc.py` — wraps the
+  projection as a `BaseSource` so the existing scoring pipeline ingests
+  it without special-casing.
+
+**2. DARKO-style current-skill signal (weight 0.8)**
+
+- New `src/dynasty/sources/nfl_impact.py` — per-position current-skill
+  formulas from the same PFR corpus: ANY/A + TD% - INT% + sack rate
+  (QB); yards-per-touch + TD rate + target share (RB); YPRR proxy +
+  aDOT proxy + TD rate (WR/TE). Normalized 0–100 within position. This
+  is the “how good are they right now” signal; the similarity engine
+  owns longevity.
+
+**3. Luke Grimm fix — coverage penalty + Bayesian prior (`scoring.py`)**
+
+- Quadratic coverage penalty: `composite *= (min(n_sources/3, 1))²`. A
+  single-source player’s composite is multiplied by **0.11**; two
+  sources → 0.44; three+ → full credit.
+- Bayesian prior pull: low-coverage players get pulled toward a
+  position-tier baseline score (20–22 across QB/RB/WR/TE). Pull strength
+  decays linearly to 0 at 3 qualifying sources.
+- Sources zeroed out for overlay use (RAS, brainy_ballers) do NOT count
+  as coverage. They still emit RankingRecords so the overlay system can
+  consume them.
+- DynastyProcess demoted from `default_weight=1.0` → `0.3` (the
+  proximate cause of the Grimm bug).
+
+**4. New composite weights (v0.14.0)**
+
+| Source                  | v0.13 weight | v0.14 weight |
+|-------------------------|--------------|--------------|
+| similarity_career_arc   | (didn’t exist) | **1.8** |
+| nfl_impact (DARKO)      | (didn’t exist) | **0.8** |
+| fantasycalc             | 1.0          | 0.6 |
+| ffc_adp                 | 0.7          | 0.4 |
+| fantasypros             | 1.2          | 0.4 |
+| pff                     | 1.3          | 0.4 |
+| nfl_draft_capital       | 1.5          | 1.5 (rookies only) |
+| cfbd_breakouts          | 0.9          | 0.9 (rookies only) |
+| dynastyprocess          | 1.0          | **0.3** (Grimm bug source) |
+| ras                     | 0.8          | **overlay only** |
+| brainy_ballers          | 1.3          | **overlay only** |
+
+**5. Overlays — RAS and Brainy Ballers SRS data-driven**
+
+- New `src/dynasty/overlays.py` — user-toggle overlays with a
+  position-specific default weight pulled from the historical
+  correlation between the signal and a player’s first 3 NFL seasons of
+  fantasy PPR.
+- New `scripts/correlation_audit.py` — computes the correlations using
+  RAS × nflverse career outcomes on `pfr_id`. Writes
+  `data/overlays/correlation_table.json`.
+- Computed RAS correlations (n in parentheses):
+    - RAS × QB first-3yr PPR: r = **+0.172** (n=245)
+    - RAS × RB first-3yr PPR: r = **+0.228** (n=527)
+    - RAS × WR first-3yr PPR: r = **+0.142** (n=719)
+    - RAS × TE first-3yr PPR: r = **+0.177** (n=354)
+- Brainy Ballers SRS uses a low-confidence prior pending a historical
+  archive (their site only publishes current rankings, so we can’t
+  back-test SRS → production yet).
+
+**6. UI — surface comparables**
+
+- Each player page now shows their top 5 historical comparables with
+  similarity scores, schools/teams, ages, and how many years each comp
+  played after the matched season. Includes projected remaining
+  years + total PPR.
+- Rankings page rows now have a hover tooltip showing the top 3 comps.
+- New `/methodology.html` page explaining the similarity engine,
+  coverage penalty, overlay system, and full weight table.
+
+### Result: before vs after (sf_ppr top 15)
+
+| # | v0.13 (before) | v0.14 (after) |
+|---|----------------|---------------|
+| 1 | **Luke Grimm** 💥 | Bijan Robinson |
+| 2 | Josh Allen | Jahmyr Gibbs |
+| 3 | Ja’Marr Chase | Ja’Marr Chase |
+| 4 | Bijan Robinson | Malik Nabers |
+| 5 | Jaxon Smith-Njigba | Ashton Jeanty |
+| 6 | Jahmyr Gibbs | Jeremiyah Love |
+| 7 | Lamar Jackson | Jordan Love |
+| 8 | Drake Maye | Joe Burrow |
+| 9 | Justin Jefferson | Brian Thomas |
+| 10 | Joe Burrow | Tetairoa McMillan |
+| 11 | Jayden Daniels | Jaxson Dart |
+| 12 | Drake London | Omarion Hampton |
+| 13 | Malik Nabers | Tee Higgins |
+| 14 | CeeDee Lamb | Justin Herbert |
+| 15 | Justin Herbert | Fernando Mendoza |
+
+**Luke Grimm new rank: #545 / 896.**
+
+The new top 15 is dominated by young high-production profiles — exactly
+what the similarity engine is supposed to surface. Bijan Robinson #1
+because his age-22 vector matches LaDainian Tomlinson 2002 / Steve Slaton
+2008 / Chris Johnson 2008 (sim 0.98+), all of whom had long productive
+careers after their comp season.
+
+### Example comparable lists
+
+**Brian Thomas (top young WR, age 21.9, dynasty_value=100):**
+- DK Metcalf 2020 (age 22.7, SEA) sim=0.99
+- Keenan Allen 2013 (age 21.4, LAC) sim=0.99
+- Justin Jefferson 2021 (age 22.2, MIN) sim=0.99
+- Tee Higgins 2020 (age 21.6, CIN) sim=0.98
+- DeSean Jackson 2009 (age 22.8, PHI) sim=0.98
+
+**Joe Burrow (top veteran QB, age 27.7, dynasty_value=68):**
+- Dak Prescott 2021 (age 28.1, DAL) sim=0.98
+- Aaron Rodgers 2011 (age 27.8, GB) sim=0.97
+- Donovan McNabb 2004 (age 27.8, PHI) sim=0.96
+- Matthew Stafford 2015 (age 27.6, DET) sim=0.96
+- Kurt Warner 1999 (age 28.2, LA) sim=0.95
+
+**Aaron Rodgers (aging vet, age 40.8, dynasty_value=30):**
+- Brett Favre 2009 (age 39.9, MIN) sim=0.93
+- Tom Brady 2017 (age 40.1, NE) sim=0.92
+- Drew Brees 2019 (age 40.6, NO) sim=0.65
+- Vinny Testaverde 2004 (age 40.8, DAL) sim=0.46
+
+(Rodgers’ nfl_impact rank: #43. Composite rank after the similarity
+engine projects his short remaining career: **#313**. Exactly the
+“young > old” signal Phil wanted.)
+
+### Scope deferred to PR #15
+
+The **college side** of the similarity engine (cfbd-driven rookie
+vector + college→NFL bridge) is not in this PR. Rookies in v0.14 still
+rely on `nfl_draft_capital` + `cfbd_breakouts` for their signal. The
+veteran NFL side + Luke Grimm fix was scoped as MVP; the college
+rookie engine is a natural follow-up.
+
+### Validation
+
+- 7 new tests in `tests/test_similarity_football.py`:
+    - PFR cache present and sane
+    - Vectorize is deterministic and order-independent
+    - KNN sensible matches (Justin Jefferson 2020 comps include
+      recognizable elite young WRs)
+    - No single-source player ranks in the top 50 (Grimm invariant)
+    - 3+ elite young WR/RB profiles in top 30
+    - Aging vet QB drops between current-skill rank and composite rank
+    - Correlation table well-formed
+- All 7 pass. Existing test suite: same pass/fail as upstream/main
+  (4 pre-existing failures stem from DB-pollution across tests, not
+  introduced by this PR).
+- Live launcher run: 896 players scored, site builds, MFL league
+  pre-fetch still works.
+
+---
+
 ## v0.13.0 — Shirts and Skins league live + MFL player-id crosswalk (PR #13)
 
 **Date:** 2026-05-20

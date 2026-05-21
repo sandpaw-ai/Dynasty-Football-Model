@@ -486,3 +486,44 @@ Total implementation effort estimate: **~12–14 hours** to ship A1–A4 + posit
   PPR. See `docs/CORRELATION-METHODOLOGY.md`.
 
 DONE
+
+## Addendum (v0.16.0, PR #16) — Rookie college→NFL similarity chain
+
+### Historical NCAA football corpus
+
+- **What:** Per-season skill-position player totals (QB/RB/WR/TE) for
+  the FBS, derived by aggregating play-by-play CSVs from
+  `sportsdataverse/cfbfastR-data` (MIT licensed). 2014–2025, ~16K
+  player-seasons.
+- **Why this and not CollegeFootballData.com?** CFBData requires an
+  API key with conservative rate limits. cfbfastR-data ships pre-built
+  CSVs as GitHub release assets — no auth, no scraping. The downside
+  is the 2014 floor (cfbfastR's PBP coverage starts there). The
+  CFBData integration is filed as a PR #17 follow-up to extend back
+  another decade.
+- **Why not sports-reference.com/cfb?** Behind Cloudflare's bot
+  challenge — returns 403 to any non-browser request. Not viable for
+  CI.
+- **Cache:** `data/historical_ncaa_football/season_<YYYY>.json` (one
+  per season) + `roster_<YYYY>.csv.gz`. Total ~16MB, committed.
+- **Live refresh:** `DYNASTY_FB_NCAA_LIVE=1`. CI never hits network.
+- **Schema:** see module docstring in
+  `src/dynasty/sources/historical_ncaa_football.py`.
+
+### College→NFL bridge
+
+- **What:** `data/bridge/ncaa_to_nfl.json` — a crosswalk from every
+  NCAA `cfb_player_id` to its eventual PFR `gsis_id` (when one exists).
+  Match strategy is (name, college, rookie_season ± 1yr), with
+  fallbacks for nickname mismatches and school-name variants.
+- **Why:** Without the bridge, college similarity is a closed system
+  — it could find "Caleb Williams is most similar to Trevor Lawrence”
+  but couldn't translate that into a dynasty projection. The bridge
+  closes the loop: each comp's realized NFL career becomes the
+  projection input.
+- **Coverage:** 80.5% of FBS-college NFL skill players with
+  rookie_season ∈ [2017, 2025]. Lower bound is set by cfbfastR's 2014
+  floor; FCS / D-II / non-football-school players are excluded from
+  the denominator (out of scope, not bridge failures).
+- **Detail:** see `src/dynasty/similarity/bridge.py` and PR #16's
+  CHANGELOG entry.

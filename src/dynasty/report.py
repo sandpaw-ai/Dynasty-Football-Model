@@ -20,6 +20,7 @@ from sqlalchemy import select, func
 from .db.session import get_session
 from .db.models import Player, CompositeScore, Source, Ranking
 from .sources.similarity_career_arc import load_comps_cache
+from .sources.rookie_similarity_chain import load_rookie_comps_cache
 
 
 # --------------------------------------------------------------------------
@@ -231,6 +232,32 @@ SOURCE_DESCRIPTIONS = {
         "weight_justification": (
             "Default weight 0.8. Strong but not dominant — paired with the similarity "
             "engine (1.8) which encodes longevity."
+        ),
+    },
+    "rookie_similarity_chain": {
+        "blurb": "College→NFL similarity chain: for each rookie/draft prospect, finds "
+                 "the top 20 college-comparable seasons at the same position/class, "
+                 "resolves each to its realized NFL career via the ncaa_to_nfl bridge, "
+                 "and aggregates a time-discounted lifetime projection.",
+        "type": "Analytics model (rookie similarity)",
+        "strength": (
+            "Extends the similarity engine to incoming draft classes — the half of the "
+            "player universe that PR #14's NFL-only engine couldn't cover. Conference "
+            "strength multipliers (P5=1.0, top-G5=0.85, lower-G5=0.75, FCS=0.65) "
+            "discount stat-line inflation against weak schedules."
+        ),
+        "weakness": (
+            "NCAA corpus coverage starts 2014 (cfbfastR-data limit); pre-2014 college "
+            "careers are not in the comp pool, so rookies whose closest comps played "
+            "before 2014 don't surface. Bridge coverage to NFL is ~80% of post-2017 "
+            "FBS rookies; the rest fall through as 'no NFL bridge available' and "
+            "contribute zero NFL longevity."
+        ),
+        "weight_justification": (
+            "Default weight 1.6 — just below similarity_career_arc (1.8) since the "
+            "college→NFL bridge adds one layer of indirection. Blends 50/50 with the "
+            "NFL similarity value for players with exactly 1 NFL season; pure rookie "
+            "value for 0-NFL-season prospects."
         ),
     },
 }
@@ -647,9 +674,20 @@ edge lives.</p>
 # Page: rankings.html — full top-300
 # --------------------------------------------------------------------------
 
-def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | None = None, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
+def _build_rankings(
+    rows, latest_ts, league_format: str,
+    comps_cache: dict | None = None,
+    rookie_comps_cache: dict | None = None,
+    formats_available: tuple[str, ...] = ("sf_ppr",),
+) -> str:
     rows_html = ""
     comps_cache = comps_cache or {}
+    rookie_comps_cache = rookie_comps_cache or {}
+    # Build a name-keyed lookup so we can flag rookie rows in the table.
+    rookie_names = {
+        (e.get("player_name") or "").lower()
+        for e in rookie_comps_cache.values()
+    }
     for cs, p in rows:
         slug = _slugify(p.full_name, p.id)
         pos_rank_str = f'{p.position}{cs.position_rank}' if cs.position_rank else '—'
@@ -664,7 +702,8 @@ def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | Non
                 for c in top
             )
         title_attr = f' title="{_esc(title)}"' if title else ""
-        rows_html += f"""<tr class="player-row"{title_attr} data-name="{_esc(p.full_name.lower())}" data-position="{_esc(p.position or '')}" onclick="location='players/{slug}.html'">
+        is_rookie = "1" if (p.full_name or "").lower() in rookie_names else "0"
+        rows_html += f"""<tr class="player-row"{title_attr} data-name="{_esc(p.full_name.lower())}" data-position="{_esc(p.position or '')}" data-rookie="{is_rookie}" onclick="location='players/{slug}.html'">
 <td class="rank">{cs.overall_rank}</td>
 <td class="name">{_esc(p.full_name)}</td>
 <td>{_pos_badge(p.position)}</td>
@@ -688,6 +727,9 @@ def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | Non
     <option value="QB">QB</option><option value="RB">RB</option>
     <option value="WR">WR</option><option value="TE">TE</option>
   </select>
+  <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">
+    <input type="checkbox" id="rookie-filter"> Rookies / prospects only
+  </label>
   <span class="stats" id="stats">{len(rows)} players</span>
   <span style="margin-left:auto;font-size:13px;color:var(--muted)">
     Hover a row for top historical comps ·
@@ -715,14 +757,17 @@ const search = document.getElementById('search');
 const posFilter = document.getElementById('pos-filter');
 const rows = document.querySelectorAll('.player-row');
 const stats = document.getElementById('stats');
+const rookieFilter = document.getElementById('rookie-filter');
 function apply() {{
   const q = search.value.toLowerCase().trim();
   const pos = posFilter.value;
+  const rookieOnly = rookieFilter && rookieFilter.checked;
   let n = 0;
   rows.forEach(r => {{
     const matchName = !q || r.dataset.name.includes(q);
     const matchPos = !pos || r.dataset.position === pos;
-    const show = matchName && matchPos;
+    const matchRookie = !rookieOnly || r.dataset.rookie === '1';
+    const show = matchName && matchPos && matchRookie;
     r.style.display = show ? '' : 'none';
     if (show) n++;
   }});
@@ -730,6 +775,7 @@ function apply() {{
 }}
 search.addEventListener('input', apply);
 posFilter.addEventListener('change', apply);
+if (rookieFilter) rookieFilter.addEventListener('change', apply);
 </script>""")
 
 
@@ -1872,13 +1918,102 @@ composite mixing, not just the dynasty-value scale.</p>
     )
 
 
-def _build_player_page(cs, p, all_sources, latest_ts, league_format: str, comps_cache: dict | None = None, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
+def _college_comps_card(rookie_entry: dict) -> str:
+    """Render the top-5 college comparables for a rookie/prospect.
+
+    ``rookie_entry`` comes from ``data/rookie_similarity_comps_cache.json``
+    (shape produced by ``rookie_similarity_chain._build_comps_cache``).
+    """
+    comps = rookie_entry.get("comparables_top5") or []
+    if not comps:
+        return ""
+    school = rookie_entry.get("school", "")
+    class_year = rookie_entry.get("class_year", "") or "—"
+    season = rookie_entry.get("query_season", "")
+    proj_yrs = rookie_entry.get("projected_career_seasons", 0)
+    proj_ppr = rookie_entry.get("projected_lifetime_fantasy_points", 0)
+    hit_rate = rookie_entry.get("nfl_hit_rate", 0)
+    n_comps = rookie_entry.get("n_comps", 0)
+    n_with_nfl = rookie_entry.get("n_comps_with_nfl", 0)
+    avg_sim = rookie_entry.get("avg_similarity", 0)
+
+    rows = []
+    for c in comps[:5]:
+        sim = c.get("similarity", 0)
+        nfl_name = c.get("nfl_display_name")
+        nfl_seasons = c.get("realized_nfl_seasons", 0)
+        nfl_ppr = c.get("realized_career_ppr", 0.0)
+        if nfl_name:
+            outcome = (
+                f"→ NFL: <strong>{_esc(nfl_name)}</strong> "
+                f"({nfl_seasons} seasons, {nfl_ppr:.0f} career PPR)"
+            )
+        else:
+            outcome = "<span style='color:var(--muted)'>did not reach NFL</span>"
+        rows.append(
+            f"<tr><td class='source-name'>{_esc(c.get('name', ''))}</td>"
+            f"<td>{c.get('season', '')}</td>"
+            f"<td>{_esc(c.get('school', ''))}</td>"
+            f"<td>{_esc(c.get('class_year') or '—')}</td>"
+            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{sim:.2f}</td>"
+            f"<td>{outcome}</td></tr>"
+        )
+    return f"""<div class="card">
+<h2 style="margin-top:0">Top 5 college comparables with realized NFL careers</h2>
+<p style="color:var(--muted);font-size:14px">
+  At <strong>{_esc(school)}</strong> as a <strong>{_esc(class_year)}</strong>
+  in {season}, this prospect's nearest college peers (z-score per-position,
+  conference-strength-adjusted), each resolved through the
+  <code>ncaa_to_nfl</code> bridge to their realized NFL career.
+</p>
+<p style="font-size:14px">
+  <strong>Projected NFL career:</strong> {proj_yrs} seasons ·
+  <strong>Projected lifetime PPR:</strong> {proj_ppr:.0f} ·
+  <strong>NFL hit rate (comp-weighted):</strong> {hit_rate*100:.0f}% ·
+  <strong>Comp pool:</strong> top {n_comps} ({n_with_nfl} reached NFL,
+  avg similarity {avg_sim:.2f})
+</p>
+<table class="breakdown-table">
+<thead><tr>
+<th>College player</th><th>Season</th><th>School</th><th>Class</th>
+<th style="text-align:right">Similarity</th><th>NFL outcome</th>
+</tr></thead>
+<tbody>{''.join(rows)}</tbody>
+</table>
+</div>
+"""
+
+
+def _build_player_page(
+    cs, p, all_sources, latest_ts, league_format: str,
+    comps_cache: dict | None = None,
+    rookie_comps_cache: dict | None = None,
+    formats_available: tuple[str, ...] = ("sf_ppr",),
+) -> str:
     try:
         breakdown = json.loads(cs.breakdown_json) if cs.breakdown_json else {}
     except Exception:
         breakdown = {}
     comps_cache = comps_cache or {}
+    rookie_comps_cache = rookie_comps_cache or {}
     comp_entry = comps_cache.get(p.gsis_id) if p.gsis_id else None
+    # Match rookie cache by gsis_id reverse-lookup through the bridge —
+    # the rookie cache is keyed by cfb_player_id, so we look up matches
+    # by NFL gsis_id when available, or by name as a fallback.
+    rookie_entry = None
+    if rookie_comps_cache:
+        # Build a one-shot lookup by gsis_id by walking the cache; cheap
+        # enough since this is per-player-page rendering and the cache
+        # is small.
+        for entry in rookie_comps_cache.values():
+            # The rookie cache doesn't carry the NFL gsis_id directly;
+            # the bridge does. The composite-row p.gsis_id should map
+            # via the source's `gsis_id` field on the emitted ranking,
+            # but we keep the lookup simple here using player name as a
+            # last-resort match.
+            if entry.get("player_name") and entry["player_name"].lower() == (p.full_name or "").lower():
+                rookie_entry = entry
+                break
 
     # Build breakdown rows, sorted by weight (highest contribution first)
     sources_by_slug = {s.slug: s for s in all_sources}
@@ -1976,6 +2111,7 @@ def _build_player_page(cs, p, all_sources, latest_ts, league_format: str, comps_
 </div>
 
 {_similar_players_card(comp_entry) if comp_entry else ''}
+{_college_comps_card(rookie_entry) if rookie_entry else ''}
 
 <div class="card">
 <h2 style="margin-top:0">Source breakdown</h2>
@@ -2052,6 +2188,8 @@ Run the launcher again — make sure the sync step completes successfully.</div>
         # once here, used for both rankings hover tooltips and per-player
         # pages below.
         comps_cache = load_comps_cache()
+        # v0.16.0: rookie college→NFL comparables (PR #16).
+        rookie_comps_cache = load_rookie_comps_cache()
 
         # Sources & methodology + league + per-player pages render once
         # against the primary format. The format toggle in the header
@@ -2074,7 +2212,12 @@ Run the launcher again — make sure the sync step completes successfully.</div>
             suffix, _label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))
 
             (out_root / f"rankings{suffix}.html").write_text(
-                _build_rankings(fmt_rows, fmt_ts, fmt, comps_cache=comps_cache, formats_available=formats_available),
+                _build_rankings(
+                    fmt_rows, fmt_ts, fmt,
+                    comps_cache=comps_cache,
+                    rookie_comps_cache=rookie_comps_cache,
+                    formats_available=formats_available,
+                ),
                 encoding="utf-8",
             )
 
@@ -2115,7 +2258,12 @@ Run the launcher again — make sure the sync step completes successfully.</div>
         for cs, p in rows:
             slug = _slugify(p.full_name, p.id)
             (out_root / "players" / f"{slug}.html").write_text(
-                _build_player_page(cs, p, sources, latest_ts, league_format, comps_cache=comps_cache, formats_available=formats_available),
+                _build_player_page(
+                    cs, p, sources, latest_ts, league_format,
+                    comps_cache=comps_cache,
+                    rookie_comps_cache=rookie_comps_cache,
+                    formats_available=formats_available,
+                ),
                 encoding="utf-8"
             )
 

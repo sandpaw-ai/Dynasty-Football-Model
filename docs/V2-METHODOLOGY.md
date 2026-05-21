@@ -1,10 +1,13 @@
-# Dynasty Football Model — v2.0 Methodology
+# Dynasty Football Model — v2.0 + v2.1 Methodology
 
-> **TL;DR.** v1.x ranked players by per-stat z-score shape. v2.0 ranks
-> players by the fantasy points they actually produce under modern scoring,
-> comping them to historical players whose fp/g curves match. Elite-fp QBs
-> (Allen, Hurts, Lamar, Daniels, Mahomes) cluster at the top regardless
-> of style.
+> **TL;DR.** v1.x ranked players by per-stat z-score shape. v2.0 replaced
+> the engine with a fantasy-point-arc methodology that ranks players by
+> the fantasy points they actually produce under modern scoring, comping
+> them to historical players whose fp/g curves match. v2.1 adds a 1-NFL-
+> season ROOKIE engine and a cohort-aware dispatcher so 2025 draft class
+> players appear in the main rankings with proper rookie-comp
+> projections, rather than being noise-matched against full-career
+> retired veterans.
 
 ---
 
@@ -181,9 +184,94 @@ half_ppr, std) are produced by reading per-format fp totals directly
 from the pre-computed arc corpus and recomputing positional VORP
 baselines under the target roster rules. No re-scoring needed.
 
+## v2.1 — 1-NFL-season rookie engine + cohort dispatcher
+
+v2.0's cumulative-arc engine assumed every active player had 2+ seasons
+of NFL data to vectorize. With the 2025 corpus refresh, this assumption
+broke for the 2025 draft class — they had ONE completed NFL season,
+which produced noisy comp matches when compared against 10-data-point
+veteran arc vectors.
+
+v2.1 introduces a three-tier cohort dispatcher in
+`engine.similarity_v1.run_engine`:
+
+```
+for ap in active_players:
+    n_completed = count(season.games >= 4 for season in ap)
+    if n_completed == 0:                      # 2026 draft class
+        skip  # deferred to v2.2 college chain
+    elif n_completed == 1 and is_recent:      # 2025 draft class
+        project via rookie_nfl_fp_arc
+    else:                                     # 2+ seasons
+        project via fantasy_arc_v2 (v2.0)
+```
+
+### 1-NFL-season rookie engine (`rookie_nfl_fp_arc.py`)
+
+The rookie engine builds an 11-dim profile vector from the player's
+rookie-year stats:
+
+| Dim | Feature | Weight | Notes |
+|---:|---|---:|---|
+| 0 | rookie_fp_per_game | 8.0 | Dominant tier separator |
+| 1 | rookie_games / 17 | 0.1 | Durability |
+| 2 | passing_yards / G | 0.0005 | Per-stat differentiator (low weight; magnitude is large) |
+| 3 | rushing_yards / G | 0.003 | Differentiates style |
+| 4 | receiving_yards / G | 0.003 | Differentiates style |
+| 5 | passing_TDs / G | 0.2 | |
+| 6 | rushing_TDs / G | 0.3 | Fantasy-significant (6 pts each) |
+| 7 | receiving_TDs / G | 0.3 | |
+| 8 | completion_rate (QB only) | 0.1 | QB tier signal |
+| 9 | age_at_rookie_year | 0.2 | |
+| 10 | position_encoded | 0.0 | Informational; position-filter applies upstream |
+
+The corpus contains every historical NFL player's actual rookie
+season (filtered to games ≥ 4, rookie_season ≥ 1999, has at least one
+post-rookie season). For each entry, the engine pre-computes
+`post_rookie_total_fp` — used for the **breakout-bias re-ranking** that
+tilts top-K comp selection toward proven year-2+ producers.
+
+Projection: `max(comp_weighted, peak_anchored) × confidence`
+* `comp_weighted` — similarity-weighted sum of comps' realised year-2+
+  fp (5%/yr discount).
+* `peak_anchored` — `rookie_fp/G × 17 × expected_career_seasons ×
+  position_discount`. Position horizons: QB 8, RB 8.5, WR 9.5, TE 9.
+  Discounts: QB 0.72 (higher rookie-projection variance), RB/WR/TE 0.85.
+* `confidence = max(0.35, min(games/10, 1.0))`. Limited-usage rookies
+  (Travis Hunter, 7G) get 0.7 confidence; cup-of-coffee rookies (3G)
+  floor at 0.35.
+
+### Cohort definitions
+
+* **0 completed NFL seasons**: 2026 draft class — drafted but not yet
+  played any NFL games (Jeremiyah Love and others). EXCLUDED from main
+  rankings; deferred to v2.2's college chain.
+* **1 completed NFL season**: 2025 draft class — played one NFL season
+  with games ≥ 4 (Jaxson Dart, Ashton Jeanty, Cam Ward, Tetairoa
+  McMillan, Travis Hunter). Use `rookie_nfl_fp_arc`. Travis Hunter
+  at 7 G still counts as "1 completed season" — his durability v[1]
+  reflects the games-played ratio.
+* **2+ completed NFL seasons**: 2024 class and earlier — use the v2.0
+  cumulative-arc engine. Jayden Daniels (17 G 2024 + 7 G 2025) counts
+  as 2 completed seasons.
+
+### Why not chain to college?
+
+v2.1 explicitly does NOT chain current 2025 rookies through their
+college fp profiles to historical college players. That's v2.2's scope.
+The 2025 class HAS NFL stats now — the 1-season-rookie engine projects
+from NFL-data comps, which is more predictive than a college-chain
+relay through historical college→NFL transitions.
+
+The college chain remains the right tool for 2026 draft class (0 NFL
+seasons). v2.2 will surface them on a separate `/prospects.html` page.
+
+---
+
 ## Validation
 
-See `tests/test_v2_fantasy_arc.py` (25 tests, all passing) for the
+See `tests/test_v2_fantasy_arc.py` (25 tests, all passing) and
+`tests/test_v2_1_rookie_nfl.py` (19 tests, all passing) for the
 pinned methodology invariants:
 
 - **Top-of-board**: Allen / Hurts / Lamar / Daniels in elite QB cluster.
@@ -230,4 +318,7 @@ pinned methodology invariants:
     `test_pocket_passers_unchanged`).
   - `tests/test_v1_2_fantasy_weighted_knn.py` — module-level skip;
     methodology entirely replaced.
-  - `tests/test_v2_fantasy_arc.py` — new, 25 tests, all passing.
+  - `tests/test_v2_fantasy_arc.py` — v2.0 invariants, 25 tests, all passing
+    against `current_season=2025` (refreshed corpus).
+  - `tests/test_v2_1_rookie_nfl.py` — v2.1 cohort dispatcher + rookie
+    engine, 19 tests, all passing.

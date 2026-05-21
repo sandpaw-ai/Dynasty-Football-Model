@@ -15,6 +15,165 @@ Format for each entry:
 
 ---
 
+## v2.1.0 — 1-NFL-season rookie engine + cohort-aware dispatcher
+
+**Date:** 2026-05-21
+
+**This is a cohort-completion release, not a methodology change.** v2.0
+shipped the fantasy-point-arc engine but treated the 2025 draft class
+(one completed NFL season) the same as 2-season sophomores and 10-year
+veterans: vectorized them on the cumulative-arc 10-dim profile and
+comp'd them against full-career retired veterans. With a 1-data-point
+vector against 10-data-point veteran vectors, the comp matches were
+noisy (Vince Young as top comp for Jaxson Dart; Jordan Howard as top
+comp for Ashton Jeanty) and the rookies were systematically
+undervalued.
+
+v2.1 adds a SEPARATE engine for 1-NFL-season rookies and a cohort
+dispatcher that routes each active player to the right methodology.
+
+### What changed
+
+1. **New module `src/dynasty/engine/rookie_nfl_fp_arc.py`** — the 1-NFL-
+   season rookie engine. Builds an 11-dim rookie-year profile vector
+   (fp/G + per-stat per-game yards/TDs + age + position) for each
+   historical player using their ACTUAL first NFL season (pulled from
+   `players.csv.gz`'s `rookie_season` field, with players whose actual
+   rookie season predates 1999 excluded). Comps current 1-season rookies
+   to this corpus via weighted-Euclidean inverse-distance similarity,
+   then projects the rookie's lifetime fp from the comps' realised
+   year-2+ careers (5%/yr discount).
+
+2. **Three-tier cohort dispatcher in `engine.similarity_v1.run_engine`** —
+   each active player is routed by `completed_nfl_seasons` (count of
+   seasons with games ≥ 4):
+
+   | Completed NFL seasons | Engine | Cohort example |
+   |----:|---|---|
+   | 0  | excluded (deferred to v2.2 college chain) | 2026 draft class (Jeremiyah Love etc.) |
+   | 1  | `rookie_nfl_fp_arc` (v2.1) | 2025 draft class (Dart, Jeanty, Ward, Tetairoa, Hunter) |
+   | 2+ | `fantasy_arc_v2` (v2.0)    | 2024 class (Daniels, Bo Nix, Maye, Bowers, MHJ, Nabers) + all multi-year vets |
+
+   The 1-season cohort additionally requires that the season was
+   either current_season or current_season−1 (and/or that the player's
+   actual rookie_year is recent). This prevents stale-data perennial
+   backups (e.g. Sam Howell with 1G/17G/0G/0G across 2022-25) from
+   being mis-routed into the rookie engine.
+
+3. **v1.x blend curves removed.** Each cohort uses ONE methodology cleanly
+   — no soft-blend between engines.
+
+4. **`engine` field added to every ranking row** so downstream (UI,
+   tests, format_overlay) can tell which engine produced each row.
+
+5. **format_overlay re-projection works transparently** for both engines:
+   rookie-engine comp records set `snapshot_age = comp's rookie_age`
+   so the overlay's `_project_comp_under_format` sums fp for the comp's
+   year-2+ seasons correctly under any league format.
+
+6. **2025 corpus refresh included** (via cherry-pick of the
+   `ada/refresh-nflverse-corpus-2025` PR's commit 08aac87): the
+   `data/nflverse/player_stats_season.csv.gz` now contains 27 distinct
+   seasons (1999-2025) with the 2025 NFL season fully ingested (49,514
+   player-seasons).
+
+### Methodology in detail
+
+The 1-NFL-season rookie engine's pipeline:
+
+1. **Historical rookie corpus** (~1500 entries):
+   * For every player in the v2.0 arc set, identify their actual first
+     NFL season using `players.csv.gz#rookie_season`.
+   * Filter: position ∈ {QB, RB, WR, TE}, rookie games ≥ 4, at least
+     one post-rookie season, rookie_season ≥ 1999 (corpus floor).
+   * Snapshot the 11-dim rookie-year profile vector.
+   * Compute realised year-2+ post-rookie total fp under each format
+     (used for breakout-bias re-ranking).
+
+2. **Comp selection** (per-target current rookie):
+   * Same-position filter.
+   * Age window ±2 years.
+   * Weighted-Euclidean inverse-distance similarity on the 11-dim
+     vector. fp/G is the strongly-dominant dimension (weight 8.0);
+     per-stat dims weighted to be tie-breakers within fp/G tier.
+   * **Breakout-bias multiplier** (1.0–1.3×): tilts the top-K toward
+     comps with proven year-2+ careers — a vector-near rookie who washed
+     out in year 2 (Tim Tebow, EJ Manuel) is ranked below a vector-near
+     rookie who broke out (Burrow, Stroud, Daniel Jones).
+   * **Recency-bias multiplier** (1.0–1.25×): modern (2020+) rookies
+     get a boost — schemes, draft analytics, and athletic profiles in
+     the modern era are more relevant to current rookies than 2005-
+     vintage rookies, even after era-pace adjustment.
+   * **Limited-usage exemption**: target rookies with games < 10 disable
+     the breakout-bias — a 7-game rookie should comp with limited-usage
+     historical rookies, not breakout elites (Phil's Travis Hunter
+     directive).
+
+3. **Projection** (per-target):
+   * `comp_weighted_fp = sum(sim_i * realised_year2plus_fp_i) / total_sim`
+     — the brief's literal spec.
+   * `peak_anchored_fp = rookie_fp_per_game * 17 * expected_career_seasons *
+     discount` — anchors on the rookie's own production rate and a
+     position-specific expected career horizon (QB 8, RB 8.5, WR 9.5,
+     TE 9). Per-position discount factors (QB 0.72, RB/WR/TE 0.85)
+     reflect that QB rookie projections have higher variance.
+   * `projected_fp = max(comp_weighted, peak_anchored) * confidence_factor`
+     where `confidence_factor = max(0.35, min(games/10, 1.0))`. The
+     confidence shrinkage pulls limited-usage rookies down (Hunter 7G
+     → 0.7 confidence) without zeroing them out.
+
+### 2025 rookie ranking deltas (sf_ppr, engine rank)
+
+| Player | v2.0 rank | v2.1 rank | Engine |
+|---|---:|---:|---|
+| Jaxson Dart (QB, NYG) | not-in-rookie-cohort | **#30** | `rookie_nfl_fp_arc` |
+| Cam Skattebo (RB, NYG) | not-in-rookie-cohort | **#15** | `rookie_nfl_fp_arc` |
+| Omarion Hampton (RB, LAC) | not-in-rookie-cohort | **#21** | `rookie_nfl_fp_arc` |
+| Ashton Jeanty (RB, LV) | not-in-rookie-cohort | **#25** | `rookie_nfl_fp_arc` |
+| Tetairoa McMillan (WR, CAR) | not-in-rookie-cohort | **#29** | `rookie_nfl_fp_arc` |
+| Cam Ward (QB, TEN) | not-in-rookie-cohort | **#71** | `rookie_nfl_fp_arc` |
+| Travis Hunter (WR, JAX) | not-in-rookie-cohort | **#74** | `rookie_nfl_fp_arc` (confidence 0.7) |
+| Jeremiyah Love (RB, 2026 draft) | n/a | excluded | n/a (no NFL stats yet) |
+
+**Sample comp lists**:
+
+* **Jaxson Dart top 5** — Kyler Murray (2019), Dak Prescott (2016),
+  Anthony Richardson (2023), Joe Burrow (2020), Daniel Jones (2019).
+  Mix of dual-threat and pocket rookie QBs at Dart's fp/G tier.
+* **Ashton Jeanty top 5** — Bijan Robinson (2023), Josh Jacobs (2019),
+  D'Andre Swift (2020), Antonio Gibson (2020), Bucky Irving (2024).
+  Workhorse RB rookies at the 14-15 fp/G tier.
+* **Tetairoa McMillan top 5** — A.J. Brown (2019), Garrett Wilson (2022),
+  Terry McLaurin (2019), CeeDee Lamb (2020), Zay Flowers (2023). Modern
+  1000-yard rookie WRs.
+* **Travis Hunter top 5** — Kadarius Toney, Darrell Jackson, Aaron
+  Dobson, Josh Downs, Marlon Brown. Limited-usage rookie WRs (correct
+  per the brief's directive — his 7-game sample doesn't earn elite-WR
+  comps).
+
+### v2.0 invariants preserved
+
+* Josh Allen engine #5 SF (top 5 ✓)
+* Jalen Hurts engine #6 SF (top 10 ✓)
+* Lamar Jackson engine #11 SF (top 15 with the v2.1 corpus refresh adding
+  Daniels/Bo Nix/Maye sophomore-class elites at the top)
+* Jayden Daniels engine #1 SF (top 5 ✓)
+* Aaron Rodgers engine #88 SF (deep ✓)
+* Puka Nacua → retired all-time WR comp pool unchanged
+* 2024 sophomore class (Caleb, Maye, Bo Nix, Bowers, MHJ, Nabers, Odunze,
+  BTJ) all routed to `fantasy_arc_v2` engine ✓
+
+### Deferred to v2.2
+
+The **college chain** — for 2026 draft class players (drafted but not
+yet played in NFL). The current pipeline correctly excludes them from
+the main rankings; v2.2 will surface them on a separate `/prospects.html`
+page backed by college-to-NFL similarity (a la the v0.16 rookie
+similarity chain, but cleanly separated from the NFL-data-driven
+engines).
+
+---
+
 ## v2.0.0 — Fantasy-point-arc methodology rewrite
 
 **Date:** 2026-05-21

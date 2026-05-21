@@ -86,6 +86,15 @@ from .fantasy_arc_similarity import (
     project_remaining as arc_project_remaining,
     project_player as arc_project_player,
 )
+from .rookie_nfl_fp_arc import (
+    FULL_CONFIDENCE_GAMES,
+    POSITION_ENCODING as ROOKIE_POSITIONS,
+    RookieCompMatch,
+    RookieProfile,
+    RookieProjectionResult,
+    build_rookie_corpus,
+    project_rookie,
+)
 from ..scoring_rules import LEAGUE_SCORING
 
 # ---------------------------------------------------------------------------
@@ -480,8 +489,81 @@ def _comp_tier_label(top_comp: CareerArc, top_comp_career_fp: float) -> str:
     return f"{tier} ({top_comp.name})"
 
 
+def _completed_nfl_seasons(career: PlayerCareer) -> int:
+    """Number of completed NFL seasons (games >= MIN_GAMES_PER_SEASON).
+
+    A "partial current season" (the in-progress year, or an injury-shortened
+    rookie year < 4 games) is NOT counted as completed. This drives the v2.1
+    cohort dispatcher: 1 = rookie engine, 2+ = v2.0 cumulative engine.
+
+    Note: the v2.0 corpus loader (load_corpus) already filters seasons with
+    games < MIN_GAMES_PER_SEASON=4, so every season on the career counts.
+    Travis Hunter (7G) and Malik Nabers (4G in 2024) DO count as 1
+    completed rookie season because they meet the 4-game floor.
+    """
+    return sum(1 for s in career.seasons if s.games >= MIN_GAMES_PER_SEASON)
+
+
+def _raw_stats_by_pid_season(careers: Dict[str, PlayerCareer]) -> Dict[Tuple[str, int], Dict[str, float]]:
+    """Pid+season → raw stat-line dict. Used by rookie_nfl_fp_arc to read
+    rookie-year per-category yards/TDs (the fp/G dimension comes from the
+    era-pace-adjusted arc corpus, but the per-category vector dims come
+    from raw stats).
+    """
+    out: Dict[Tuple[str, int], Dict[str, float]] = {}
+    for c in careers.values():
+        for s in c.seasons:
+            out[(c.player_id, s.season)] = s.stats
+    return out
+
+
+def _rookie_comp_records(
+    comps: Sequence[RookieCompMatch], league_format: str,
+) -> List[Dict]:
+    """Convert RookieCompMatch list to the comp-record dict shape that
+    format_overlay + report.py expect. Sets snapshot_age = comp's
+    rookie_age so that format_overlay's re-projection sums fp for
+    seasons at age > rookie_age (i.e. year 2+).
+    """
+    records: List[Dict] = []
+    for m in comps:
+        arc = m.profile.arc
+        # post-age stats projected from comp's year-2+
+        pts = 0.0
+        n_seasons = 0
+        for s in arc.career_arc:
+            if s.season <= m.profile.rookie_season:
+                continue
+            if s.games < MIN_GAMES_PER_SEASON:
+                continue
+            decay = (1.0 - DISCOUNT_PER_YEAR) ** n_seasons
+            pts += s.fp_total.get(league_format, 0.0) * decay
+            n_seasons += 1
+        records.append({
+            "player_id": arc.player_id,
+            "name": arc.name,
+            "position": arc.position,
+            "last_season": arc.last_season,
+            "similarity": round(float(m.similarity), 4),
+            "career_ppr": round(arc.career_total_fp.get(league_format, 0.0), 1),
+            "post_age_projected_pts": round(pts, 1),
+            "post_age_seasons": n_seasons,
+            # snapshot_age = comp's rookie age so format_overlay re-projects
+            # year-2+ correctly under any format.
+            "snapshot_age": m.profile.rookie_age,
+            "rookie_year": m.profile.rookie_season,
+            "peak_3yr_fp_per_game": round(arc.peak_3yr_fp_per_game.get(league_format, 0.0), 2),
+            "peak_season_fp_per_game": round(arc.peak_season_fp_per_game.get(league_format, 0.0), 2),
+            "career_arc_fp_per_game": [
+                {"age": s.age, "fp_per_game": round(s.fp_per_game.get(league_format, 0.0), 2)}
+                for s in arc.career_arc
+            ],
+        })
+    return records
+
+
 def run_engine(
-    current_season: int = 2024,
+    current_season: int = 2025,
     retired_through: int = RETIRED_THROUGH_SEASON,
     scoring: Optional[Dict[str, float]] = None,
     top_k: int = TOP_K_COMPS,
@@ -548,6 +630,27 @@ def run_engine(
         if _is_active(c, current_season=current_season)
     ]
 
+    # v2.1: build the historical rookie corpus from the FULL arc set
+    # (long-arc/retired vets + active vets with completed rookie years).
+    # Each entry is a player's actual rookie-year profile vector +
+    # reference to their full v2.0 arc (for year-2+ projection).
+    #
+    # Exclude the current 2025 draft class from the corpus — we don't
+    # want current 1-season rookies comping against each other (they
+    # have no year-2+ realised career yet).
+    raw_stats = _raw_stats_by_pid_season(careers)
+    rookie_season_by_pid = {
+        pid: c.rookie_season for pid, c in careers.items()
+        if c.rookie_season is not None
+    }
+    rookie_corpus = build_rookie_corpus(
+        arcs=arcs.values(),
+        raw_stats_by_pid_season=raw_stats,
+        rookie_season_by_pid=rookie_season_by_pid,
+        league_format=BASE_FORMAT,
+        exclude_rookie_seasons={current_season},
+    )
+
     rankings: List[Dict] = []
     comps_map: Dict[str, List[Dict]] = {}
     CURRENT_ERA = 4
@@ -559,6 +662,130 @@ def run_engine(
         last_season = ap.seasons[-1]
         age_now = last_season.age
 
+        # ------------------------------------------------------------------
+        # v2.1 cohort dispatcher — by completed NFL seasons.
+        #   0 seasons: 2026 draft class (drafted, not yet played). EXCLUDED
+        #              from main rankings; deferred to v2.2's college chain.
+        #   1 season:  2025 draft class (one NFL season under their belt).
+        #              Use the 1-NFL-season rookie engine (rookie_nfl_fp_arc).
+        #   2+ seasons: 2024 class and earlier. Use the v2.0 cumulative-arc
+        #              engine — their data is rich enough to comp against
+        #              full-career retired veterans.
+        # ------------------------------------------------------------------
+        n_completed = _completed_nfl_seasons(ap)
+        if n_completed == 0:
+            # Should not happen — load_corpus already filters seasons with
+            # games < MIN_GAMES_PER_SEASON, so any active player with at
+            # least one row in careers has >= 1 completed season. Kept as
+            # a safety net for future schema changes.
+            continue
+
+        # v2.1 rookie-engine eligibility: must have EXACTLY 1 completed
+        # season AND that season must be the player's actual rookie
+        # year (i.e. the draft class within the last ~2 NFL years). This
+        # avoids routing perennial backups (Sam Howell: 17G in 2023,
+        # benched 2024-25) into the rookie engine — their "1 completed
+        # season" isn't a recent rookie campaign.
+        is_recent_rookie = False
+        if n_completed == 1:
+            rookie_year = ap.rookie_season
+            first_completed = target_arc.career_arc[0].season
+            # Treat the player as a v2.1 rookie if EITHER:
+            #   * their first completed season is the current or previous
+            #     NFL season (most common case — 2025 draft class), OR
+            #   * their actual draft year is within the last 2 seasons
+            #     AND they only played 1 completed year (handles late
+            #     bloomers who debuted in year 2 like Brock Purdy did,
+            #     though Purdy played enough that he's not in this bucket).
+            if first_completed >= current_season - 1:
+                is_recent_rookie = True
+            elif rookie_year is not None and rookie_year >= current_season - 1:
+                is_recent_rookie = True
+
+        if is_recent_rookie:
+            # ---- v2.1 1-NFL-season rookie engine ----
+            rookie_season = target_arc.career_arc[0]
+            rookie_stats = raw_stats.get(
+                (ap.player_id, rookie_season.season), {}
+            )
+            rproj = project_rookie(
+                target_arc=target_arc,
+                target_rookie_stats=rookie_stats,
+                target_rookie_age=rookie_season.age,
+                target_rookie_games=rookie_season.games,
+                rookie_corpus=rookie_corpus,
+                league_format=BASE_FORMAT,
+                k=top_k,
+            )
+            if not rproj.comps:
+                continue
+            weighted_points = rproj.projected_year_2_plus_fp
+            weighted_seasons = rproj.projected_year_2_plus_seasons
+
+            # No career-length lift for rookies — too small a sample
+            # to know if they're mobile/dual-threat (also, the comp pool
+            # already implicitly captures style: a mobile rookie's comps
+            # are mobile rookies).
+            qb_style = STYLE_POCKET
+            qb_rypg = 0.0
+            lift_fp = 1.0
+            lift_years = 1.0
+            if ap.position == "QB":
+                qb_style = style_for_career(ap)
+                qb_rypg = career_rushing_rate(ap)
+
+            top_comp = rproj.comps[0].profile.arc
+            comp_records = _rookie_comp_records(rproj.comps, BASE_FORMAT)
+            rankings.append({
+                "player_id": ap.player_id,
+                "name": ap.name,
+                "position": ap.position,
+                "age": age_now,
+                "last_season": ap.last_season,
+                "production_score": round(weighted_points, 1),
+                "projected_years_remaining": round(weighted_seasons, 1),
+                "top_comp": top_comp.name,
+                "top_comp_id": top_comp.player_id,
+                "comp_tier": _comp_tier_label(
+                    top_comp, top_comp.career_total_fp.get(BASE_FORMAT, 0.0),
+                ),
+                "n_comps": len(rproj.comps),
+                "qb_style": qb_style if ap.position == "QB" else None,
+                "qb_career_rypg": round(qb_rypg, 1) if ap.position == "QB" else None,
+                "career_length_lift": round(lift_years, 3),
+                "career_length_lift_fp": round(lift_fp, 3),
+                # v2.0 projection diagnostics — rookie engine has its own
+                # comp-weighted vs peak-anchored split (peak-anchored =
+                # rookie_rate × expected_horizon × discount).
+                "comp_weighted_fp": round(rproj.comp_weighted_fp * rproj.confidence_factor, 1),
+                "peak_anchored_fp": round(rproj.peak_anchored_fp * rproj.confidence_factor, 1),
+                "projection_path": (
+                    "rookie_peak_anchored"
+                    if rproj.peak_anchored_fp > rproj.comp_weighted_fp
+                    else "rookie_comp_weighted"
+                ),
+                # v2.1 rookie-engine fields
+                "engine": "rookie_nfl_fp_arc",
+                "rookie_year": rproj.rookie_year,
+                "rookie_games": rproj.rookie_games,
+                "rookie_fp_per_game": round(rproj.rookie_fp_per_game, 2),
+                "rookie_confidence_factor": round(rproj.confidence_factor, 3),
+                # Arc-summary fields for the UI (rookies have only 1 season,
+                # so peak == single-season == career_avg).
+                "peak_3yr_fp_per_game": round(target_arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+                "peak_season_fp_per_game": round(target_arc.peak_season_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+                "career_avg_fp_per_game": round(target_arc.career_avg_fp_per_game.get(BASE_FORMAT, 0.0), 2),
+                "career_total_fp_to_date": round(target_arc.career_total_fp.get(BASE_FORMAT, 0.0), 1),
+                # cohort fields retained for downstream readers
+                "style_cohort": None,
+                "cohort_pool_size": None,
+                "cohort_widened": None,
+                "cohort_styles_used": None,
+            })
+            comps_map[ap.player_id] = comp_records
+            continue
+
+        # ---- v2.0 cumulative-arc engine (2+ NFL seasons) ----
         proj = arc_project_player(
             target=target_arc,
             long_arc_corpus=long_arc_arcs,
@@ -659,6 +886,8 @@ def run_engine(
             "peak_season_fp_per_game": round(target_arc.peak_season_fp_per_game.get(BASE_FORMAT, 0.0), 2),
             "career_avg_fp_per_game": round(target_arc.career_avg_fp_per_game.get(BASE_FORMAT, 0.0), 2),
             "career_total_fp_to_date": round(target_arc.career_total_fp.get(BASE_FORMAT, 0.0), 1),
+            # v2.1 dispatcher field: which engine produced this row
+            "engine": "fantasy_arc_v2",
             # v1.2 cohort fields retained as None for downstream readers
             "style_cohort": None,
             "cohort_pool_size": None,
@@ -703,8 +932,8 @@ def _persist(result: EngineResult, current_season: int) -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at_season": current_season,
-        "engine_version": "v2.0",
-        "methodology": "fantasy-point-arc",
+        "engine_version": "v2.1",
+        "methodology": "three-tier cohort dispatcher (rookie-NFL + cumulative-arc)",
         "n_active": len(result.active_players),
         "n_long_arc": len(result.long_arc_corpus),
         "n_retired": len(result.long_arc_corpus),  # back-compat

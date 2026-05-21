@@ -63,6 +63,15 @@ from .career_length_era import (
     career_rushing_rate,
     style_for_career,
 )
+from .style_cohort import (
+    COHORTS,
+    MIN_COHORT_COMPS,
+    cohort_for,
+    cohort_summary,
+    index_corpus_by_cohort,
+    widen_pool,
+)
+from ..scoring_rules import LEAGUE_SCORING
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -101,8 +110,10 @@ LONG_ARC_VETERAN_SEASONS = 6
 # Skill positions we model.
 SKILL_POSITIONS: Tuple[str, ...] = ("QB", "RB", "WR", "TE")
 
-# Per-position feature set: per-game rate stats only (the era z-score lives in
-# rate-space so volume differences from era inflation are normalised away).
+# Per-position raw-stat feature set (kept for back-compat / era-pace plumbing).
+# v1.2 replaces this with FANTASY-POINT-PER-CATEGORY vectors (see
+# FANTASY_CATEGORIES below) so cosine similarity weighs each stat by its
+# scoring value under the active format, not by raw counting volume.
 FEATURES: Dict[str, Tuple[str, ...]] = {
     "QB": (
         "passing_yards", "passing_tds", "interceptions",
@@ -121,6 +132,84 @@ FEATURES: Dict[str, Tuple[str, ...]] = {
     ),
 }
 
+# v1.2.0 fantasy-point-weighted vector categories.
+#
+# Each entry is a (category_label, stat_name, scoring_key) triplet. The vector
+# is a *fantasy-points-per-game-by-sub-category* vector under the active
+# format: each component = (raw_stat_per_game * scoring_coef[scoring_key]).
+# Categories that don't apply to a position simply aren't in the position's
+# tuple. Each sub-category gets its OWN era-z-norm so cosine similarity
+# matches players on the *shape* of their fantasy production, not the gross
+# magnitude.
+#
+# Why fantasy-weighted: under sf_ppr 1 passing yard is worth 0.04 fp and 1
+# rushing TD is worth 6 fp — equal-weighting raw-stat z-scores buries that
+# ~150x scoring spread. Building the vector in fantasy-point space makes
+# cosine similarity match players on what they produce for fantasy scoring,
+# not on which counting-stat columns they fill.
+#
+# Why keep sub-categories (passing_yards / passing_tds / interceptions)
+# rather than collapsing to one number per category: dimensionality. A 2D
+# vector (passing, rushing) for QBs produces near-degenerate cosine — every
+# pocket passer sits on the same ray. Keeping the sub-components gives the
+# KNN enough room to distinguish "high-TD pocket" from "high-volume pocket".
+FANTASY_FEATURES: Dict[str, Tuple[Tuple[str, str, str], ...]] = {
+    "QB": (
+        ("passing", "passing_yards", "passing_yards"),
+        ("passing", "passing_tds",   "passing_tds"),
+        ("passing", "interceptions", "interceptions"),
+        ("rushing", "rushing_yards", "rushing_yards"),
+        ("rushing", "rushing_tds",   "rushing_tds"),
+    ),
+    "RB": (
+        ("rushing",   "rushing_yards",   "rushing_yards"),
+        ("rushing",   "rushing_tds",     "rushing_tds"),
+        ("receiving", "receptions",      "receptions"),
+        ("receiving", "receiving_yards", "receiving_yards"),
+        ("receiving", "receiving_tds",   "receiving_tds"),
+    ),
+    "WR": (
+        ("receiving", "receptions",      "receptions"),
+        ("receiving", "receiving_yards", "receiving_yards"),
+        ("receiving", "receiving_tds",   "receiving_tds"),
+        ("rushing",   "rushing_yards",   "rushing_yards"),  # jet-sweep trickle
+        ("rushing",   "rushing_tds",     "rushing_tds"),
+    ),
+    "TE": (
+        ("receiving", "receptions",      "receptions"),
+        ("receiving", "receiving_yards", "receiving_yards"),
+        ("receiving", "receiving_tds",   "receiving_tds"),
+    ),
+}
+
+# Coarse category list per position (used for cohort thresholds and
+# diagnostic readouts only).
+FANTASY_CATEGORIES: Dict[str, Tuple[str, ...]] = {
+    "QB": ("passing", "rushing"),
+    "RB": ("rushing", "receiving"),
+    "WR": ("receiving", "rushing"),
+    "TE": ("receiving",),
+}
+
+# Map category -> (stat, scoring_key) pairs (used by style_cohort to compute
+# career fantasy points per coarse category, e.g. for rushing_fp_share).
+_CATEGORY_STATS: Dict[str, Tuple[Tuple[str, str], ...]] = {
+    "passing": (
+        ("passing_yards", "passing_yards"),
+        ("passing_tds", "passing_tds"),
+        ("interceptions", "interceptions"),
+    ),
+    "rushing": (
+        ("rushing_yards", "rushing_yards"),
+        ("rushing_tds", "rushing_tds"),
+    ),
+    "receiving": (
+        ("receptions", "receptions"),
+        ("receiving_yards", "receiving_yards"),
+        ("receiving_tds", "receiving_tds"),
+    ),
+}
+
 # Fantasy scoring (SF-PPR default).
 DEFAULT_SCORING = {
     "passing_yards":   0.04,   # 1 pt / 25 yds
@@ -132,6 +221,11 @@ DEFAULT_SCORING = {
     "receiving_yards": 0.10,
     "receiving_tds":   6.0,
 }
+
+# Format used for the BASE production score (the engine's master ranking).
+# Per the v1.2 brief this is sf_ppr (the primary site format). Format overlays
+# reproject under their own scoring keys via format_overlay.apply_overlay.
+BASE_FORMAT = "sf_ppr"
 
 # Discount future seasons.
 DISCOUNT_PER_YEAR = 0.05
@@ -382,33 +476,97 @@ def load_corpus(
 # Era-z-scoring
 # ---------------------------------------------------------------------------
 
+def _season_category_fp_per_game(
+    season: "PlayerSeason",
+    category: str,
+    scoring_coefs: Dict[str, float],
+) -> float:
+    """Compute fantasy points produced in ``category`` per game for one season.
+
+    Categories are: ``passing``, ``rushing``, ``receiving``. Uses
+    ``scoring_coefs`` (a per-format scoring dict from
+    ``scoring_rules.LEAGUE_SCORING``) to weigh each stat by its fantasy
+    scoring value.
+    """
+    pairs = _CATEGORY_STATS.get(category, ())
+    total = 0.0
+    for stat, scoring_key in pairs:
+        coef = float(scoring_coefs.get(scoring_key, 0.0))
+        total += season.stats.get(stat, 0.0) * coef
+    games = max(season.games, 1)
+    return total / games
+
+
+def _season_subfeature_fp_per_game(
+    season: "PlayerSeason",
+    stat: str,
+    scoring_key: str,
+    scoring_coefs: Dict[str, float],
+) -> float:
+    """Per-game fantasy points contributed by a single sub-feature stat."""
+    coef = float(scoring_coefs.get(scoring_key, 0.0))
+    games = max(season.games, 1)
+    return (season.stats.get(stat, 0.0) * coef) / games
+
+
 @dataclass
 class EraZNorm:
-    """Per-position, per-era, per-stat mean/std on per-game rate."""
+    """Per-position, per-era, per-SUBFEATURE (and per-format) mean/std on
+    per-game FANTASY POINTS.
 
-    means: Dict[Tuple[str, int, str], float]
-    stds: Dict[Tuple[str, int, str], float]
+    v1.2.0 change: the z-norm operates in fantasy-point-per-game space at
+    the SUB-feature granularity (passing_yards, passing_tds, interceptions,
+    rushing_yards, ...), not raw-stat. Each entry is keyed by
+    (position, era, stat, format).
+    """
 
-    def z(self, position: str, era: int, stat: str, per_game_value: float) -> float:
-        key = (position, era, stat)
+    means: Dict[Tuple[str, int, str, str], float]
+    stds: Dict[Tuple[str, int, str, str], float]
+
+    def z(
+        self,
+        position: str,
+        era: int,
+        stat: str,
+        per_game_fp: float,
+        league_format: str = BASE_FORMAT,
+    ) -> float:
+        key = (position, era, stat, league_format)
         mu = self.means.get(key, 0.0)
         sd = self.stds.get(key, 1.0)
         if sd <= 1e-9:
             return 0.0
-        return (per_game_value - mu) / sd
+        return (per_game_fp - mu) / sd
 
 
-def build_era_z_norm(careers: Dict[str, PlayerCareer]) -> EraZNorm:
-    bucket: Dict[Tuple[str, int, str], List[float]] = defaultdict(list)
+def build_era_z_norm(
+    careers: Dict[str, PlayerCareer],
+    formats: Optional[Sequence[str]] = None,
+) -> EraZNorm:
+    """Build per-position, per-era, per-subfeature, per-format z-norms.
+
+    v1.2.0: feature space is fantasy-points-per-game per stat sub-feature
+    (passing_yards * 0.04, passing_tds * 4, rushing_tds * 6, ...). The same
+    player has a DIFFERENT vector under sf_ppr vs sf_te_premium when the
+    format's coefficients differ.
+    """
+    if formats is None:
+        formats = tuple(LEAGUE_SCORING.keys())
+    bucket: Dict[Tuple[str, int, str, str], List[float]] = defaultdict(list)
     for c in careers.values():
+        feats = FANTASY_FEATURES.get(c.position, ())
+        if not feats:
+            continue
         for s in c.seasons:
             if s.games < MIN_GAMES_PER_SEASON:
                 continue
-            for stat in FEATURES[c.position]:
-                per_game = s.stats.get(stat, 0.0) / max(s.games, 1)
-                bucket[(c.position, s.era, stat)].append(per_game)
-    means: Dict[Tuple[str, int, str], float] = {}
-    stds: Dict[Tuple[str, int, str], float] = {}
+            for fmt in formats:
+                coefs = LEAGUE_SCORING.get(fmt, LEAGUE_SCORING[BASE_FORMAT])
+                for _cat, stat, scoring_key in feats:
+                    fp = _season_subfeature_fp_per_game(s, stat, scoring_key, coefs)
+                    bucket[(c.position, s.era, stat, fmt)].append(fp)
+    means: Dict[Tuple[str, int, str, str], float] = {}
+    stds: Dict[Tuple[str, int, str, str], float] = {}
     for k, vals in bucket.items():
         if not vals:
             means[k] = 0.0
@@ -426,24 +584,32 @@ def player_career_vector(
     career: PlayerCareer,
     znorm: EraZNorm,
     through_age: Optional[int] = None,
+    league_format: str = BASE_FORMAT,
 ) -> Optional[List[float]]:
-    """Compute an era-normalised, cumulative-through-age vector.
+    """Compute an era-normalised, fantasy-point-weighted, cumulative
+    through-age vector under ``league_format``.
 
-    For each feature: average the per-game era z-scores across all qualifying
-    seasons up to ``through_age``, weighted by games played.
+    v1.2.0 change: each component of the vector is FANTASY POINTS
+    contributed per game by a single stat sub-feature (e.g. passing_tds *
+    4.0 / games), era-z-scored per position per format. The vector
+    measures "what does this player produce for fantasy under this
+    format" rather than "what are this player's raw counting stats".
     """
-    feats = FEATURES[career.position]
+    feats = FANTASY_FEATURES.get(career.position, ())
+    if not feats:
+        return None
     seasons = career.seasons_through_age(through_age) if through_age is not None else career.seasons
     seasons = [s for s in seasons if s.games >= MIN_GAMES_PER_SEASON]
     if not seasons:
         return None
+    coefs = LEAGUE_SCORING.get(league_format, LEAGUE_SCORING[BASE_FORMAT])
     vec: List[float] = []
-    for stat in feats:
+    for _cat, stat, scoring_key in feats:
         num = 0.0
         den = 0.0
         for s in seasons:
-            per_game = s.stats.get(stat, 0.0) / max(s.games, 1)
-            z = znorm.z(career.position, s.era, stat, per_game)
+            fp = _season_subfeature_fp_per_game(s, stat, scoring_key, coefs)
+            z = znorm.z(career.position, s.era, stat, fp, league_format=league_format)
             num += z * s.games
             den += s.games
         vec.append(num / den if den > 0 else 0.0)
@@ -550,38 +716,109 @@ def find_comps(
     through_age: Optional[int],
     k: int = TOP_K_COMPS,
     age_window: int = AGE_WINDOW,
+    league_format: str = BASE_FORMAT,
+    cohort_index: Optional[Dict[Tuple[str, str], List["PlayerCareer"]]] = None,
+    target_style: Optional[str] = None,
+    cohort_diag: Optional[Dict[str, object]] = None,
 ) -> List[Tuple[PlayerCareer, float]]:
-    """Find top-k similar LONG-ARC comps for a target player at a given age."""
-    tv = player_career_vector(target, znorm, through_age=through_age)
+    """Find top-k similar LONG-ARC comps for a target player at a given age.
+
+    v1.2.0: when ``cohort_index`` is supplied, restrict the comp pool to the
+    target's STYLE bucket; widen to adjacent buckets if the bucket has fewer
+    than ``MIN_COHORT_COMPS`` qualifying comps. ``cohort_diag`` (if passed)
+    records the cohort-fallback path for diagnostics.
+    """
+    tv = player_career_vector(target, znorm, through_age=through_age, league_format=league_format)
     if tv is None:
         return []
-    candidates: List[Tuple[PlayerCareer, float]] = []
     target_age = through_age if through_age is not None else (
         target.seasons[-1].age if target.seasons else 25
     )
-    for comp in long_arc_corpus:
-        if comp.position != target.position:
-            continue
-        if comp.player_id == target.player_id:
-            continue
-        # Comp must have played past `target_age` so there's a future to project
-        if not comp.seasons_after_age(target_age):
-            continue
-        # Comp must have meaningful career THROUGH the same age
-        comp_v = player_career_vector(comp, znorm, through_age=target_age + age_window)
-        if comp_v is None:
-            continue
-        # Age-window filter: the comp must have at least one season inside the
-        # target age window — i.e., they were active at a comparable age.
-        ages_in_window = any(
-            abs(s.age - target_age) <= age_window for s in comp.seasons
-        )
-        if not ages_in_window:
-            continue
-        sim = _cosine(tv, comp_v)
-        if sim <= 0:
-            continue
-        candidates.append((comp, sim))
+
+    # ---- v1.2.0 style-cohort pool selection ---------------------------
+    # Walk the fallback chain widening until we accumulate enough QUALIFIED
+    # candidates (post-age career exists, age-window match, valid vector).
+    # The raw bucket size can be misleading because many of a thin cohort's
+    # members lack post-age production (e.g., the dual-threat bucket has 16
+    # members but ~half retired before age 28).
+    if cohort_index is not None and target_style is not None and target.position in COHORTS:
+        from .style_cohort import cohort_fallback_chain
+        chain = list(cohort_fallback_chain(target.position, target_style))
+    else:
+        chain = [None]
+
+    def _qualified_candidates(pool_iter):
+        out: List[Tuple[PlayerCareer, float]] = []
+        for comp in pool_iter:
+            if comp.position != target.position:
+                continue
+            if comp.player_id == target.player_id:
+                continue
+            if not comp.seasons_after_age(target_age):
+                continue
+            comp_v = player_career_vector(
+                comp, znorm, through_age=target_age + age_window,
+                league_format=league_format,
+            )
+            if comp_v is None:
+                continue
+            ages_in_window = any(
+                abs(s.age - target_age) <= age_window for s in comp.seasons
+            )
+            if not ages_in_window:
+                continue
+            sim = _cosine(tv, comp_v)
+            if sim <= 0:
+                continue
+            out.append((comp, sim))
+        return out
+
+    candidates: List[Tuple[PlayerCareer, float]] = []
+    styles_used: List[str] = []
+    pool_size = 0
+    if chain == [None]:
+        candidates = _qualified_candidates(long_arc_corpus)
+        pool_size = len(long_arc_corpus)
+    else:
+        seen_ids = set()
+        # Cap the widening at the first 2 styles in the fallback chain
+        # (primary + 1 adjacent). The brief's wording is "adjacent style
+        # buckets" — singular adjacent step. Walking the full chain to a
+        # third style pollutes the comp pool (e.g., a dual-threat target
+        # picking up pocket-style retired QBs), defeating the purpose of
+        # cohort restriction. Targets with insufficient candidates after
+        # one adjacent step accept the smaller qualified set.
+        capped_chain = chain[:2]
+        for style in capped_chain:
+            members = cohort_index.get((target.position, style), []) if cohort_index else []
+            if not members:
+                continue
+            # Append only new comps; pool grows monotonically as we widen.
+            new_members = [m for m in members if m.player_id not in seen_ids]
+            for m in new_members:
+                seen_ids.add(m.player_id)
+            new_qualified = _qualified_candidates(new_members)
+            candidates.extend(new_qualified)
+            styles_used.append(style)
+            pool_size += len(members)
+            if len(candidates) >= MIN_COHORT_COMPS:
+                break
+        # Last resort: widen to the full corpus if cohort + adjacent didn't
+        # produce any qualified comps (rare — only when style index is empty).
+        if not candidates:
+            candidates = _qualified_candidates(long_arc_corpus)
+            pool_size = len(long_arc_corpus)
+            if cohort_diag is not None:
+                cohort_diag["raw_fallback"] = True
+
+        if cohort_diag is not None:
+            cohort_diag["primary_style"] = target_style
+            cohort_diag["styles_used"] = styles_used
+            cohort_diag["fallback_chain"] = list(chain)
+            cohort_diag["pool_size"] = pool_size
+            cohort_diag["qualified_count"] = len(candidates)
+            cohort_diag["widened"] = len(styles_used) > 1
+
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[:k]
 
@@ -600,6 +837,10 @@ class EngineResult:
     long_arc_corpus: List[PlayerCareer]
     active_players: List[PlayerCareer]
     career_length_era: Optional[CareerLengthEraTable] = None
+    # v1.2.0 — style cohort plumbing.
+    cohort_index: Optional[Dict[Tuple[str, str], List["PlayerCareer"]]] = None
+    cohort_diag: Optional[Dict[str, Dict[str, object]]] = None
+    base_format: str = BASE_FORMAT
 
     # Back-compat alias for v1.0 callers that expected ``retired_corpus``.
     # v1.1 broadens the corpus to "long-arc" (see module docstring), but the
@@ -674,6 +915,11 @@ def run_engine(
         long_arc_corpus, era_for_season,
     )
 
+    # v1.2.0 — build style-cohort index under the BASE format.
+    base_scoring_coefs = LEAGUE_SCORING.get(BASE_FORMAT, LEAGUE_SCORING["sf_ppr"])
+    cohort_index = index_corpus_by_cohort(long_arc_corpus, base_scoring_coefs)
+    cohort_diag: Dict[str, Dict[str, object]] = {}
+
     active_players = [
         c for c in careers.values()
         if _is_active(c, current_season=current_season)
@@ -690,11 +936,19 @@ def run_engine(
         # If birth_date is missing, fall back to estimated age from rookie+22.
         last_season = ap.seasons[-1]
         age_now = last_season.age
+        target_style = cohort_for(ap, base_scoring_coefs)
+        diag: Dict[str, object] = {}
         comps = find_comps(
             ap, long_arc_corpus, znorm,
             through_age=age_now,
             k=top_k,
+            league_format=BASE_FORMAT,
+            cohort_index=cohort_index,
+            target_style=target_style,
+            cohort_diag=diag,
         )
+        if diag:
+            cohort_diag[ap.player_id] = diag
         if not comps:
             continue
         # Weighted projection.
@@ -748,6 +1002,11 @@ def run_engine(
             "qb_style": qb_style if ap.position == "QB" else None,
             "qb_career_rypg": round(qb_rypg, 1) if ap.position == "QB" else None,
             "career_length_lift": round(lift, 3),
+            # v1.2.0: style-cohort metadata
+            "style_cohort": target_style,
+            "cohort_pool_size": diag.get("pool_size") if diag else None,
+            "cohort_widened": diag.get("widened") if diag else None,
+            "cohort_styles_used": diag.get("styles_used") if diag else None,
         })
         comps_map[ap.player_id] = comp_records
 
@@ -776,6 +1035,9 @@ def run_engine(
         long_arc_corpus=long_arc_corpus,
         active_players=active_players,
         career_length_era=career_length_era,
+        cohort_index=cohort_index,
+        cohort_diag=cohort_diag,
+        base_format=BASE_FORMAT,
     )
 
     if persist:
@@ -832,6 +1094,32 @@ def _persist(result: EngineResult, current_season: int) -> None:
     )
     (OUT_ROOT / "long_arc_corpus.json").write_text(
         json.dumps(long_arc, indent=2, default=float), encoding="utf-8"
+    )
+
+    # v1.2.0 cohort diagnostics.
+    diag_root = Path("data/diagnostics")
+    diag_root.mkdir(parents=True, exist_ok=True)
+    cohort_stats_payload: Dict = {
+        "base_format": result.base_format,
+        "cohort_sizes": cohort_summary(result.cohort_index or {}),
+        "per_player_widened_count": sum(
+            1 for d in (result.cohort_diag or {}).values() if d.get("widened")
+        ),
+        "per_position_widened_rate": {},
+    }
+    # Compute per-position widened rate.
+    by_pos: Dict[str, List[bool]] = {}
+    for ap in result.active_players:
+        d = (result.cohort_diag or {}).get(ap.player_id, {})
+        if "widened" not in d:
+            continue
+        by_pos.setdefault(ap.position, []).append(bool(d["widened"]))
+    cohort_stats_payload["per_position_widened_rate"] = {
+        pos: round(sum(flags) / max(len(flags), 1), 3)
+        for pos, flags in by_pos.items()
+    }
+    (diag_root / "v1.2_cohort_stats.json").write_text(
+        json.dumps(cohort_stats_payload, indent=2, default=float), encoding="utf-8"
     )
 
 

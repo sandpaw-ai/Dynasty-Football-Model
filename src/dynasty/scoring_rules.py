@@ -78,6 +78,14 @@ _BASE_SF_PPR = {
     "special_teams_tds": 6.0,
 }
 
+# v1.2.0: Half-PPR and Standard (non-PPR) variants. The structural per-stat
+# coefs differ in the reception bonus; rushing TDs / receiving TDs / yards
+# weights are unchanged. These are real format variants used by some
+# leagues and they exercise the fantasy-point-weighted vectorization
+# (same player, different per-format vector under v1.2's KNN logic).
+_BASE_HALF_PPR = {**_BASE_SF_PPR, "receptions": 0.5}
+_BASE_STD = {**_BASE_SF_PPR, "receptions": 0.0}
+
 LEAGUE_SCORING: dict[str, dict[str, float]] = {
     "sf_ppr": dict(_BASE_SF_PPR),
     "1qb_ppr": dict(_BASE_SF_PPR),
@@ -85,6 +93,10 @@ LEAGUE_SCORING: dict[str, dict[str, float]] = {
     # TE-premium just adds a per-reception bonus that's applied at
     # score-time for TEs only — see score_season() position handling.
     "sf_te_premium": dict(_BASE_SF_PPR),
+    # v1.2.0: half-PPR and standard variants for fantasy-vector
+    # format-awareness testing and downstream overlay use.
+    "half_ppr": dict(_BASE_HALF_PPR),
+    "std": dict(_BASE_STD),
 }
 
 # TE premium reception bonus (additive, on top of the 1.0 PPR).

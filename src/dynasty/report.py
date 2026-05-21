@@ -427,23 +427,63 @@ footer { color: var(--muted); font-size: 12px; padding: 32px 40px; text-align: c
 """
 
 
-def _site_header(active: str, latest_ts: datetime | None, league_format: str) -> str:
-    league_label = {"sf_ppr": "Superflex PPR", "1qb_ppr": "1QB PPR"}.get(league_format, league_format)
+# Map of league_format -> (filename_suffix, display_label)
+FORMAT_PAGE_INFO: dict[str, tuple[str, str]] = {
+    "sf_ppr": ("", "Superflex PPR"),
+    "1qb_ppr": ("_1qb_ppr", "1QB PPR"),
+}
+
+
+def _rankings_href(league_format: str) -> str:
+    suffix, _ = FORMAT_PAGE_INFO.get(league_format, ("", league_format))
+    return f"rankings{suffix}.html"
+
+
+def _site_header(
+    active: str,
+    latest_ts: datetime | None,
+    league_format: str,
+    formats_available: tuple[str, ...] = ("sf_ppr",),
+) -> str:
+    league_label = FORMAT_PAGE_INFO.get(
+        league_format, ("", league_format)
+    )[1]
     ts = latest_ts.strftime("%B %d, %Y at %I:%M %p") if latest_ts else "—"
 
     def link(href, label, key):
         cls = ' style="opacity:1;text-decoration:underline"' if key == active else ""
         return f'<a href="{href}"{cls}>{label}</a>'
 
+    # v0.15.0 — format toggle. We render an inline <select> that
+    # navigates to the rankings page for the chosen format (the
+    # client-side hop is enough; the format-specific pages share
+    # all other navigation).
+    fmt_options = ""
+    if len(formats_available) > 1:
+        opts = []
+        for f in formats_available:
+            label = FORMAT_PAGE_INFO.get(f, ("", f))[1]
+            sel = " selected" if f == league_format else ""
+            opts.append(
+                f'<option value="{_esc(_rankings_href(f))}"{sel}>{_esc(label)}</option>'
+            )
+        fmt_options = (
+            '<select id="format-toggle" aria-label="League format" '
+            'style="margin-left:10px;font-size:13px;padding:2px 6px;" '
+            "onchange=\"window.location.href=this.value\">"
+            + "".join(opts)
+            + "</select>"
+        )
+
     return f"""<header class="site">
   <div class="row">
     <div>
       <h1><a href="index.html">Dynasty Model</a></h1>
-      <div class="meta">{league_label} · Last updated {ts}</div>
+      <div class="meta">{league_label} · Last updated {ts}{fmt_options}</div>
     </div>
     <nav>
       {link("index.html", "Overview", "index")}
-      {link("rankings.html", "Rankings", "rankings")}
+      {link(_rankings_href(league_format), "Rankings", "rankings")}
       {link("league.html", "Rate My League", "league")}
       {link("sources.html", "Sources", "sources")}
       {link("methodology.html", "Methodology", "methodology")}
@@ -499,7 +539,7 @@ def _all_sources(session):
 # Page: index.html — landing page with methodology + divergence highlights
 # --------------------------------------------------------------------------
 
-def _build_index(rows, sources, latest_ts, league_format: str) -> str:
+def _build_index(rows, sources, latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
     # Compute divergence highlights
     rows_with_div = [(cs, p) for cs, p in rows if cs.rank_divergence is not None]
     biggest_buys = sorted(rows_with_div, key=lambda x: -x[0].rank_divergence)[:8]
@@ -558,7 +598,7 @@ diverges from the market consensus.
 
     return _page(
         f"Dynasty Model — Overview",
-        _site_header("index", latest_ts, league_format),
+        _site_header("index", latest_ts, league_format, formats_available),
         f"""<div class="container narrow">
 
 <div class="card">
@@ -607,7 +647,7 @@ edge lives.</p>
 # Page: rankings.html — full top-300
 # --------------------------------------------------------------------------
 
-def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | None = None) -> str:
+def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | None = None, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
     rows_html = ""
     comps_cache = comps_cache or {}
     for cs, p in rows:
@@ -638,7 +678,7 @@ def _build_rankings(rows, latest_ts, league_format: str, comps_cache: dict | Non
 
     return _page(
         "Dynasty Model — Rankings",
-        _site_header("rankings", latest_ts, league_format),
+        _site_header("rankings", latest_ts, league_format, formats_available),
         f"""<div class="container">
 
 <div class="controls">
@@ -697,7 +737,7 @@ posFilter.addEventListener('change', apply);
 # Page: sources.html — methodology and how to add evaluators
 # --------------------------------------------------------------------------
 
-def _build_sources_page(sources, latest_ts, league_format: str) -> str:
+def _build_sources_page(sources, latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
     active_sources_html = ""
     for s in sources:
         desc = SOURCE_DESCRIPTIONS.get(s.slug, {})
@@ -734,7 +774,7 @@ Import as: <strong>{_esc(ev['import_as'])}</strong>
 
     return _page(
         "Dynasty Model — Sources & Methodology",
-        _site_header("sources", latest_ts, league_format),
+        _site_header("sources", latest_ts, league_format, formats_available),
         f"""<div class="container narrow">
 
 <div class="card">
@@ -793,10 +833,10 @@ command. Each evaluator below shows a suggested weight based on their documented
 # Page: league.html — client-side Sleeper league evaluator
 # --------------------------------------------------------------------------
 
-def _build_league_page(latest_ts, league_format: str) -> str:
+def _build_league_page(latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
     import os
     title = "Dynasty Model — Rate My League"
-    header = _site_header("league", latest_ts, league_format)
+    header = _site_header("league", latest_ts, league_format, formats_available)
     # PROXY_URL is the deployed Cloudflare Worker URL (see
     # scripts/cf-worker/README.md). When set at build time, the MFL form
     # on the page actually works against the user's league. When unset,
@@ -1638,13 +1678,78 @@ def _similar_players_card(comp_entry: dict) -> str:
 """
 
 
-def _build_methodology_page(latest_ts, league_format: str) -> str:
-    """v0.14.0 — methodology page explaining the similarity engine + overlays."""
+def _vorp_diagnostics_html(vorp_debug: dict, formats_available: tuple[str, ...]) -> str:
+    """Render the per-format VORP / scarcity-multiplier table."""
+    if not vorp_debug:
+        return (
+            "<p style='color:var(--muted);font-size:13px'>"
+            "VORP diagnostics not yet generated. Run the launcher to populate."
+            "</p>"
+        )
+    blocks: list[str] = []
+    for fmt in formats_available:
+        info = vorp_debug.get(fmt)
+        if not info:
+            continue
+        label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))[1]
+        rows = []
+        for pos in ("QB", "RB", "WR", "TE"):
+            d = info.get("per_position", {}).get(pos, {})
+            base = d.get("replacement_baseline", 0.0)
+            mult = d.get("scarcity_multiplier", 1.0)
+            n = d.get("n_players", 0)
+            rows.append(
+                f"<tr><td><strong>{pos}</strong></td>"
+                f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{base:.0f}</td>"
+                f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{mult:.2f}</td>"
+                f"<td style='text-align:right;font-variant-numeric:tabular-nums'>{n}</td></tr>"
+            )
+        blocks.append(
+            f"<h3 style='margin-top:18px;margin-bottom:6px'>{_esc(label)}</h3>"
+            "<table class='breakdown-table'>"
+            "<thead><tr><th>Pos</th><th style='text-align:right'>Replacement (lifetime pts)</th>"
+            "<th style='text-align:right'>Scarcity mult</th>"
+            "<th style='text-align:right'># players</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>"
+        )
+    return "\n".join(blocks) or (
+        "<p style='color:var(--muted);font-size:13px'>No VORP data available.</p>"
+    )
+
+
+def _composite_overrides_table_html(overrides: list) -> str:
+    """Render the per-(format, position, source) composite weight overrides."""
+    if not overrides:
+        return ""
+    rows = []
+    for fmt, pos, slug, mult in overrides:
+        label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))[1]
+        rows.append(
+            f"<tr><td>{_esc(label)}</td><td>{_esc(pos)}</td>"
+            f"<td class='source-name'>{_esc(slug)}</td>"
+            f"<td style='text-align:right;font-variant-numeric:tabular-nums'>× {mult:.3f}</td></tr>"
+        )
+    return (
+        "<table class='breakdown-table'>"
+        "<thead><tr><th>Format</th><th>Position</th><th>Source</th>"
+        "<th style='text-align:right'>Multiplier</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _build_methodology_page(latest_ts, league_format: str, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
+    """v0.14.0 — methodology page explaining the similarity engine + overlays.
+    v0.15.0 — adds the VORP / positional-scarcity card with per-format
+    replacement baselines and scarcity multipliers.
+    """
     from .overlays import load_correlation_table
+    from .sources.similarity_career_arc import load_vorp_debug
+    from .composite_weights import explain_overrides
     table = load_correlation_table()
     ras = table.get("ras", {})
     srs = table.get("brainy_ballers_srs", {})
     methodology = table.get("methodology", "")
+    vorp_debug = load_vorp_debug()
 
     def _row(pos: str) -> str:
         ras_v = float(ras.get(pos, 0.0))
@@ -1708,7 +1813,38 @@ until a historical archive becomes available.</p>
 </div>
 
 <div class="card">
-<h2 style="margin-top:0">Source weights (v0.14.0)</h2>
+<h2 style="margin-top:0">Positional VORP &amp; format-aware scoring (v0.15.0)</h2>
+<p>Raw projected lifetime fantasy points don’t answer the question every dynasty
+GM actually has: <em>how much better is this player than the next-best one I could
+start in their slot?</em> v0.15 fixes that with three changes:</p>
+<ol>
+  <li><strong>Format-aware comp re-scoring.</strong> When projecting a player’s remaining
+  career, we re-score every historical comp season under the active format’s
+  rules (PPR / pass-TD value / etc.) rather than using the comp’s raw
+  era-of-the-time fantasy points.</li>
+  <li><strong>Positional VORP.</strong> We compute the per-position replacement
+  baseline (Nth-best projected lifetime points where N = starters × 12 teams),
+  then subtract it. In SF, replacement-QB is QB24; in 1QB it’s QB12. That gap
+  is precisely the SF QB premium.</li>
+  <li><strong>Scarcity-cliff multiplier.</strong> For each position we compare
+  the top-N starters’ average to the next 6 below replacement. A steep cliff
+  yields a multiplier &gt; 1 (capped at 1.5). QBs in SF show a much steeper
+  cliff than RB/WR — that’s the math behind “start QBs early.”</li>
+</ol>
+{_vorp_diagnostics_html(vorp_debug, formats_available)}
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Format-aware composite weight overrides (v0.15.0)</h2>
+<p>On top of VORP, the composite scorer multiplies the
+<code>similarity_career_arc</code> and <code>nfl_impact</code> weights by a
+per-(format, position) factor so that the QB premium also shows up in the
+composite mixing, not just the dynasty-value scale.</p>
+{_composite_overrides_table_html(explain_overrides())}
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Source weights (v0.14.0 baseline)</h2>
 <table class="breakdown-table">
 <thead><tr><th>Source</th><th>Category</th><th style="text-align:right">Default weight</th></tr></thead>
 <tbody>
@@ -1731,12 +1867,12 @@ until a historical archive becomes available.</p>
 """
     return _page(
         "Methodology — Dynasty Model v0.14",
-        _site_header("methodology", latest_ts, league_format),
+        _site_header("methodology", latest_ts, league_format, formats_available),
         body,
     )
 
 
-def _build_player_page(cs, p, all_sources, latest_ts, league_format: str, comps_cache: dict | None = None) -> str:
+def _build_player_page(cs, p, all_sources, latest_ts, league_format: str, comps_cache: dict | None = None, formats_available: tuple[str, ...] = ("sf_ppr",)) -> str:
     try:
         breakdown = json.loads(cs.breakdown_json) if cs.breakdown_json else {}
     except Exception:
@@ -1857,7 +1993,7 @@ def _build_player_page(cs, p, all_sources, latest_ts, league_format: str, comps_
 
     return _page(
         f"{p.full_name} — Dynasty Model",
-        _site_header("rankings", latest_ts, league_format),
+        _site_header("rankings", latest_ts, league_format, formats_available),
         body,
     )
 
@@ -1870,8 +2006,17 @@ def generate_site(
     output_dir: str = "dynasty_site",
     league_format: str = "sf_ppr",
     limit: int = 300,
+    additional_formats: tuple[str, ...] = (),
 ) -> str:
-    """Generate the multi-page site. Returns the absolute path to index.html."""
+    """Generate the multi-page site. Returns the absolute path to index.html.
+
+    v0.15.0: ``additional_formats`` enables the SF/1QB toggle. For each
+    extra format we emit ``rankings<suffix>.html`` and corresponding
+    ``assets/model_scores<suffix>.json`` so the rate-my-league client
+    can switch formats too. The primary ``league_format`` still
+    governs the index / methodology / per-player pages (those use the
+    primary format's composite scores).
+    """
     out_root = Path(output_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     (out_root / "assets").mkdir(exist_ok=True)
@@ -1880,6 +2025,8 @@ def generate_site(
     # Shared CSS
     (out_root / "assets" / "style.css").write_text(_shared_css(), encoding="utf-8")
 
+    formats_available: tuple[str, ...] = (league_format, *additional_formats)
+
     with get_session() as session:
         latest_ts, rows = _latest_composite(session, league_format, limit)
         sources = _all_sources(session)
@@ -1887,7 +2034,7 @@ def generate_site(
         if not rows:
             (out_root / "index.html").write_text(_page(
                 "Dynasty Model — No Data",
-                _site_header("index", None, league_format),
+                _site_header("index", None, league_format, formats_available),
                 """<div class="container narrow">
 <div class="callout"><strong>No rankings have been generated yet.</strong>
 Run the launcher again — make sure the sync step completes successfully.</div>
@@ -1895,9 +2042,10 @@ Run the launcher again — make sure the sync step completes successfully.</div>
             ), encoding="utf-8")
             return str(out_root / "index.html")
 
-        # Landing page
+        # Landing page (uses primary format's composite scores)
         (out_root / "index.html").write_text(
-            _build_index(rows, sources, latest_ts, league_format), encoding="utf-8"
+            _build_index(rows, sources, latest_ts, league_format, formats_available),
+            encoding="utf-8",
         )
 
         # v0.14.0: surface comparables from the similarity engine. Loaded
@@ -1905,58 +2053,69 @@ Run the launcher again — make sure the sync step completes successfully.</div>
         # pages below.
         comps_cache = load_comps_cache()
 
-        # Full rankings
-        (out_root / "rankings.html").write_text(
-            _build_rankings(rows, latest_ts, league_format, comps_cache=comps_cache), encoding="utf-8"
-        )
-
-        # Sources & methodology
+        # Sources & methodology + league + per-player pages render once
+        # against the primary format. The format toggle in the header
+        # is for rankings specifically.
         (out_root / "sources.html").write_text(
-            _build_sources_page(sources, latest_ts, league_format), encoding="utf-8"
+            _build_sources_page(sources, latest_ts, league_format, formats_available),
+            encoding="utf-8",
         )
-
-        # Rate-My-League page + the model-scores JSON that powers it
-        # client-side. Keyed by sleeper_id so the Sleeper league API joins
-        # without any server-side work. Use an UNBOUNDED query so deep
-        # rosters (12 teams x ~35 = 420) all resolve, not just the top-300
-        # we render on rankings.html.
-        all_rows_for_json = session.execute(
-            select(CompositeScore, Player)
-            .join(Player, CompositeScore.player_id == Player.id)
-            .where(CompositeScore.league_format == league_format)
-            .where(CompositeScore.generated_at == latest_ts)
-            .order_by(CompositeScore.overall_rank)
-        ).all()
-        scores_lookup: dict[str, dict] = {}
-        for cs, p in all_rows_for_json:
-            if not p.sleeper_id:
-                continue
-            scores_lookup[str(p.sleeper_id)] = {
-                "name": p.full_name,
-                "position": p.position,
-                "team": p.nfl_team,
-                "score": round(cs.score, 2),
-                "rank": cs.overall_rank,
-                "tier": cs.tier,
-                "position_rank": cs.position_rank,
-            }
-        (out_root / "assets" / "model_scores.json").write_text(
-            json.dumps(scores_lookup, separators=(",", ":")), encoding="utf-8"
-        )
-        (out_root / "league.html").write_text(
-            _build_league_page(latest_ts, league_format), encoding="utf-8"
-        )
-
-        # Methodology page (v0.14.0)
         (out_root / "methodology.html").write_text(
-            _build_methodology_page(latest_ts, league_format), encoding="utf-8"
+            _build_methodology_page(latest_ts, league_format, formats_available),
+            encoding="utf-8",
         )
 
-        # Per-player pages
+        # Per-format outputs: rankings page + model_scores.json + league page.
+        for fmt in formats_available:
+            fmt_ts, fmt_rows = _latest_composite(session, fmt, limit)
+            if not fmt_rows:
+                # Skip formats that have no composite scores yet.
+                continue
+            suffix, _label = FORMAT_PAGE_INFO.get(fmt, ("", fmt))
+
+            (out_root / f"rankings{suffix}.html").write_text(
+                _build_rankings(fmt_rows, fmt_ts, fmt, comps_cache=comps_cache, formats_available=formats_available),
+                encoding="utf-8",
+            )
+
+            # Rate-My-League JSON (per-format)
+            all_rows_for_json = session.execute(
+                select(CompositeScore, Player)
+                .join(Player, CompositeScore.player_id == Player.id)
+                .where(CompositeScore.league_format == fmt)
+                .where(CompositeScore.generated_at == fmt_ts)
+                .order_by(CompositeScore.overall_rank)
+            ).all()
+            scores_lookup: dict[str, dict] = {}
+            for cs, p in all_rows_for_json:
+                if not p.sleeper_id:
+                    continue
+                scores_lookup[str(p.sleeper_id)] = {
+                    "name": p.full_name,
+                    "position": p.position,
+                    "team": p.nfl_team,
+                    "score": round(cs.score, 2),
+                    "rank": cs.overall_rank,
+                    "tier": cs.tier,
+                    "position_rank": cs.position_rank,
+                }
+            scores_filename = f"model_scores{suffix}.json" if suffix else "model_scores.json"
+            (out_root / "assets" / scores_filename).write_text(
+                json.dumps(scores_lookup, separators=(",", ":")), encoding="utf-8"
+            )
+
+        # League page (uses primary format)
+        (out_root / "league.html").write_text(
+            _build_league_page(latest_ts, league_format, formats_available),
+            encoding="utf-8",
+        )
+
+        # Per-player pages (primary format only — the page surfaces
+        # composite breakdown details which are format-specific).
         for cs, p in rows:
             slug = _slugify(p.full_name, p.id)
             (out_root / "players" / f"{slug}.html").write_text(
-                _build_player_page(cs, p, sources, latest_ts, league_format, comps_cache=comps_cache),
+                _build_player_page(cs, p, sources, latest_ts, league_format, comps_cache=comps_cache, formats_available=formats_available),
                 encoding="utf-8"
             )
 

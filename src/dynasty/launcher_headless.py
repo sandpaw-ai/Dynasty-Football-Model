@@ -119,15 +119,34 @@ def main():
         print(f"  FAIL: {e}")
         sys.exit(1)
 
-    # Step 5: Build site
+    # Step 5: Build site (multi-format — v0.15.0)
+    # We pass both formats so the site can ship a client-side dropdown
+    # that switches between sf_ppr (primary / default) and 1qb_ppr.
     print("\n[5/6] Building site...")
     try:
         from dynasty.report import generate_site
-        out = generate_site(output_dir="dynasty_site", league_format="sf_ppr", limit=300)
+        out = generate_site(
+            output_dir="dynasty_site",
+            league_format="sf_ppr",
+            limit=300,
+            additional_formats=("1qb_ppr",),
+        )
         print(f"  OK -> {out}")
     except Exception as e:
         print(f"  FAIL: {e}")
         sys.exit(1)
+
+    # v0.15.0: print VORP debug summary so CI logs surface the new diagnostics.
+    try:
+        from dynasty.sources.similarity_career_arc import load_vorp_debug
+        vorp = load_vorp_debug()
+        for fmt, info in vorp.items():
+            print(f"  VORP/{fmt}: " + ", ".join(
+                f"{pos} base={d['replacement_baseline']:.0f} mult={d['scarcity_multiplier']:.2f}"
+                for pos, d in info.get("per_position", {}).items()
+            ))
+    except Exception:
+        pass
 
     # Step 6: Pre-fetch any leagues listed in leagues.json.
     # This is how MFL leagues reach the site (no CORS on api.myfantasyleague.com).

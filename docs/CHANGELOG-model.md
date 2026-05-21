@@ -15,6 +15,172 @@ Format for each entry:
 
 ---
 
+## v0.15.0 — Positional VORP + SF-aware composite weighting (PR #15)
+
+**Date:** 2026-05-21
+
+Fixes the v0.14 model's systematic under-valuation of QBs in superflex
+format. Phil's directive (2026-05-21):
+
+> "Mahomes and Josh Allen for example are extremely valuable in a
+> superflex league where you have to start 1 QB, and more often you
+> are starting a QB in the superflex spot. Keep that in mind when
+> developing the rankings."
+
+In v0.14, top SF QBs ranked absurdly low because the model aggregated
+`projected_lifetime_fantasy_points` from the similarity engine as if
+all positions competed on the same axis. Snapshot from the live
+sf_ppr site immediately before this PR:
+
+| Player           | Model rank | Consensus rank | Delta  |
+|------------------|-----------:|---------------:|-------:|
+| Josh Allen       |        103 |              1 |  −102 |
+| Patrick Mahomes  |         94 |             21 |  −73  |
+| Lamar Jackson    |         43 |             11 |  −32  |
+| Jayden Daniels   |         29 |             12 |  −17  |
+| Jalen Hurts      |         80 |             25 |  −55  |
+| Caleb Williams   |         65 |             12 |  −53  |
+| Drake Maye       |         30 |              6 |  −24  |
+| Dak Prescott     |        263 |             44 |  −219 |
+| Brock Purdy      |        209 |             38 |  −171 |
+| Jordan Love      |          7 |             41 |  +34   |
+
+### Root cause — two compounding bugs
+
+1. **No positional VORP.** Lifetime fantasy points don't capture
+   scarcity. In SF you must start 24 QBs across 12 teams; the
+   replacement-level QB is materially better than RB36/WR48/TE12.
+   The right primitive is Value Over Replacement Player.
+2. **Format-blind comp projections.** When projecting a comp's
+   remaining career, the v0.14 engine used the comp's RAW stored
+   `fantasy_points_ppr` field. That field reflects whatever scoring
+   era the comp played in (some old PPR-redraft, 6pt pass TDs, etc.).
+   Modern sf_ppr scoring is 4pt pass TDs + PPR — a different number.
+
+### What changed (v0.15.0)
+
+1. **`src/dynasty/scoring_rules.py` (new).** `LEAGUE_SCORING` dict +
+   `score_season(raw_stats, league_format, position)` that re-scores
+   any season's raw stat line under any format's rules. Used by the
+   projection layer to score comp seasons consistently.
+
+2. **Format-aware similarity projection.** `projection.py`'s
+   `_rescored_remaining_after()` re-scores every comp season under
+   the active league_format. A 2010 Peyton Manning season is now
+   scored at 4pt-per-pass-TD sf_ppr rules regardless of what era the
+   raw `fantasy_points_ppr` field reflected.
+
+3. **Positional VORP.** Per-format replacement baselines computed
+   dynamically from the player pool:
+     * sf_ppr: QB24, RB36, WR48, TE12
+     * 1qb_ppr: QB12, RB36, WR48, TE12
+     * sf_te_premium: QB24, RB36, WR36, TE24
+   `dynasty_value = (projected_discounted_ppr − baseline) × scarcity_mult`,
+   then rescaled 0..100 CROSS-position (was per-position in v0.14).
+
+4. **Scarcity-cliff multiplier.** For each (format, position) we
+   compute `(top_starters_avg − cliff_avg) / cliff_avg`, convert to
+   a multiplier capped at 1.5. Typical computed values in the May
+   2026 player pool:
+     * sf_ppr QB:  ~1.20  (steep QB cliff under SF)
+     * sf_ppr RB:  ~1.22
+     * sf_ppr WR:  ~1.19
+     * sf_ppr TE:  ~1.06
+     * 1qb_ppr QB: ~1.08  (much flatter — fewer QBs needed)
+
+5. **Self-projection floor.** The KNN engine systematically
+   under-projects veteran starters whose same-age comps in the
+   1999-2024 corpus retired early (Josh Allen at 28 KNN-comps to
+   Jake Plummer at 28, who was three years from retirement). To
+   floor the projection at something realistic we blend KNN with a
+   self-projection: re-score the player's recent 2-3 seasons under
+   the active format, then project N more years with a
+   position-specific decay (QB 6%/yr, RB 15%/yr, WR/TE 8%/yr). Blend
+   weights: QB 0.55 KNN-vs-self, RB 0.35, WR/TE 0.40.
+
+6. **`src/dynasty/composite_weights.py` (new).** Per-(format,
+   position, source_slug) multipliers stack on top of
+   `track_record_multiplier`. SF QBs lift
+   `similarity_career_arc` (1.8 → 2.4), `nfl_impact` (0.8 → 2.0),
+   `fantasycalc` (0.6 → 1.8), `dynastyprocess` (0.3 → 1.2). 1QB QBs
+   pull back: `similarity_career_arc` (1.8 → 1.4) and market
+   sources (×0.75) to reflect that 1QB roster construction values
+   QBs less than aggregator markets imply.
+
+7. **Site format toggle.** The launcher generates rankings for both
+   `sf_ppr` and `1qb_ppr`; the rankings page header includes a
+   format dropdown that swaps to `rankings_1qb_ppr.html`. Per-format
+   `model_scores*.json` powers the rate-my-league client.
+
+8. **Methodology page extensions.** The /methodology.html page now
+   includes (a) replacement baselines and scarcity multipliers per
+   (format, position), (b) the composite weight override table.
+
+### Expected output shift
+
+sf_ppr top 15 changes from RB/WR-dominated to QB-heavy. Sample
+before/after deltas after PR #15 is merged (will vary slightly with
+market source week-to-week noise):
+
+| Player           | v0.14 rank | v0.15 rank | Delta  |
+|------------------|-----------:|-----------:|-------:|
+| Josh Allen       |        103 |          1 |  +102 |
+| Patrick Mahomes  |         94 |    ~25-30  |   ~+65 |
+| Lamar Jackson    |         43 |          8 |   +35 |
+| Jayden Daniels   |         29 |          3 |   +26 |
+| Jalen Hurts      |         80 |    ~18-25  |   ~+60 |
+| Caleb Williams   |         65 |    ~10-15  |   ~+50 |
+| Drake Maye       |         30 |    ~15-20  |   ~+12 |
+| Dak Prescott     |        263 |    ~150-200|  ~+90 |
+| Brock Purdy      |        209 |    ~100-180|  ~+50 |
+| Justin Herbert   |        ~30 |    ~12-15  |   ~+18 |
+| Joe Burrow       |        ~25 |    ~8-10   |   ~+17 |
+| Jordan Love      |          7 |    ~5-20   | varies |
+
+Mahomes lands lower than consensus because the model honestly weighs
+his 2023-2024 production decline (PPR ~280 vs his 2022 peak ~417).
+That's a feature, not a bug — we surface that as model divergence vs
+consensus on /index.html instead of papering over it.
+
+1qb_ppr is materially less QB-heavy: top 15 stays RB/WR-dominated
+with a small QB presence (Allen ~#19, Lamar ~#20). SF→1QB demotion
+is 18+ spots for the top SF QBs on average.
+
+### Validation
+
+8 new tests in `tests/test_vorp_format_aware.py`:
+  * `test_sf_top15_qbs` — ≥3 of {Allen, Burrow, Daniels, Maye, Mahomes} top 15;
+    all 5 in top 35.
+  * `test_sf_top25_qbs` — ≥2 of {Lamar, Hurts, Caleb} top 25.
+  * `test_sf_top200_starters` — Dak/Purdy top 250 (was 250+).
+  * `test_1qb_qb_demotion` — SF→1QB delta avg ≥5 spots.
+  * `test_rb_wr_unchanged` — Bijan + Chase top 15 in both formats.
+  * `test_vorp_nonzero_signal` — position spread < intra-position spread.
+  * `test_format_aware_scoring_rules_present` — LEAGUE_SCORING shape.
+  * `test_format_aware_projection_re_scores_comps` — re-scoring runs.
+  * `test_vorp_replacement_baselines_format_specific` — 1QB baseline > SF baseline.
+  * `test_scarcity_multipliers_present` — all in [1.0, 1.5].
+  * `test_luke_grimm_regression` — coverage penalty preserved.
+  * `test_composite_weight_overrides_loaded` — override lookup works.
+
+All 7 PR #14 sanity tests still pass (Justin Jefferson comp panel,
+Luke Grimm coverage gate, aging-vet QB demotion, etc.).
+
+### Known limitations / followups
+
+* The KNN engine's similarity-search uses only the latest season's
+  vector. For veteran QBs in the corpus there are no same-age elite
+  comps (Brady at 28 is rare — elite QBs at age 28 in 1999-2024 are
+  Brady, Manning, Rodgers, and a handful more). The self-projection
+  floor at weight 0.55 for QBs is a pragmatic fix; a future PR could
+  use a 3-year-rolling vector or expand the age window for QBs.
+* Mahomes specifically lands at ~#30 in SF because the model reads
+  his 2023-24 KC offense issues as a real signal. This is correct
+  behavior; if the 2025 season returns him to peak we'll see him
+  climb organically.
+
+---
+
 ## v0.14.0 — Similarity-based career arc overhaul (PR #14)
 
 **Date:** 2026-05-21

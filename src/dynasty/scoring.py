@@ -43,6 +43,7 @@ from .weights import (
     corr_to_multiplier,
     ROOKIE_SIGNAL_SOURCES,
 )
+from .composite_weights import composite_weight_multiplier
 
 
 # How many players to consider "in range" for normalization. Above this rank,
@@ -168,7 +169,7 @@ def _value_to_score(value: float | None, max_value: float) -> float | None:
 def compute_composite_scores(
     league_format: str = "sf_ppr",
     depth: int = DEFAULT_NORMALIZATION_DEPTH,
-    model_version: str = "0.14.0",
+    model_version: str = "0.15.0",
     score_year: int | None = None,
 ) -> int:
     """Run the scoring pipeline. Returns number of CompositeScore rows written."""
@@ -229,12 +230,20 @@ def compute_composite_scores(
         # Pre-compute effective weights per (source, position). For sources
         # with no position-specific track record, this collapses to a single
         # value per source.
+        #
+        # v0.15.0 adds a third multiplicative term:
+        #     composite_weight_multiplier(format, position, source_slug)
+        # which lifts QB weights in sf_ppr and pulls them back in 1qb_ppr.
+        # See ``composite_weights.py`` for the configured overrides.
         def _weight_for(sid: int, pos: Optional[str]) -> float:
             src = sources[sid]
             tr_mult = select_track_record_multiplier(
                 multipliers_by_pos.get(sid, {}), pos
             )
-            return src.default_weight * tr_mult
+            fmt_mult = composite_weight_multiplier(
+                league_format, pos, src.slug
+            )
+            return src.default_weight * tr_mult * fmt_mult
 
         # Aggregate per-player contributions
         contribs: dict[int, list[tuple[str, str, float, float, int | None]]] = defaultdict(list)

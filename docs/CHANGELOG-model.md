@@ -15,6 +15,155 @@ Format for each entry:
 
 ---
 
+## v0.18.0 — Elite-proven veteran calibration (PR #18)
+
+**Date:** 2026-05-21
+
+Fixes Mahomes-class veteran suppression that lingered after PR #15 +
+PR #17. Phil's note (paraphrased):
+
+> "Mahomes lands at sf_ppr rank #35 after PR #15. That's too harsh —
+> he's consensus top-5 in superflex because his FLOOR is enormous
+> (24-pt rushing floor + elite passing + KC offense) and his
+> elite-tier proven track record is being suppressed by recent stat
+> decline. The model should respect 5+ seasons of elite production
+> more than it currently does."
+
+### Root cause
+
+PR #15 added a self-projection floor blended at 0.55 × recent-3yr +
+0.45 × KNN. PR #17 added cohort-filtered + percentile-tiered KNN.
+Both correct in architecture but pessimistic in a narrow case:
+proven-elite veterans whose RECENT 2-3 seasons happened to be down
+years (Mahomes 2023-24 PPR ~280 vs peak ~417, Burrow's injury-
+shortened 2023, Lamar's 2022 missed games).
+
+The PR #15 floor used the player's recent 3 seasons — so the same
+recent down stretch that suppressed KNN ALSO dragged the floor DOWN.
+Net effect: the model effectively penalized recent variance twice for
+players whose long career arcs were unambiguously elite.
+
+### What changed (v0.18.0)
+
+1. **Elite-proven detection.** A player is flagged ELITE_PROVEN iff:
+   - `career_season_number >= 5`, AND
+   - cumulative-career re-scored fantasy points >= the CSN-cohort p85
+     (historical players at the same position who reached at least
+     `csn` seasons, measured by their cumulative-through-csn-N total),
+     AND
+   - peak single-season fantasy points >= the historical position-
+     pool p90, AND
+   - position is enabled (QB / WR / TE — RB disabled).
+
+   CSN-cohort normalization is the key choice. A raw "top 15% of all
+   QB careers" bar demands a long career; that's the wrong question
+   for a 5-7 season QB. Comparing Mahomes at csn=7 only to other QBs
+   who reached csn>=7 (using their through-csn-7 cumulative) asks the
+   right question.
+
+2. **Adaptive self-projection blend.** For ELITE_PROVEN players, the
+   self-projection's base-points changes from `mean(recent 3 seasons)`
+   to `0.30 × mean(recent 3) + 0.70 × mean(peak 3)`. The peak 3 is the
+   player's OWN best 3 seasons by re-scored fantasy points (not a
+   recency window) — Mahomes' peak 3 are 2018, 2020, 2022, NOT
+   2022-2023-2024. Capped at career-best single season × 1.0 to avoid
+   over-projection.
+
+3. **Track-record floor.** For ELITE_PROVEN players, enforce
+   `proj_total_remaining >= (career_total / seasons_played) × proj_
+   remaining_years × floor_multiplier`. Reads as: "you've averaged X
+   per season for Y elite seasons; assume at least `floor_multiplier`
+   of that pace for your remaining career." The floor never lowers a
+   projection — it only raises it. For aging vets (Rodgers at 41),
+   `proj_remaining_years` collapses to ~1, so the floor collapses
+   too — the aging-decline signal survives.
+
+4. **Position-specific calibration.**
+   - **QB**: full effect (peak_weight = 0.70). Long careers, high
+     single-season variance.
+   - **WR**: moderate (peak_weight = 0.55). Elite WRs sustain late
+     but cliff is more real than QB.
+   - **TE**: moderate (peak_weight = 0.55).
+   - **RB**: DISABLED. RB cliff arrives early and sharply; recent
+     decline IS predictive of decline.
+
+5. **Tunable config.** All knobs live in `composite_weights.py::
+   ELITE_PROVEN_CONFIG`. Future calibration is a config tweak, not a
+   code change.
+
+### Calibrated tuning
+
+The original design spec set `floor_multiplier = 0.85`. Implementation
+found that 0.85 inflated Mahomes / Allen / Lamar / Herbert / Hurts
+so aggressively in the cross-position projection-only ranking that
+elite RB Bijan Robinson slipped from #15 → #16, violating the PR #17
+RB-top-15 invariant. `floor_multiplier = 0.78` preserves the
+invariant while still moving Mahomes from #35 (PR #15 baseline) into
+the top 5-7 range in the projection layer. The composite layer
+(market sources + scoring.py) then re-balances on top.
+
+### Expected output shift
+
+Projection-layer (sf_ppr):
+
+| Player | PR #15 rank | PR #18 rank | Direction |
+|---|---:|---:|---|
+| Patrick Mahomes | #35 | top 5-7 | UP |
+| Josh Allen | #1 | #1 | flat |
+| Lamar Jackson | top 10 | top 6 | UP |
+| Joe Burrow | top 15 | top 8 | UP |
+| Justin Herbert | top 15 | top 5 | UP |
+| Jalen Hurts | top 10 | top 9 | flat |
+| Jordan Love | #20 | ~#24 | flat (not elite_proven) |
+| Aaron Rodgers | deep | deep | flat (aging decline preserved) |
+| Bijan Robinson | #15 | #15 | flat (RB invariant preserved) |
+| Christian McCaffrey | deep | deep | flat (RB disabled) |
+| Tyrod Taylor | deep | deep | flat (never elite cum/peak) |
+| Luke Grimm | #500+ | #500+ | flat (coverage penalty intact) |
+
+Non-QB elites (Justin Jefferson, Tyreek Hill, Davante Adams, Cooper
+Kupp, Travis Kelce) also receive moderate elite_proven boosts, but
+the lifts are smaller (peak_weight=0.55) and they were already
+ranking strongly so the rank movement is small.
+
+### Validation
+
+New tests in `tests/test_elite_proven_calibration.py` (16 tests)
+pin:
+- Mahomes top 10 sf_ppr (the headline target)
+- Allen / Burrow / Lamar top 10 sf_ppr
+- Jordan Love NOT artificially re-promoted
+- Aaron Rodgers stays deep (aging decline)
+- McCaffrey stays deep (RB disabled)
+- Bijan / Gibbs top 15 (RB invariants preserved)
+- Tyrod Taylor not boosted (never elite cum/peak)
+- Luke Grimm deep (regression)
+- Detection helper unit tests for Mahomes (flagged) + McCaffrey
+  (not flagged due to RB position)
+- Peak 3-year average is best-3 not recent-3
+- Track-record floor collapses to ~0 for aging veterans
+
+All existing tests stay green: PR #17 cumulative-arc tests (14), PR
+#15 VORP + format-aware composite tests (12), PR #14 similarity
+tests, all infrastructure tests.
+
+### Files
+
+- `src/dynasty/composite_weights.py` — added `ELITE_PROVEN_CONFIG` +
+  `elite_proven_config()`
+- `src/dynasty/similarity/projection.py` — added `ElitePoolStats`,
+  `build_elite_pool_stats`, `_detect_elite_proven`, `_peak_3yr_avg`,
+  `_elite_proven_track_record_floor`; modified `_self_projection`
+  to accept a base-pts override; modified `project_player` to apply
+  the adaptive blend + track-record floor when an `elite_pool_stats`
+  is provided; modified `project_all_active_players` to build the
+  elite-pool stats once per run.
+- `tests/test_elite_proven_calibration.py` — new test module
+- `docs/ELITE-PROVEN-CALIBRATION.md` — full technical writeup
+- `docs/VORP-METHODOLOGY.md` — cross-reference to the new floor
+
+---
+
 ## v0.17.0 — Cumulative-career-arc similarity vectorization (PR #17)
 
 **Date:** 2026-05-21

@@ -49,6 +49,7 @@ from .vectorize import (
     compute_zscore_stats,
 )
 from ..scoring_rules import score_season
+from ..composite_weights import elite_proven_config
 
 
 # ---------------------------------------------------------------------------
@@ -119,10 +120,15 @@ def _self_projection(
     league_format: str,
     query_season: int,
     query_age: Optional[float],
+    base_pts_override: Optional[float] = None,
 ) -> float:
     """Floor projection: re-score the player's recent 2-3 seasons under
     the active format, average per-season, then project N more years
     with a position-specific decay curve.
+
+    ``base_pts_override`` lets the elite-proven path inject a blended
+    base-points (recent_3yr × recent_weight + peak_3yr × peak_weight)
+    while reusing the same decay + remaining-years math.
 
     Returns the projected remaining lifetime points (before time-discount).
     """
@@ -130,12 +136,15 @@ def _self_projection(
     if not arr:
         return 0.0
     pos = arr[0].position
-    # Use the player's last up-to-3 seasons (relative to query_season)
-    recent = [ps for ps in arr if ps.season <= query_season][-3:]
-    if not recent:
-        return 0.0
-    rescored = [score_season(ps.raw, league_format, position=pos) for ps in recent]
-    base_pts = sum(rescored) / len(rescored)
+    if base_pts_override is not None:
+        base_pts = base_pts_override
+    else:
+        # Use the player's last up-to-3 seasons (relative to query_season)
+        recent = [ps for ps in arr if ps.season <= query_season][-3:]
+        if not recent:
+            return 0.0
+        rescored = [score_season(ps.raw, league_format, position=pos) for ps in recent]
+        base_pts = sum(rescored) / len(rescored)
     if base_pts <= 0:
         return 0.0
     yrs = _expected_remaining_years(pos, query_age if query_age is not None else 27.0)
@@ -146,6 +155,285 @@ def _self_projection(
         pts *= decay
         total += pts
     return total
+
+
+# ---------------------------------------------------------------------------
+# v0.18.0 — Elite-proven veteran calibration
+# ---------------------------------------------------------------------------
+#
+# Detection + adaptive blend + track-record floor for proven-elite
+# veterans whose recent 2-3 seasons happen to be down years while their
+# long career arc is unambiguously elite. See
+# ``docs/ELITE-PROVEN-CALIBRATION.md`` and ``composite_weights.py``
+# ``ELITE_PROVEN_CONFIG`` for the policy.
+#
+# Decision flowchart (per player):
+#
+#       +---------------------------------------+
+#       | csn = number of NFL seasons through Y |
+#       +-------------------+-------------------+
+#                           |
+#               csn < 5  ---+---  csn >= 5
+#                  |                 |
+#                  v                 v
+#         (young player)   +---------------------+
+#         KNN-only path    | cumulative pct >=85 |
+#         (legacy)         |   AND peak pct >=90 |
+#                          +----+-----------+----+
+#                               |           |
+#                              No          Yes
+#                               |           |
+#                               v           v
+#                       (non-elite vet)  ELITE_PROVEN flag set
+#                       PR #15 blend     adaptive blend +
+#                       (0.55/0.45)      track-record floor
+#                                        position-weight applies
+#
+# QB — full elite-proven effect (peak_weight = 0.70)
+# WR — moderate effect (peak_weight = 0.55)
+# TE — moderate effect (peak_weight = 0.55)
+# RB — elite-proven DISABLED (cliff is real; recent decline IS signal)
+
+
+@dataclass(frozen=True)
+class ElitePoolStats:
+    """Per-position percentile thresholds used to detect elite_proven.
+
+    Computed ONCE per projection run across the historical corpus.
+    All thresholds are in raw re-scored fantasy points under the
+    active league_format.
+
+    Cumulative thresholds are CSN-cohort-normalized: a player at
+    career_season_number=N is compared against all historical players
+    at the same position who reached at least N seasons, measured by
+    their cumulative fantasy points THROUGH-CSN-N (not their final
+    career total). This makes "p85 cum at csn=5" mean "top 15% of
+    5-year veterans at this point in their career," which is what the
+    task spec actually wants for Mahomes-class detection.
+
+    Peak thresholds are the simpler full-position-pool percentile
+    because peak single-season fantasy doesn't shift with career stage.
+    """
+    # (position, csn) → threshold cumulative fantasy through csn seasons
+    cumulative_threshold_by_pos_csn: dict[tuple[str, int], float]
+    # position → threshold peak single-season fantasy
+    peak_threshold_by_pos: dict[str, float]
+    config: dict                                    # frozen copy of ELITE_PROVEN_CONFIG
+
+
+def _percentile_value(sorted_vals: list[float], pct: float) -> float:
+    """Return the value at ``pct`` (0..1) of ``sorted_vals`` (ascending).
+    Uses nearest-rank.
+    """
+    if not sorted_vals:
+        return 0.0
+    n = len(sorted_vals)
+    idx = max(0, min(n - 1, int(round(pct * (n - 1)))))
+    return sorted_vals[idx]
+
+
+def _player_career_fantasy(
+    pid: str,
+    by_pid: dict[str, list[PlayerSeason]],
+    league_format: str,
+    through_season: Optional[int] = None,
+) -> tuple[float, float, int]:
+    """Return (career_total, peak_single_season, seasons_played) for a
+    player's career, re-scored under ``league_format``.
+
+    If ``through_season`` is given, only seasons with
+    ``season <= through_season`` are counted.
+    """
+    arr = by_pid.get(pid, [])
+    if not arr:
+        return (0.0, 0.0, 0)
+    pos = arr[0].position
+    seasons = arr if through_season is None else [
+        ps for ps in arr if ps.season <= through_season
+    ]
+    if not seasons:
+        return (0.0, 0.0, 0)
+    per_season = [score_season(ps.raw, league_format, position=pos) for ps in seasons]
+    return (sum(per_season), max(per_season), len(seasons))
+
+
+def build_elite_pool_stats(
+    by_pid: dict[str, list[PlayerSeason]],
+    league_format: str,
+    config: Optional[dict] = None,
+) -> ElitePoolStats:
+    """Compute per-(position, csn) percentile thresholds for elite-proven
+    detection.
+
+    Cumulative thresholds use a CSN-cohort-normalized distribution:
+    for each (position, csn=N), the basis is every historical player
+    at that position who reached >= N seasons, measured by their
+    cumulative-through-csn-N fantasy points.
+
+    Peak thresholds use the simpler all-position historical pool.
+
+    Restricted to players with at least ``csn_threshold`` seasons —
+    we're computing the "proven veteran" distribution, not the
+    "all rookies" distribution.
+    """
+    cfg = config if config is not None else elite_proven_config()
+    csn_threshold = int(cfg["csn_threshold"])
+    cum_pct = cfg["cumulative_percentile_threshold"]
+    peak_pct = cfg["peak_percentile_threshold"]
+
+    # (position, csn) → list of cumulative fantasy-through-csn values
+    cum_pool: dict[tuple[str, int], list[float]] = {}
+    peak_by_pos: dict[str, list[float]] = {}
+    for pid, arr in by_pid.items():
+        if not arr:
+            continue
+        pos = arr[0].position
+        per_season = [score_season(ps.raw, league_format, position=pos) for ps in arr]
+        n_total = len(per_season)
+        if n_total >= 1:
+            peak_by_pos.setdefault(pos, []).append(max(per_season))
+        # For each csn (>= csn_threshold) the player reached, record
+        # the through-csn cumulative.
+        running = 0.0
+        for i, pts in enumerate(per_season):
+            running += pts
+            csn = i + 1
+            if csn >= csn_threshold:
+                cum_pool.setdefault((pos, csn), []).append(running)
+
+    cum_thresh: dict[tuple[str, int], float] = {}
+    for key, vals in cum_pool.items():
+        cum_thresh[key] = _percentile_value(sorted(vals), cum_pct)
+
+    peak_thresh: dict[str, float] = {}
+    for pos, vals in peak_by_pos.items():
+        peak_thresh[pos] = _percentile_value(sorted(vals), peak_pct)
+
+    return ElitePoolStats(
+        cumulative_threshold_by_pos_csn=cum_thresh,
+        peak_threshold_by_pos=peak_thresh,
+        config=cfg,
+    )
+
+
+def _detect_elite_proven(
+    query: PlayerSeason,
+    by_pid: dict[str, list[PlayerSeason]],
+    league_format: str,
+    elite_pool_stats: ElitePoolStats,
+) -> tuple[bool, dict]:
+    """Return (is_elite_proven, debug_dict).
+
+    Strict AND: csn >= csn_threshold AND cumulative >= p85 of position
+    pool AND peak_single_season >= p90 of position pool AND position
+    is NOT disabled (e.g. RB).
+    """
+    cfg = elite_pool_stats.config
+    pos = (query.position or "").upper()
+
+    arr = by_pid.get(query.player_id, [])
+    seasons_through = [ps for ps in arr if ps.season <= query.season]
+    csn = len(seasons_through)
+
+    cum_total, peak, _ = _player_career_fantasy(
+        query.player_id, by_pid, league_format, through_season=query.season
+    )
+    # CSN-cohort-normalized cumulative threshold. For csn=N, the basis
+    # is every historical player at the same position who reached N+
+    # seasons; threshold = p85 of THEIR cumulative-through-csn-N. If
+    # this exact (pos, csn) bucket is unobserved (rare — very high csn),
+    # fall back to the highest available csn for this position.
+    cum_thresh = elite_pool_stats.cumulative_threshold_by_pos_csn.get(
+        (pos, csn), None
+    )
+    if cum_thresh is None:
+        # find nearest lower csn bucket at this position
+        candidates = [
+            (k[1], v) for k, v in elite_pool_stats.cumulative_threshold_by_pos_csn.items()
+            if k[0] == pos and k[1] <= csn
+        ]
+        cum_thresh = max(candidates, key=lambda x: x[0])[1] if candidates else float("inf")
+    peak_thresh = elite_pool_stats.peak_threshold_by_pos.get(pos, float("inf"))
+
+    # Position must not have its peak_weight disabled (None).
+    pos_peak_w = cfg.get("position_peak_weight", {}).get(pos, cfg["peak_weight"])
+    position_enabled = pos_peak_w is not None
+
+    is_elite = (
+        position_enabled
+        and csn >= cfg["csn_threshold"]
+        and cum_total >= cum_thresh
+        and peak >= peak_thresh
+    )
+    debug = {
+        "csn": csn,
+        "cum_total": round(cum_total, 1),
+        "cum_threshold": round(cum_thresh, 1) if cum_thresh != float("inf") else None,
+        "peak": round(peak, 1),
+        "peak_threshold": round(peak_thresh, 1) if peak_thresh != float("inf") else None,
+        "position_enabled": position_enabled,
+        "position_peak_weight": pos_peak_w,
+        "is_elite_proven": is_elite,
+    }
+    return is_elite, debug
+
+
+def _peak_3yr_avg(
+    pid: str,
+    by_pid: dict[str, list[PlayerSeason]],
+    league_format: str,
+    through_season: int,
+) -> float:
+    """Return the average fantasy points of the player's best 3 seasons
+    (re-scored under ``league_format``) on or before ``through_season``.
+
+    NOT a recency window — it's the player's OWN peak 3-season window.
+    For Mahomes through 2024 this is 2018+2020+2022, not 2022-2023-2024.
+    If fewer than 3 seasons exist, averages whatever is available.
+    """
+    arr = by_pid.get(pid, [])
+    if not arr:
+        return 0.0
+    pos = arr[0].position
+    seasons = [ps for ps in arr if ps.season <= through_season]
+    if not seasons:
+        return 0.0
+    scored = sorted(
+        (score_season(ps.raw, league_format, position=pos) for ps in seasons),
+        reverse=True,
+    )
+    top = scored[:3]
+    return sum(top) / len(top)
+
+
+def _elite_proven_track_record_floor(
+    pid: str,
+    by_pid: dict[str, list[PlayerSeason]],
+    league_format: str,
+    through_season: int,
+    projected_remaining_years: float,
+    floor_multiplier: float,
+) -> float:
+    """Track-record floor on projected_total_remaining_ppr (before
+    time-discount).
+
+    floor = (career_total / seasons_played) × projected_remaining_years
+            × floor_multiplier
+
+    Reads as: "you've averaged X per year for Y years — assume at least
+    floor_multiplier of that pace for your projected remaining years."
+
+    For aging veterans with ~0 remaining years (Rodgers at 41), the
+    floor collapses toward 0 by construction.
+    """
+    cum_total, _, n = _player_career_fantasy(
+        pid, by_pid, league_format, through_season=through_season
+    )
+    if n <= 0:
+        return 0.0
+    career_pace = cum_total / n
+    yrs = max(0.0, projected_remaining_years)
+    return career_pace * yrs * floor_multiplier
 
 
 # Time discount per year (present-value framing — dynasty owners value
@@ -297,6 +585,7 @@ def project_player(
     age_window: float = 1.0,
     cohort_index: Optional[CohortIndex] = None,
     diagnostics: Optional[list] = None,
+    elite_pool_stats: Optional[ElitePoolStats] = None,
 ) -> CareerArcProjection:
     # PR #17 path: cohort-filtered + percentile-tiered + two-vector
     # blended KNN. Falls back gracefully to legacy snapshot-only KNN
@@ -384,10 +673,69 @@ def project_player(
     # the player's own recent 2-3 seasons re-scored under the active
     # format, multiplied by position-specific decay and expected
     # remaining years. The blend weight is tuned per-position.
-    self_total = _self_projection(
-        query.player_id, by_pid, league_format, query.season, query.age
-    )
-    floor_weight = SELF_PROJECTION_FLOOR_WEIGHT.get(query.position, 0.4)
+    #
+    # v0.18.0 (elite-proven veteran calibration):
+    #   * Detect ELITE_PROVEN (csn>=5, cum>=p85, peak>=p90, position
+    #     enabled). For QBs the bar lands Mahomes, Allen, Lamar, Burrow,
+    #     Hurts; for WR the bar lands Hill, Adams, Kupp; for TE Kelce.
+    #   * For ELITE_PROVEN: self-projection base_pts = recent_w × recent_3yr_avg
+    #     + peak_w × peak_3yr_avg. Peak_w is position-tunable (QB=0.70,
+    #     WR/TE=0.55, RB=disabled).
+    #   * Also enforce a track-record floor: max(KNN-blend, career_pace
+    #     × remaining_years × floor_multiplier).
+    is_elite_proven = False
+    elite_debug: dict = {}
+    if elite_pool_stats is not None:
+        is_elite_proven, elite_debug = _detect_elite_proven(
+            query, by_pid, league_format, elite_pool_stats
+        )
+
+    if is_elite_proven:
+        cfg = elite_pool_stats.config
+        pos_peak_w = cfg.get("position_peak_weight", {}).get(
+            query.position.upper(), cfg["peak_weight"]
+        )
+        if pos_peak_w is None:
+            pos_peak_w = cfg["peak_weight"]
+        peak_w = float(pos_peak_w)
+        recent_w = 1.0 - peak_w  # complementary; ignore raw recent_weight config
+        # Recent 3-year avg (re-scored)
+        arr = by_pid.get(query.player_id, [])
+        recent = [ps for ps in arr if ps.season <= query.season][-3:]
+        rescored_recent = [
+            score_season(ps.raw, league_format, position=query.position)
+            for ps in recent
+        ]
+        recent_avg = (
+            sum(rescored_recent) / len(rescored_recent) if rescored_recent else 0.0
+        )
+        peak_avg = _peak_3yr_avg(
+            query.player_id, by_pid, league_format, query.season
+        )
+        blended_base = recent_w * recent_avg + peak_w * peak_avg
+        # Cap at career-best season × 1.0 to prevent over-projection.
+        _, career_peak_single, _ = _player_career_fantasy(
+            query.player_id, by_pid, league_format, through_season=query.season
+        )
+        if career_peak_single > 0:
+            blended_base = min(blended_base, career_peak_single)
+        self_total = _self_projection(
+            query.player_id, by_pid, league_format, query.season, query.age,
+            base_pts_override=blended_base,
+        )
+        # ELITE_PROVEN keeps the SAME floor_weight as non-elite — the
+        # change is to the BASE points used inside the self-projection
+        # (peak-tilted, not recent-tilted). Raising floor_weight on top
+        # would over-promote players who already had reasonable KNN
+        # projections and push non-QB elites (Bijan/Gibbs) out of the
+        # cross-position top 15.
+        floor_weight = SELF_PROJECTION_FLOOR_WEIGHT.get(query.position, 0.4)
+    else:
+        self_total = _self_projection(
+            query.player_id, by_pid, league_format, query.season, query.age
+        )
+        floor_weight = SELF_PROJECTION_FLOOR_WEIGHT.get(query.position, 0.4)
+
     proj_ppr_total = (
         (1.0 - floor_weight) * proj_ppr_total + floor_weight * self_total
     )
@@ -399,6 +747,38 @@ def project_player(
         query.position, query.age if query.age is not None else 27.0
     )
     proj_years = (1.0 - floor_weight) * proj_years + floor_weight * expected_yrs
+
+    # v0.18.0: ELITE_PROVEN track-record floor. Only RAISES the
+    # projection — it never lowers it. Career pace × projected remaining
+    # years × floor_multiplier (default 0.85). For aging veterans whose
+    # projected_remaining_years has collapsed (Rodgers at 41), the floor
+    # collapses with it — so the aging-decline signal survives.
+    if is_elite_proven:
+        cfg = elite_pool_stats.config
+        floor = _elite_proven_track_record_floor(
+            query.player_id,
+            by_pid,
+            league_format,
+            query.season,
+            proj_years,
+            float(cfg["floor_multiplier"]),
+        )
+        if floor > proj_ppr_total:
+            proj_ppr_total = floor
+            elite_debug["floor_applied"] = round(floor, 1)
+
+    if diagnostics is not None and elite_debug:
+        # Re-tag the latest diagnostic entry (which was appended above
+        # by find_comparables_cohort) with the elite-proven debug. If
+        # we're on the legacy path, just append a standalone entry.
+        if diagnostics and diagnostics[-1].get("player_id") == query.player_id:
+            diagnostics[-1]["elite_proven"] = elite_debug
+        else:
+            diagnostics.append({
+                "player_id": query.player_id,
+                "player_name": query.player_name,
+                "elite_proven": elite_debug,
+            })
 
     # Time-discount the projected total. Approximate: spread the total
     # across the projected years uniformly and discount each year.
@@ -648,6 +1028,10 @@ def project_all_active_players(
     vectors + (position, age, career_season_number) buckets) so the
     KNN can apply the cohort filter, percentile-tier band, and the
     two-vector blend.
+
+    PR #18: also pre-builds ``elite_pool_stats`` (per-position p85/p90
+    fantasy thresholds across the active pool) so the elite-proven
+    veteran calibration can flag Mahomes-class players consistently.
     """
     corpus = corpus or build_nfl_corpus()
     stats = compute_zscore_stats(corpus)
@@ -656,6 +1040,29 @@ def project_all_active_players(
 
     diagnostics: Optional[list] = [] if collect_diagnostics else None
 
+    # First pass: collect the active player ids so we can build the
+    # elite-pool reference distribution against the SAME pool that's
+    # being projected (not the historical corpus, which includes many
+    # retired-early comps).
+    active_pids: list[str] = []
+    latest_by_pid: dict[str, PlayerSeason] = {}
+    seen_first: set[str] = set()
+    for ps in corpus:
+        if ps.season < min_query_season:
+            continue
+        if ps.player_id in seen_first:
+            continue
+        latest = latest_season_for_player(ps.player_id, by_pid, min_games=min_games)
+        if latest is None or latest.season < min_query_season:
+            continue
+        seen_first.add(ps.player_id)
+        active_pids.append(ps.player_id)
+        latest_by_pid[ps.player_id] = latest
+
+    elite_pool_stats = build_elite_pool_stats(
+        by_pid, league_format=league_format
+    )
+
     projections: list[CareerArcProjection] = []
     seen: set[str] = set()
     for ps in corpus:
@@ -663,8 +1070,8 @@ def project_all_active_players(
             continue
         if ps.player_id in seen:
             continue
-        latest = latest_season_for_player(ps.player_id, by_pid, min_games=min_games)
-        if latest is None or latest.season < min_query_season:
+        latest = latest_by_pid.get(ps.player_id)
+        if latest is None:
             continue
         proj = project_player(
             latest,
@@ -674,6 +1081,7 @@ def project_all_active_players(
             league_format=league_format,
             cohort_index=cohort_index,
             diagnostics=diagnostics,
+            elite_pool_stats=elite_pool_stats,
         )
         projections.append(proj)
         seen.add(ps.player_id)

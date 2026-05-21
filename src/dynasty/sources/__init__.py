@@ -13,6 +13,7 @@ from .ras import RAS
 from .cfbd_breakouts import CFBDBreakouts
 from .nfl_impact import NFLImpact
 from .similarity_career_arc import SimilarityCareerArc
+from .rookie_similarity_chain import RookieSimilarityChain
 
 REGISTRY: dict[str, Type[BaseSource]] = {
     cls.slug: cls
@@ -29,6 +30,7 @@ REGISTRY: dict[str, Type[BaseSource]] = {
         CFBDBreakouts,
         NFLImpact,
         SimilarityCareerArc,
+        RookieSimilarityChain,
     ]
 }
 
@@ -37,4 +39,5 @@ __all__ = [
     "FantasyCalc", "DynastyProcessValues", "SleeperPlayers",
     "PFF", "FantasyPros", "BrainyBallers", "NFLDraftCapital", "FFCAdp", "RAS",
     "CFBDBreakouts", "NFLImpact", "SimilarityCareerArc",
+    "RookieSimilarityChain",
 ]

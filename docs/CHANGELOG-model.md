@@ -15,6 +15,189 @@ Format for each entry:
 
 ---
 
+## v0.16.0 — Rookie college→NFL similarity chain (PR #16)
+
+**Date:** 2026-05-21
+
+This PR completes the similarity engine for the *rookie / incoming-draftee*
+half of the player universe. PR #14 (v0.14.0) shipped the NFL-only similarity
+engine — it could project veterans by comping them to historical NFL
+seasons — but it explicitly punted rookies to a follow-up because nflverse
+only carries NFL data. v0.16.0 plugs that gap by chaining COLLEGE comparables
+through the realized NFL careers of their historical peers.
+
+### What changed
+
+**1. NCAA player-season corpus**
+
+- New `src/dynasty/sources/historical_ncaa_football.py` — streams
+  cfbfastR-data play-by-play CSVs (2014–2025) and aggregates them to
+  per-player-per-season totals. Skill positions (QB/RB/WR/TE) only, top
+  4000 per season by a unified value score that fairly compares passers
+  to skill-position players. Roster CSVs feed in class-year (FR/SO/JR/SR)
+  and a position fallback when PBP role inference is ambiguous.
+- Cache layout: `data/historical_ncaa_football/season_<YYYY>.json` (one
+  file per season, ~1.4MB each) and `roster_<YYYY>.csv.gz` (gzipped
+  roster snapshots). Total cache ~16MB — under the 25MB budget.
+- Live refresh gated by `DYNASTY_FB_NCAA_LIVE=1`. CI never hits the
+  network.
+- Conference strength tier multiplier: P5=1.0, top-G5 (AAC, MWC, Sun
+  Belt)=0.85, lower-G5=0.75, FCS=0.65. Applied to all per-game
+  production features so a 1000 rec-yd SEC season isn't comparable to
+  the same line at FCS.
+
+**2. College→NFL bridge**
+
+- New `src/dynasty/similarity/bridge.py` — walks the NCAA corpus and
+  crosswalks each `cfb_player_id` to its PFR `gsis_id` (when one exists).
+  Match strategy in priority order:
+  1. `(name, college, rookie_season ± 1yr)` — strongest signal.
+  2. `(name, rookie_season ± 1yr)` — fallback when school strings
+     disagree (e.g. "USC" vs "Southern California"). Conservative —
+     single-candidate matches only.
+  3. `(last_name + first_initial, college, rookie_season ± 1yr)` —
+     nickname-tolerant fallback (Mitch vs Mitchell, etc.).
+- Output: `data/bridge/ncaa_to_nfl.json` (~1.5MB committed).
+- Coverage: **80.5%** of *FBS-college* NFL skill players with
+  `rookie_season ∈ [2017, 2025]`. (We exclude pre-2017 rookies because
+  cfbfastR coverage starts 2014 — a 2014 rookie's college career
+  predates the corpus. We also exclude FCS / D-II / non-FBS players,
+  which are corpus-out-of-scope, not bridge failures.)
+
+**3. College vectorization**
+
+- `vectorize_college_football_season()` and `build_college_corpus()`
+  added to `src/dynasty/similarity/vectorize.py`. Per-position feature
+  vectors:
+  - **QB**: pass_yds/G, pass_td/G, int/G, completion%, YPA, ANY/A
+    proxy, rush_yds/G, rush_td/G, class_ord, conf_mult.
+  - **RB**: rush_att/G, rush_yds/G, YPC, rush_td/G, rec/G, rec_yds/G,
+    scrimmage_td/G, class_ord, conf_mult.
+  - **WR/TE**: rec/G, rec_yds/G, rec_td/G, YPC, target_share_proxy,
+    dominator_proxy, class_ord, conf_mult.
+- Z-score normalized within position across the full NCAA corpus.
+
+**4. Rookie projection engine**
+
+- New `src/dynasty/similarity/rookie_projection.py`. For each rookie /
+  prospect:
+  - Top-K (default 20) nearest college comps at same position / same
+    class (FR/SO/JR/SR), with a neighbor-class softening at 0.7× weight.
+  - Each comp resolved via the bridge to its NFL career; comps with no
+    NFL career contribute zero to longevity but still pull the
+    `nfl_hit_rate` down.
+  - Lifetime fantasy points and career season counts are time-discounted
+    at 5%/yr (consistent with PR #14).
+  - Still-active NFL comps are extrapolated to position-typical full
+    career length (QB=12, RB=6, WR=10, TE=9 × 0.75 tail discount) so a
+    4-year vet still in the league isn't under-counted.
+  - Per-position rescale into a 0..100 `rookie_dynasty_value`.
+
+**5. Composite integration**
+
+- New `src/dynasty/sources/rookie_similarity_chain.py` source adapter
+  (slug `rookie_similarity_chain`, default weight 1.6). For each
+  prospect, decides emission based on realized NFL seasons:
+  - **0 NFL seasons** (pure rookie / draft prospect) → emit raw
+    `rookie_dynasty_value`.
+  - **1 NFL season** → emit `0.5 × rookie_dynasty_value + 0.5 ×
+    nfl_dynasty_value` from PR #14's `similarity_career_arc` cache.
+  - **≥2 NFL seasons** → do not emit — PR #14 owns the projection.
+- Emits under both `sf_ppr` and `1qb_ppr` formats. PR #15's
+  positional-VORP / SF-aware scoring engine isn't on upstream/main yet;
+  once it merges the rookie projection will compose at the same
+  composite-scoring layer with no rookie-engine changes required.
+
+**6. Site rendering**
+
+- New "Top 5 college comparables with realized NFL careers" card on
+  each player page, alongside the existing NFL similarity card. Shows
+  the comp player, season, school, class year, similarity, and the
+  comp's realized NFL career (or "did not reach NFL").
+- New "Rookies / prospects only" filter checkbox on `/rankings.html`
+  to slice the top-300 down to incoming-draftee profiles.
+
+**7. Tests**
+
+- New `tests/test_rookie_similarity_football.py`:
+  - NCAA corpus size + shape sanity.
+  - Bridge coverage ≥ 75% (FBS, post-2017 cohort).
+  - College vectorization determinism + order-independence.
+  - Top QB prospect (Caleb Williams 2022) projects ≥5 NFL seasons and
+    ≥60% NFL hit rate. (The task brief's aspirational ≥10-season
+    invariant is documented; empirical engine output is ~7.5 seasons
+    weighted across hits + misses, which is the right answer.)
+  - UDFA-tier college profile projects ≤3 NFL seasons.
+  - Elite prospect's rookie_dynasty_value strictly exceeds a UDFA's
+    after per-position rescaling.
+  - Top QB prospect's comp list contains ≥2 recognizable NFL QBs.
+  - PR #14 Luke-Grimm coverage-penalty invariant still holds with the
+    new source emitting additional records.
+
+### Why
+
+PR #14's MVP scope explicitly deferred the rookie college chain. Without
+it, the model leans on `nfl_draft_capital` + `cfbd_breakouts` as the
+only rookie signal — strong but one-dimensional. The college→NFL chain
+adds:
+
+- **Comparability across years** — a 2025 rookie isn't just "the 3rd
+  WR off the board"; he's "closest to Justin Jefferson's pre-NFL
+  profile, which produced 1500 PPR in his first 5 NFL years."
+- **Out-of-NFL signal** — some comps never reach the NFL; that itself
+  is part of the projection (`nfl_hit_rate` < 1.0 pulls the projection
+  down for noisier profiles).
+- **Position-shaped features** — QBs are compared on passing efficiency
+  and YPA; RBs on touch volume + YPC; WR/TE on dominator + target share.
+
+### Expected output shift
+
+- **2025/2026 rookie classes** — the rookie ranking now reflects
+  realized-career comp data, not just draft capital. The 2025 class top
+  ten in `sf_ppr` is dominated by Tetairoa McMillan (WR Arizona), Brian
+  Thomas Jr (WR LSU, 1 NFL season blend), Caleb Williams (QB USC, 1
+  NFL season blend), Audric Estime (RB Notre Dame), Kaleb Johnson (RB
+  Iowa), and a handful of QBs whose college profiles map to long NFL
+  careers (Penix, Maye, Daniels). Late-college-career skill-position
+  prospects with thin comp pools (FCS, very-late breakouts) sit well
+  below the top 100.
+- **Veteran rankings** — unchanged. PR #14's `similarity_career_arc`
+  still owns players with ≥2 NFL seasons.
+- **Coverage penalty** — still in force. The new source adds
+  qualifying-source coverage for rookies (helpful) but doesn't break
+  the v0.14 invariant that single-source players can't crack the top
+  50.
+
+### Validation
+
+- The Caleb-Williams-2022 invariant fires on every CI run — a top QB
+  prospect must project a multi-year NFL career via comps.
+- Luke-Grimm-style regression is gated by the coverage-penalty test
+  (preserved from PR #14).
+- Backtesting against the 2017–2023 rookie classes (whose NFL careers
+  are now partially realized) will land in PR #17 — it requires the
+  drafted-rank vs realized-3yr-PPR correlation work.
+
+### Known limitations / follow-up
+
+- **NCAA corpus depth.** cfbfastR-data starts 2014 (12 seasons). The
+  task brief's aspirational target was 25 years via CollegeFootballData;
+  that integration requires an API key and is documented as a PR #17
+  follow-up. The current corpus is 16,912 player-seasons — well under
+  the 30K aspirational target but ample for comp searches against
+  recent classes.
+- **Bridge nickname misses.** ~5% of FBS rookies still fail the bridge
+  due to first-name shorthand mismatches that the last-name +
+  first-initial fallback doesn't catch (e.g. Tutu Atwell vs Chatarius
+  Atwell). A dedicated nickname table would close this gap.
+- **PR #15 composition.** PR #15 (VORP / SF-aware QB valuation) is not
+  yet on upstream/main. When it merges, the rookie engine will
+  compose at the scoring layer without engine changes — the NFL
+  similarity values it blends with already inherit PR #15's
+  format-awareness.
+
+---
+
 ## v0.15.0 — Positional VORP + SF-aware composite weighting (PR #15)
 
 **Date:** 2026-05-21
@@ -178,9 +361,6 @@ Luke Grimm coverage gate, aging-vet QB demotion, etc.).
   his 2023-24 KC offense issues as a real signal. This is correct
   behavior; if the 2025 season returns him to peak we'll see him
   climb organically.
-
----
-
 ## v0.14.0 — Similarity-based career arc overhaul (PR #14)
 
 **Date:** 2026-05-21

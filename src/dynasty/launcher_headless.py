@@ -84,6 +84,12 @@ def main():
         # under data/nflverse/, so no network call in CI.
         ("nfl_impact", "NFL Impact (DARKO-style current-skill)"),
         ("similarity_career_arc", "Similarity Career Arc"),
+        # v0.16.0 — rookie college→NFL similarity chain. Reads the
+        # committed cfbfastR-derived NCAA corpus under
+        # data/historical_ncaa_football/ + the ncaa_to_nfl bridge under
+        # data/bridge/. Pure rookies + 1-NFL-season blends only; PR #14
+        # owns players with ≥2 NFL seasons.
+        ("rookie_similarity_chain", "Rookie Similarity Chain (college→NFL)"),
     ]
     for slug, label in sources_to_sync:
         try:

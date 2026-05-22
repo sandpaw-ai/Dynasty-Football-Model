@@ -370,9 +370,31 @@ def _build_league_consensus(
     league_label: str,
     team_lookup: Dict[str, str],
 ) -> str:
-    """Consensus-vs-model diff body for the Dynasty Rankings tab."""
+    """Consensus-vs-model diff body for the Dynasty Rankings tab.
+
+    v2.3.4 (Phil 2026-05-22):
+      * Drop the 1QB PPR format toggle — Superflex only. "The point is
+        to show that production scores are in some ways detached from
+        the consensus," which works with one format clearly.
+      * Ensure every row's player name links to /players/<slug>.html
+        (the similarity-score page). Pre-fix the slug field was None
+        because the engine rankings don't carry a slug; we now compute
+        it locally from (name, player_id) matching ``_slug()``.
+    """
     crosswalk = load_crosswalk()
-    formats = ("sf_ppr", "1qb_ppr")
+    # Superflex PPR is the only format on the Dynasty Rankings tab.
+    # KTC's 1QB consensus is still computed by ``compare_to_consensus``
+    # for callers that want it (engine.overlays still ships it), but the
+    # site UI no longer surfaces a toggle.
+    formats = ("sf_ppr",)
+    # Map player_id → slug from the source rankings so every consensus
+    # row gets a valid /players/<slug>.html link. Phil's 2026-05-22
+    # bug report: "when you click into a player in the dynasty rankings
+    # tab this should link to the player's similarity score."
+    slug_by_pid: Dict[str, str] = {
+        r["player_id"]: _slug(r["name"], r["player_id"])
+        for r in engine.rankings
+    }
     payload: Dict[str, Dict] = {}
     for fmt in formats:
         cmp = compare_to_consensus(
@@ -382,7 +404,7 @@ def _build_league_consensus(
             league_format=fmt,
         )
         payload[fmt] = {
-            "label": "Superflex PPR" if fmt == "sf_ppr" else "1QB PPR",
+            "label": "Superflex PPR",
             "matched": len(cmp.rows),
             "unmatched": cmp.n_unmatched_consensus,
             "rows": [
@@ -398,7 +420,9 @@ def _build_league_consensus(
                     "ktc_value": r.consensus_value,
                     "tier": r.consensus_tier,
                     "pos_rank": r.consensus_positional_rank,
-                    "slug": r.slug,
+                    # Compute slug from the engine row by gsis_id so
+                    # every row clicks through to its player page.
+                    "slug": slug_by_pid.get(r.gsis_id) or r.slug,
                 }
                 for r in cmp.rows
             ],
@@ -428,8 +452,7 @@ community consensus for the same league format.</p>
 </div>
 
 <div class="controls">
-  Format: <button onclick="setFormat('sf_ppr')" id="btn-sf_ppr">Superflex PPR</button>
-  <button onclick="setFormat('1qb_ppr')" id="btn-1qb_ppr">1QB PPR</button>
+  Format: <span class="stats"><strong>Superflex PPR</strong></span>
   &nbsp;· Sort:
   <button onclick="setSort('model')" id="sort-model">Model rank</button>
   <button onclick="setSort('consensus')" id="sort-consensus">Consensus rank</button>
@@ -457,7 +480,12 @@ that cannot be resolved to a model player are excluded.</p>
 
 <script>
 const CONSENSUS = {payload_json};
-let currentFmt = 'sf_ppr';
+// v2.3.4: Superflex PPR is the only format on the Dynasty Rankings tab
+// per Phil 2026-05-22 ("On Dynasty Rankings tab it should only be
+// Superflex PPR. Let's get rid of the 1QB PPR format button."). The
+// payload still uses a dict keyed by format string for back-compat with
+// the legacy overlay fallback path.
+const currentFmt = 'sf_ppr';
 let currentSort = 'model';
 // Consensus-page delta semantics (per Phil 2026-05-22):
 // Model ranking a player HIGHER than the crowd is the bullish
@@ -506,16 +534,11 @@ function render() {{
   }}).join('');
   document.getElementById('ov-stats').textContent =
     data.label + ' · ' + data.matched + ' players matched';
-  ['sf_ppr','1qb_ppr'].forEach(k => {{
-    const b = document.getElementById('btn-'+k);
-    if (b) b.style.opacity = (k === currentFmt) ? '1' : '0.55';
-  }});
   ['model','consensus','bullish','bearish'].forEach(k => {{
     const b = document.getElementById('sort-'+k);
     if (b) b.style.opacity = (k === currentSort) ? '1' : '0.55';
   }});
 }}
-function setFormat(fmt) {{ currentFmt = fmt; render(); }}
 function setSort(s) {{ currentSort = s; render(); }}
 render();
 </script>
@@ -1204,8 +1227,12 @@ def generate_site(
         encoding="utf-8",
     )
 
-    # Per-player pages.
-    for row in engine.rankings[:limit]:
+    # Per-player pages. v2.3.4 (Phil 2026-05-22): generate a page for
+    # EVERY ranked player, not just the top ``limit``, so every row on
+    # the Dynasty Rankings consensus tab clicks through to a
+    # similarity-score page. The top-N main rankings table still uses
+    # ``limit`` for the homepage display.
+    for row in engine.rankings:
         slug = _slug(row["name"], row["player_id"])
         comps = engine.comps.get(row["player_id"], [])
         team = team_lookup.get(row["player_id"], "—")

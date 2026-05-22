@@ -1,16 +1,20 @@
-"""Headless launcher — v1.0 rewrite.
+"""Headless launcher — v2.3.4 daily-refresh pipeline.
 
-Replaces the v0.x multi-source composite with a single-engine pipeline:
-    1. Sync Sleeper player metadata (for current rosters / team display).
-    2. Sync MFL player crosswalk (for MFL league imports).
-    3. Build retired comp corpus + era-pace + similarity vectors.
-    4. Run the v1 similarity engine, persist sidecars under data/engine_v1/.
-    5. Build the static site (rankings.html, league.html, methodology.html,
-       sources.html, prospects.html, per-player pages).
-    6. Pre-fetch any leagues listed in leagues.json.
+Every step that pulls external data runs on each invocation so the
+site always reflects fresh-as-of-today inputs. Phil 2026-05-22:
 
-No more "compute composite scores" step. No more 10-source weighting. One
-engine. One file of truth.
+  "I want everything to pull from every source on a daily basis. I
+   know the code is meant to run every day, but lets make sure that
+   the scrapes from all of the sources runs every day as well."
+
+Pipeline:
+    [1/7]  init DB (used for Sleeper metadata + league imports)
+    [2/7]  refresh nflverse caches (player_stats_season + players.csv.gz)
+    [3/7]  sync Sleeper + MFL player metadata
+    [4/7]  refresh KeepTradeCut consensus + dynastyprocess crosswalk
+    [5/7]  run the v2.3 similarity engine
+    [6/7]  build the static site
+    [7/7]  pre-fetch any leagues listed in leagues.json
 """
 from __future__ import annotations
 import sys
@@ -23,7 +27,7 @@ def main():
     print("=" * 60)
 
     # Step 1: init DB (used for Sleeper metadata + league imports only).
-    print("\n[1/5] Initializing database...")
+    print("\n[1/7] Initializing database...")
     try:
         from dynasty.db.session import init_db
         init_db()
@@ -32,8 +36,32 @@ def main():
         print(f"  FAIL: {e}")
         sys.exit(1)
 
-    # Step 2: Sleeper + MFL player metadata.
-    print("\n[2/5] Syncing player metadata (Sleeper + MFL)...")
+    # Step 2: refresh nflverse caches (player_stats_season + players).
+    # This MUST run before the engine — the engine reads from these
+    # files. Daily mode just re-pulls the current season's stats and
+    # the players metadata; older seasons are static. Non-fatal: if
+    # the network is down we keep the previous cache and the engine
+    # still builds.
+    print("\n[2/7] Refreshing nflverse caches...")
+    try:
+        from pathlib import Path as _P
+        sys.path.insert(
+            0,
+            str(_P(__file__).resolve().parent.parent.parent / "scripts"),
+        )
+        import refresh_nflverse_corpus  # type: ignore
+        nflverse_summary = refresh_nflverse_corpus.refresh(verbose=True)
+        print(
+            f"  OK · current_season={nflverse_summary['current_season']} "
+            f"years_fetched={len(nflverse_summary['years_fetched'])} "
+            f"rows_total={nflverse_summary['rows_total']:,}"
+        )
+    except Exception as e:
+        print(f"  WARN: nflverse refresh failed: {e}")
+        print("  (Engine will run against the previously cached corpus.)")
+
+    # Step 3: Sleeper + MFL player metadata.
+    print("\n[3/7] Syncing player metadata (Sleeper + MFL)...")
     try:
         from dynasty.sync import sync_sleeper_players
         n = sync_sleeper_players()
@@ -52,8 +80,22 @@ def main():
     except Exception as e:
         print(f"  MFL crosswalk WARN: {e}")
 
-    # Step 3: Run the v1 similarity engine.
-    print("\n[3/5] Running v1 similarity engine...")
+    # Step 4: Refresh KTC consensus snapshot + dynastyprocess crosswalk.
+    # Moved BEFORE the engine run so a freshly published consensus is
+    # available to the site builder in the same invocation. Non-fatal:
+    # if the network call fails we keep the previous day's cache and
+    # the site falls back gracefully.
+    print("\n[4/7] Refreshing KTC consensus + dynastyprocess crosswalk...")
+    try:
+        import refresh_ktc_consensus  # type: ignore
+        n = refresh_ktc_consensus.refresh()
+        print(f"  OK · {n} consensus players cached")
+    except Exception as e:
+        print(f"  WARN: KTC refresh failed: {e}")
+        print("  (Site will use cached snapshot if available, otherwise overlay fallback.)")
+
+    # Step 5: Run the similarity engine.
+    print("\n[5/7] Running similarity engine...")
     try:
         from dynasty.engine.similarity_v1 import run_engine
         engine_result = run_engine(persist=True)
@@ -76,22 +118,8 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
-    # Step 3b: Refresh the KeepTradeCut consensus snapshot. Non-fatal:
-    # if the network call fails we keep the previous day's cache and the
-    # site falls back to the legacy overlay automatically.
-    print("\n[3b/5] Refreshing KTC consensus snapshot...")
-    try:
-        from pathlib import Path as _P
-        sys.path.insert(0, str(_P(__file__).resolve().parent.parent.parent / "scripts"))
-        import refresh_ktc_consensus  # type: ignore
-        n = refresh_ktc_consensus.refresh()
-        print(f"  OK · {n} consensus players cached")
-    except Exception as e:
-        print(f"  WARN: KTC refresh failed: {e}")
-        print("  (Site will use cached snapshot if available, otherwise overlay fallback.)")
-
-    # Step 4: Build the static site.
-    print("\n[4/5] Building site...")
+    # Step 6: Build the static site.
+    print("\n[6/7] Building site...")
     try:
         from dynasty.report import generate_site
         out = generate_site(
@@ -107,11 +135,9 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
-    # Step 5: Pre-fetch leagues listed in leagues.json.
-    print("\n[5/5] Pre-fetching listed leagues...")
+    # Step 7: Pre-fetch leagues listed in leagues.json.
+    print("\n[7/7] Pre-fetching listed leagues...")
     try:
-        from pathlib import Path as _P
-        sys.path.insert(0, str(_P(__file__).resolve().parent.parent.parent / "scripts"))
         import prefetch_leagues  # type: ignore
         summary = prefetch_leagues.prefetch_all()
         ok_count = len(summary.get("leagues", []))

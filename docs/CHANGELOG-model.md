@@ -15,6 +15,127 @@ Format for each entry:
 
 ---
 
+## v2.3.4 — Superflex-only consensus tab, working player links, daily refresh
+
+**Date:** 2026-05-22
+
+Phil 2026-05-22 review of v2.3.3:
+
+  1. *"On Dynasty Rankings tab it should only be Superflex PPR.
+     Let's get rid of the 1QB PPR format button. I like the model rank
+     and consensus rank buttons as well as the model bullish and model
+     bearish buttons. The point of all of this is to show that
+     production scores are in some ways detached from the consensus."*
+
+  2. *"When you click into a player in the dynasty rankings tab this
+     should link to the player's similarity score."*
+
+  3. *"I want everything to pull from every source on a daily basis.
+     I know the code is meant to run every day, but lets make sure
+     that the scrapes from all of the sources runs every day as well.
+     Build that into the code."*
+
+**Mechanics.**
+
+  1. **Superflex-only on Dynasty Rankings.** ``_build_league_consensus``
+     now iterates over ``formats = ("sf_ppr",)`` only. The format
+     selector renders as a static ``<strong>Superflex PPR</strong>``
+     label — no toggle button. The four sort buttons (Model rank /
+     Consensus rank / Model bullish / Model bearish) are unchanged.
+     The 1QB-rank field is still computed by
+     ``compare_to_consensus`` for callers that want it (engine.overlays
+     ships it), but the site UI no longer exposes it.
+
+  2. **Every row clicks through to /players/<slug>.html.** Pre-fix the
+     consensus rows had `slug=None` because the engine rankings JSON
+     never carried a slug, so the render() JS rendered plain text
+     instead of an anchor. Two-part fix:
+
+     * `_build_league_consensus` now computes a `{player_id: slug}`
+       lookup from `engine.rankings` (using the same `_slug()` helper
+       the rankings page uses) and stamps the slug onto every
+       consensus row before emitting JSON.
+     * `generate_site` now produces a player page for EVERY ranked
+       player, not just the top `limit`. Pre-fix only the top-300
+       got pages, leaving ~80 deep-tail consensus rows linking to
+       404s. Now 764 player pages match 384 consensus rows with
+       0 broken links.
+
+  3. **Daily refresh of all external data sources.** The launcher
+     pipeline is reordered to a 7-step flow:
+
+     ```
+     [1/7]  init DB
+     [2/7]  refresh nflverse caches (stats + players)   *** NEW ***
+     [3/7]  sync Sleeper + MFL player metadata
+     [4/7]  refresh KTC consensus + dynastyprocess crosswalk
+     [5/7]  run similarity engine
+     [6/7]  build static site
+     [7/7]  pre-fetch leagues from leagues.json
+     ```
+
+     The nflverse refresh runs BEFORE the engine (the engine reads
+     from `data/nflverse/`); KTC refresh runs after metadata sync
+     but before the engine so the site builder sees same-day
+     consensus. Every refresh is wrapped in try/except so a single
+     network failure doesn't fail the build — we fall back to the
+     cached file and the next day's run picks up.
+
+     `scripts/refresh_nflverse_corpus.py` was rewritten with:
+
+     * A `refresh()` function the launcher imports.
+     * Daily mode (default): re-pulls only the current NFL season's
+       stats (the in-progress season is the only one that changes
+       week-to-week) plus `players.csv.gz`. ~5 seconds.
+     * `--full` mode: rebuilds the entire 1999-current stats file.
+     * A `current_nfl_season(today)` helper that auto-detects the
+       right season (Sept-Dec = `today.year`; Jan-Aug = `today.year - 1`).
+     * Atomic writes via tempfile + rename so a mid-refresh crash
+       can't corrupt the cache.
+     * `players.csv.gz` refresh added (new; previously this metadata
+       file was never refreshed).
+
+**Output shifts.** Cosmetic on the consensus page; no model-math
+changes. Every Dynasty Rankings row now clicks through to a real
+player page. Player-page count went from 300 to 764.
+
+**Validation.** New `tests/test_v2_3_4_superflex_only_and_daily_refresh.py`
+(15 cases):
+
+  * No format-toggle buttons on Dynasty Rankings.
+  * CONSENSUS JSON payload has only the `sf_ppr` key.
+  * Every consensus row's slug references a real player page on disk.
+  * Anchor template `<a href="players/...">` present in render() JS.
+  * Launcher source imports + calls `refresh_nflverse_corpus.refresh`,
+    `refresh_ktc_consensus.refresh`, `sync_sleeper_players`,
+    `sync_mfl_players`.
+  * Nflverse refresh runs BEFORE the engine in the launcher script.
+  * `current_nfl_season(today)` heuristic pinned across 7 dates
+    spanning offseason / regular season / postseason / season boundary.
+
+Also updated `test_dynasty_rankings_presets` (now
+`test_dynasty_rankings_superflex_only`) to assert no format-toggle
+buttons exist on Dynasty Rankings.
+
+All **181 affected tests pass.**
+
+**Files.**
+
+  * `src/dynasty/report.py`: `_build_league_consensus` Superflex-only;
+    slug lookup added; `generate_site` produces player pages for
+    every ranked player.
+  * `src/dynasty/launcher_headless.py`: 7-step pipeline with nflverse
+    + KTC refresh inline; non-fatal try/except wrappers.
+  * `scripts/refresh_nflverse_corpus.py`: rewritten with `refresh()`
+    API, daily-mode default, `--full` flag, `current_nfl_season()`
+    helper, atomic writes, players.csv.gz refresh.
+  * `tests/test_v2_3_4_superflex_only_and_daily_refresh.py` (new,
+    15 cases).
+  * `tests/test_v2_2_penalties.py`:
+    `test_dynasty_rankings_presets` -> `test_dynasty_rankings_superflex_only`.
+
+---
+
 ## v2.3.3 — wash-out heavy penalty (top-5 bust amplifier), stronger survival, stale-data flag
 
 **Date:** 2026-05-22

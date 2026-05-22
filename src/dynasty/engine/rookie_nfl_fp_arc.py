@@ -453,13 +453,13 @@ def build_rookie_corpus(
       require_post_rookie_season: when True, only include players with
             at least one realised year-2+ season (so projection has
             something to draw from).
-      min_total_seasons: minimum number of completed NFL seasons the
-            comp must have on the books (counts only seasons with
-            ``games >= MIN_ROOKIE_GAMES_CORPUS``). v2.3.3 Phil directive:
-            comps must have a settled career arc, not be active 2-3
-            year players whose year-5+ careers are precisely what we're
-            trying to project. Defaults to 0 for back-compat; the
-            engine passes ``MIN_NFL_SEASONS_FOR_COMP`` (5) at runtime.
+      min_total_seasons: optional minimum completed NFL seasons per
+            comp. Defaults to 0 (no filter). Kept as an optional knob
+            for experimentation; the production engine does NOT enable
+            it because short-career busts are signal, not noise (the
+            v2.3.3 wash-out penalty in ``v2_2_penalties.compute_survival``
+            is the mechanism that punishes targets with bust-heavy
+            comp pools).
     """
     out: List[RookieProfile] = []
     rs_map = rookie_season_by_pid or {}

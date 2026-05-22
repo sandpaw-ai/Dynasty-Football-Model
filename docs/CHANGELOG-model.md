@@ -15,9 +15,27 @@ Format for each entry:
 
 ---
 
-## v2.3.3 — hard ≥5-NFL-season comp filter, stronger survival, stale-data flag
+## v2.3.3 — wash-out heavy penalty (top-5 bust amplifier), stronger survival, stale-data flag
 
 **Date:** 2026-05-22
+
+**Note:** an earlier draft of v2.3.3 implemented a hard ≥5-NFL-season
+filter on the comp pool. Phil explicitly rejected that approach:
+
+> *"I don't want to implement that fix. I didn't mean to omit the
+> similarity scores if those players did not have 5 seasons. I meant
+> that if they did not make it more than 4/5 seasons then that should
+> be held against the player because it means the player they are
+> compared to was a bust. If anything, it should get held against the
+> player we are ranking. Take the Bo Nix, and Anthony Richardson as
+> an example. If you are being compared to a player like Aaron Brooks
+> or Desmond Ridder or Tim Tebow you should be heavily de-ranked for
+> that comparison. You are being compared to players who stopped
+> accumulating stats because teams stopped playing them."*
+
+v2.3.3-final reverts the corpus filter and instead amplifies the
+wash-out penalty so short-career busts in the comp pool drag the
+target down hard.
 
 Phil 2026-05-22 review of v2.3.2:
 
@@ -39,39 +57,31 @@ Phil 2026-05-22 review of v2.3.2:
      to the player being evaluated. Please overhaul the model using
      this logic."*
 
-**Three-layer fix.**
+**Three-layer fix (corrected).**
 
-  1. **Hard ≥5-NFL-season comp filter** (`MIN_NFL_SEASONS_FOR_COMP=5`)
-     applied at corpus-construction time for both engines:
+  1. **Top-5 bust amplifier** on the survival multiplier (Phil's
+     core directive). For each wash-out among a target's 5 highest-
+     similarity comps, apply an EXTRA multiplicative 8% haircut on
+     top of the rate-based survival formula:
 
-     * v2.0 cumulative-arc engine (`run_engine`): the `long_arc_corpus`
-       gate now stacks the ≥5-season floor on top of the existing
-       long-arc / retired rules. Pre-v2.3.3 a 3-season retired QB
-       (Tim Tebow) was a comp because he was retired-through-2022.
-       Post-fix every comp has ≥5 completed NFL seasons regardless
-       of retirement status.
-     * v2.1 rookie engine (`build_rookie_corpus`): new
-       `min_total_seasons` parameter, set to 5 at call site. Active
-       2-3 year players (Bo Nix, CJ Stroud, Caleb Williams,
-       Anthony Richardson) can no longer be rookie comps for the
-       2025 class. Phil's exact directive verified for Dart: his
-       new comp pool is Kyler Murray (7), Dak Prescott (10),
-       Joe Burrow (6), Daniel Jones (7), Josh Allen (8), Mariota
-       (8), Jameis (8), Russell Wilson (14), Baker (8), Roethlisberger
-       (17), Stafford (16), Fitzpatrick (14), Mayfield (8),
-       Minshew (6), CJ Beathard (5) — every comp ≥5 seasons.
+     ```
+     top5_amp = 1.0 - 0.08 * min(top5_bust_count, 5)
+     survival *= top5_amp
+     ```
 
-     Corpus size impact: long-arc pool drops from ~1,500 to ~850.
-     Per-position depth: 123 QBs / 278 RBs / 409 WRs / 230 TEs.
-     Plenty deep for top-K=20 selection.
+     The intuition: a wash-out as the #1 comp is a far louder signal
+     than the same wash-out as the #15 comp, even after similarity
+     weighting. Anthony Richardson's pre-fix top 5 was Jameis,
+     Freeman, Darnold, Tebow, Manuel — three wash-outs in his top 5
+     → 1.0 − 3 × 0.08 = 0.76 × the rate-based survival. Clean comp
+     pools (Allen, Mahomes, Chase, Jefferson, Lamar) keep
+     `top5_bust_count = 0` and amp = 1.0.
 
-  2. **Strengthened survival multiplier.** With the corpus now
-     guaranteed to consist of settled NFL careers, bust_rate is a
-     clean signal (every comp had a chance to wash out OR succeed,
-     and we observed which). Pre-v2.3.3 the calibration was
-     intentionally soft to avoid penalising active 2-3 year players
-     who hadn't washed out but read as short-career. With the new
-     filter that protection is structural so the formula can bite:
+     `SurvivalDiagnostics.top5_bust_count` is stamped on every row
+     so the per-player page can surface exactly which top-5 comps
+     drove the penalty.
+
+  2. **Strengthened rate-based survival multiplier**:
 
      ```
      Old (v2.2 - v2.3.2):
@@ -83,84 +93,74 @@ Phil 2026-05-22 review of v2.3.2:
        floor = 0.30
      ```
 
-     A 60%-bust comp pool now yields survival=0.58 (42% haircut)
-     instead of 0.79 (21% haircut). Clean comp pools (Allen, Mahomes,
-     Hurts, Lamar at 0% bust) still resolve to 1.0.
+     A 60%-bust comp pool now yields rate-based survival 0.58
+     (42% haircut) instead of 0.79 (21% haircut). Combined with the
+     top-5 amplifier, a target whose top comps are dominated by
+     short-career busts (Richardson, Caleb Williams) takes a full
+     wash-out haircut.
 
-  3. **Stale-data flag.** A new diagnostic
-     `ConfidenceDiagnostics.is_stale_data` fires when a player
-     accumulated < 12 games across the two most recent NFL seasons.
-     Sam Howell (0 games in 2024-25) and Anthony Richardson (11
-     games combined) trip it; every active rookie starter (Cam Ward
-     17, Dart 14, Bowers 17, etc.) does not. When stale=True,
-     `apply_penalty_stack` disables the Bayesian pull-toward-baseline
-     so the projection multiplies straight by confidence instead of
-     being lifted back toward the QB top-50 median. This is the
-     direct fix for Phil's specific Howell complaint: with stale=True
-     and confidence=0.531, Howell's post-survival 1628 becomes
-     1628*0.531 = 864 (not 1652 like before).
+  3. **Stale-data flag.** `ConfidenceDiagnostics.is_stale_data`
+     fires when a player accumulated < 12 games across the two most
+     recent NFL seasons. Sam Howell (0 games 2024-25) and Anthony
+     Richardson (11 games combined) trip it. When stale, the
+     Bayesian pull-toward-baseline is disabled in
+     `apply_penalty_stack` so the projection multiplies straight by
+     confidence instead of being lifted back toward the QB top-50
+     median. Every active rookie starter (Cam Ward 17, Dart 14,
+     Bowers 17) does NOT trip it.
 
 **Output shifts (Phil's anchors).**
 
-  * Sam Howell:           #38   -> #101  (score 1491 -> 841)
-  * Anthony Richardson:   #37   -> #126  (score 1495 -> 738)
-  * Justin Fields:        #23   -> #29   (score 1681 -> 1569)
-  * Jaxson Dart:          ~#40  -> #35   (modest lift)
-  * Cam Ward:             #158  -> #137  (modest lift; his rookie
-    11.0 PPR/g is still mid-tier so the comp pool centres on Davis
-    Mills / Carson Wentz / Trubisky, not the elite QBs Phil's eye
-    test suggests)
+  * Anthony Richardson:   #37   -> #178 (top5_busts=3, stale=True)
+  * Sam Howell:           #38   -> #114 (top5_busts=0, stale=True;
+                                          stale flag does the work)
+  * Justin Fields:        #23   -> #32  (top5_busts=1)
+  * Caleb Williams:       ~#22  -> #59  (top5_busts=3)
+  * Drake Maye:           ~#20  -> #51  (top5_busts=2)
+  * C.J. Stroud:          ~#71  -> #92  (top5_busts=2)
+  * Bo Nix:               #5    -> #8   (top5_busts=1 = Aaron Brooks)
+  * Jaxson Dart:          ~#40  -> #31  (top5_busts=0)
+  * Cam Ward:             #158  -> #142 (top5_busts=0)
+  * Marvin Harrison Jr.:  #154  (unchanged; top5_busts=1)
+  * Active multi-year vets (Jefferson, Chase, Hurts, Mahomes,
+    Lamar) unchanged — top5_busts=0 across the board.
 
-  * Elite-tier compression: with stronger survival, more clean-
-    comp-pool QBs cluster at the top. SF overlay ranks shifted a
-    few spots for Allen / Hurts / Lamar / Burrow / Stroud; test
-    invariants relaxed accordingly with rationale.
+**Validation.** New `tests/test_v2_3_3_washout_heavy_penalty.py`
+(7 cases):
 
-**Validation.** New `tests/test_v2_3_3_min_5_season_filter.py`
-(16 cases):
-
-  * Long-arc corpus excludes Tim Tebow, Christian Ponder, Tyler
-    Thigpen, EJ Manuel (all <5 seasons) AND every member has ≥5
-    completed seasons.
-  * Anthony Richardson's and Jaxson Dart's comp pools both verified
-    to exclude unproven 2-3 year active QBs.
-  * Sam Howell rank > 50; flagged `is_stale_data=True`.
-  * Anthony Richardson rank > 50; flagged `is_stale_data=True`.
-  * Cam Ward and Jaxson Dart NOT flagged stale (full rookie years).
-  * Active starters (Allen, Mahomes, Hurts, Lamar, Jefferson, Chase,
-    Bo Nix, Daniels) all confirmed non-stale.
-  * Per-position corpus depth still adequate for top-K=20 selection.
+  * Short-career busts (Tebow, Ponder, Thigpen, Manuel, Brooks,
+    Freeman, Sanchez, Bortles, Vince Young) all remain in the
+    long-arc corpus — they are SIGNAL, not noise.
+  * Richardson `top5_bust_count >= 2` and survival_multiplier `<= 0.75`.
+  * Clean comp pools (Allen / Mahomes / Lamar / Chase / Jefferson)
+    have `top5_bust_count == 0` and survival `>= 0.93`.
+  * Anthony Richardson rank `> 100`; Sam Howell rank `> 75`.
+  * Jaxson Dart inside top 50 (clean top-5, no amplifier hit).
+  * Amplifier source constant `0.08` is pinned via inspection.
 
 Touched-up invariants in older test files (with rationale comments):
 
-  * `test_long_arc_corpus_size` >=1500 -> >=800.
-  * `test_travis_hunter_top_80` -> `top_100`.
-  * `test_jeanty_comps_are_rookie_RBs` pin set updated to use
-    long-arc workhorse RBs.
-  * `test_mcmillan_comps_are_rookie_WRs` pin set updated to use
-    long-arc 1000-yard-rookie WRs.
-  * `test_allen_top_5_sf` top_12 -> top_20.
-  * `test_hurts_top_15_sf` top_15 -> top_22.
-  * `test_lamar_top_15_sf` top_18 -> top_30.
-  * `test_burrow_top_30_sf` top_40 -> top_50.
-  * `test_pocket_qbs_still_meaningful` top_130 -> top_140.
+  * `test_daniels_top_8` -> `test_daniels_top_12`.
+  * `test_drake_maye_top_20` -> `test_drake_maye_top_75`.
+  * `test_caleb_williams_top_30` -> `test_caleb_williams_top_75`.
+  * `test_jayden_daniels_top_8_sf` -> `test_jayden_daniels_top_12_sf`.
 
-All **168 affected tests pass.**
+All **170 affected tests pass.**
 
 **Files.**
 
-  * `src/dynasty/engine/similarity_v1.py` (MIN_NFL_SEASONS_FOR_COMP
-    constant; long-arc corpus filter; rookie corpus filter wired;
-    is_stale_data threaded through apply_penalty_stack;
-    `current_season` passed to compute_confidence)
-  * `src/dynasty/engine/rookie_nfl_fp_arc.py` (`build_rookie_corpus`
-    gains `min_total_seasons` parameter)
-  * `src/dynasty/engine/v2_2_penalties.py` (strengthened survival
-    formula; new RECENT_STARTER_GAMES_TWO_YEAR threshold + stale-data
-    flag; `apply_penalty_stack` gains `is_stale_data` arg that
-    disables the Bayesian pull)
-  * `tests/test_v2_3_3_min_5_season_filter.py` (new, 16 cases)
-  * Various invariant updates with v2.3.3 rationale comments
+  * `src/dynasty/engine/v2_2_penalties.py`: strengthened survival
+    formula; new top-5 bust amplifier in `compute_survival`;
+    `top5_bust_count` added to `SurvivalDiagnostics`; new
+    `RECENT_STARTER_GAMES_TWO_YEAR` threshold + stale-data flag;
+    `apply_penalty_stack` gains `is_stale_data` arg that disables
+    the Bayesian pull.
+  * `src/dynasty/engine/similarity_v1.py`: `top5_bust_count` stamped
+    on every row; `current_season` passed to `compute_confidence`;
+    `is_stale_data` threaded through to `apply_penalty_stack`.
+  * `tests/test_v2_3_3_washout_heavy_penalty.py` (new, 7 cases).
+  * `tests/test_v2_2_penalties.py`, `tests/test_v2_1_rookie_nfl.py`:
+    invariant relaxations for Daniels/Maye/Caleb with rationale.
 
 ---
 

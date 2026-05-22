@@ -107,21 +107,14 @@ def test_tetairoa_top_30(engine):
     assert rank <= 30, f"Tetairoa engine rank #{rank} — should be top 30"
 
 
-def test_travis_hunter_top_100(engine):
+def test_travis_hunter_top_80(engine):
     """Travis Hunter (JAX, 63.8 PPR, only 7 G / 298 yds). The model
-    should project him into the top 100 — elite draft capital but
+    should project him into the top 80 — elite draft capital but
     LIMITED USAGE, so the confidence shrinkage prevents a top-30
-    overprojection.
-
-    Updated in v2.3.3 (Phil 2026-05-22 directive): the ≥5-NFL-season
-    hard comp filter removes active 2-3 year WRs from Hunter's comp
-    pool, leaving long-arc comps that drag his projection a few spots
-    deeper than the original top-80 invariant. The structural pin is
-    just "still rosterable as a top-100 dynasty asset."
-    """
+    overprojection."""
     rank = _rank(engine, "Travis Hunter")
     assert rank is not None
-    assert rank <= 100, f"Hunter engine rank #{rank} — should be top 100"
+    assert rank <= 80, f"Hunter engine rank #{rank} — should be top 80"
 
 
 def test_travis_hunter_cautious(engine):
@@ -168,22 +161,13 @@ def test_dart_comps_are_rookie_QBs(engine):
 
 
 def test_jeanty_comps_are_rookie_RBs(engine):
-    """Jeanty's comps should include workhorse-rookie RBs with
-    settled NFL careers. AT LEAST 2 of Phil's pinned set should appear
-    in the top 10.
-
-    Updated in v2.3.3 (Phil 2026-05-22 directive): only players with
-    ≥5 NFL seasons are eligible as comps, which excludes Bijan (3),
-    Najee (4), and Kyren (4). The remaining pinned candidates are
-    McCaffrey, Saquon, Jonathan Taylor plus established workhorse
-    RBs whose rookie years pattern-match Jeanty.
-    """
+    """Jeanty's comps should include workhorse-rookie RBs. AT LEAST 2 of
+    Phil's pinned set should appear in the top 10 (the top 5 is dominated
+    by close-fp/G matches like Josh Jacobs and D'Andre Swift which are
+    also legitimate workhorse-RB-rookie comps)."""
     pins = {
-        "Saquon Barkley", "Jonathan Taylor", "Christian McCaffrey",
-        # Long-arc workhorse-rookie RBs whose 200+-touch debut
-        # seasons are the natural comp set for Jeanty:
-        "Josh Jacobs", "D'Andre Swift", "Marshawn Lynch",
-        "Steven Jackson", "Joseph Addai", "Travis Henry",
+        "Bijan Robinson", "Saquon Barkley", "Najee Harris",
+        "Jonathan Taylor", "Christian McCaffrey", "Kyren Williams",
     }
     top10 = set(_comp_names(engine, "Ashton Jeanty", k=10))
     matches = top10 & pins
@@ -194,25 +178,18 @@ def test_jeanty_comps_are_rookie_RBs(engine):
 
 
 def test_mcmillan_comps_are_rookie_WRs(engine):
-    """Tetairoa's comps should include 1000-yard rookie WRs with
-    settled NFL careers. AT LEAST 2 of Phil's pinned set should appear
-    in the top 15.
-
-    Updated in v2.3.3 (Phil 2026-05-22 directive): the ≥5-NFL-season
-    hard floor excludes Garrett Wilson (4), Drake London (4),
-    Chris Olave (4), MHJ (2), Brian Thomas Jr. (2). Phil's intent was
-    "long-arc 1000-yard rookie WRs" — the new corpus surfaces exactly
-    that (Tyreek Hill, Julio Jones, A.J. Green, Keenan Allen, Amari
-    Cooper, Tee Higgins, AR St. Brown, CeeDee Lamb). Justin Jefferson
-    and Ja'Marr Chase both have ≥5 seasons so they remain eligible.
-    """
+    """Tetairoa's comps should include 1000-yard rookie WRs. AT LEAST 2
+    of Phil's pinned set should appear in the top 15 (the top 10 is
+    saturated with close-fp/G recent rookies like Garrett Wilson, A.J.
+    Brown, Terry McLaurin, CeeDee Lamb — all valid 12-14 fp/G rookie
+    WR comps that compete with Phil's pinned set on pure feature
+    distance)."""
     pins = {
-        "Justin Jefferson", "Ja'Marr Chase",
-        # Long-arc 1000-yard-rookie WRs:
-        "A.J. Brown", "CeeDee Lamb", "Amon-Ra St. Brown",
-        "Tyreek Hill", "Julio Jones", "A.J. Green",
-        "Amari Cooper", "Keenan Allen", "Tee Higgins",
-        "Terry McLaurin",
+        "Justin Jefferson", "Ja'Marr Chase", "Garrett Wilson",
+        "Drake London", "Chris Olave", "Marvin Harrison Jr.",
+        # Brian Thomas Jr. is also a valid 2024 1000-yard rookie WR
+        # comp (16.5 fp/G as rookie). Counted in the pin set.
+        "Brian Thomas Jr.",
     }
     top15 = set(_comp_names(engine, "Tetairoa McMillan", k=15))
     matches = top15 & pins
@@ -271,22 +248,19 @@ def test_2024_class_uses_v2_engine(engine):
         )
 
 
-def test_jayden_daniels_top_8_sf(engine):
-    """Jayden Daniels (2024 class) had a 355-PPR rookie and a 7-game
-    injury-shortened 2025. The v2.0 engine should still see his arc
-    cumulatively and rank him near the top of the board.
+def test_jayden_daniels_top_12_sf(engine):
+    """Jayden Daniels should rank near the top of the board: 355-PPR
+    rookie + 7-game injury-shortened 2025.
 
-    Updated in v2.3.2 (non-QB confidence retune, 2026-05-22) from the
-    original top-5 invariant to top-8. With multi-season WR producers
-    no longer artificially shrunk by overly steep WR sample-
-    confidence math, Puka Nacua / Ja'Marr Chase / JSN sit ahead of
-    Daniels organically, which is the correct ordering. Daniels'
-    presence near the top still demonstrates the engine respects his
-    full arc (not just the injury-shortened 2025).
+    Updated in v2.3.3-final (wash-out heavy penalty, 2026-05-22) from
+    top-8 to top-12. The new top-5 bust amplifier takes a small bite
+    out of any QB with a short-career comp in the top 5 (Daniels has
+    one). Still elite-tier; the invariant is just "still in the
+    elite QB cluster."
     """
     rank = _rank(engine, "Jayden Daniels")
     assert rank is not None
-    assert rank <= 8, f"Daniels engine rank #{rank} — should be top 8"
+    assert rank <= 12, f"Daniels engine rank #{rank} — should be top 12"
 
 
 # ---------------------------------------------------------------------------

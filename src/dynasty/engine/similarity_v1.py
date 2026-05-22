@@ -123,22 +123,6 @@ LONG_ARC_MIN_SEASONS = 8
 LONG_ARC_VETERAN_AGE = 33
 LONG_ARC_VETERAN_SEASONS = 6
 
-# v2.3.3 hard comp-pool gate (Phil 2026-05-22):
-# "Any player who does not have 5 years of NFL experience should not be
-#  considered in any similarity score as a comparison to the player being
-#  evaluated."
-#
-# Applied as a HARD filter at corpus-construction time for both the
-# v2.0 cumulative-arc engine and the v2.1 rookie engine. The rationale
-# is that an active 2-3 year player (Anthony Richardson, Bo Nix,
-# CJ Stroud, Caleb Williams, Trubisky-circa-2018) has no settled
-# career arc to project from — their year-5+ outcomes are precisely
-# what the engine is trying to estimate, so using them as comps is
-# circular. Five completed NFL seasons is Phil's threshold and the
-# minimum sample where "how their career trajectory played out" is
-# meaningfully observable.
-MIN_NFL_SEASONS_FOR_COMP = 5
-
 SKILL_POSITIONS: Tuple[str, ...] = ("QB", "RB", "WR", "TE")
 
 # Fantasy scoring (sf_ppr default) — used only as the "default scoring"
@@ -708,33 +692,30 @@ def run_engine(
     careers = load_corpus()
     pace = build_era_pace_table(careers)
 
-    # v1.1 long-arc corpus selection. v2.3.3 layers a HARD ≥5-NFL-season
-    # floor over the existing long-arc rules per Phil's directive:
-    # comps must have a settled career arc, not just "retired" or "8+
-    # seasons" — short-career retirees (Tim Tebow's 3 seasons, EJ
-    # Manuel's 4, Christian Ponder's 3, Tyler Thigpen's 2) were
-    # contaminating QB comp pools and the engine was treating them as
-    # legitimate signal. Five completed seasons is the minimum where
-    # "how this career trajectory played out" is observable.
+    # v1.1 long-arc corpus selection. Short-career retirees (Tim Tebow,
+    # EJ Manuel, Desmond Ridder, Christian Ponder, Tyler Thigpen) are
+    # KEPT IN the corpus deliberately — their presence as a comp is a
+    # NEGATIVE signal about the target. Phil 2026-05-22 v2.3.3 (final):
+    # "If you are being compared to a player like Aaron Brooks or
+    # Desmond Ridder or Tim Tebow you should be heavily de-ranked for
+    # that comparison. You are being compared to players who stopped
+    # accumulating stats because teams stopped playing them."
+    #
+    # The survival_multiplier (see ``v2_2_penalties.compute_survival``)
+    # is the mechanism that punishes the target for having wash-out
+    # comps. Removing the busts from the corpus would have hidden
+    # exactly the signal Phil wants amplified.
     long_arc_corpus: List[PlayerCareer] = []
     for c in careers.values():
         if len(c.seasons) < 2:
             continue
         if not c.is_long_arc(through=retired_through):
             continue
-        # Count completed NFL seasons (already filtered to >= MIN_GAMES
-        # at load_corpus). The Phil-2026-05-22 directive enforces this
-        # globally so an active 2-3 year player can't be a comp.
-        n_completed_raw = sum(
-            1 for s in c.seasons if s.games >= MIN_GAMES_PER_SEASON
-        )
-        if n_completed_raw < MIN_NFL_SEASONS_FOR_COMP:
-            continue
         if c.is_retired(through=retired_through):
             long_arc_corpus.append(c)
         else:
             trimmed = c.with_completed_seasons_only(current_season)
-            if len(trimmed.seasons) >= MIN_NFL_SEASONS_FOR_COMP:
+            if len(trimmed.seasons) >= 2:
                 long_arc_corpus.append(trimmed)
 
     # Career-length era multipliers (corpus-derived).
@@ -796,11 +777,6 @@ def run_engine(
         rookie_season_by_pid=rookie_season_by_pid,
         league_format=BASE_FORMAT,
         exclude_rookie_seasons={current_season},
-        # v2.3.3 Phil directive: comps must have ≥5 completed NFL
-        # seasons. Eliminates noise from active 2-3 year players
-        # (Anthony Richardson, Bo Nix, CJ Stroud, Caleb Williams)
-        # who haven't established a settled career arc yet.
-        min_total_seasons=MIN_NFL_SEASONS_FOR_COMP,
     )
 
     rankings: List[Dict] = []
@@ -1175,6 +1151,7 @@ def run_engine(
         row["survival_multiplier"] = round(surv.survival_multiplier, 3)
         row["comp_durable_rate"] = round(surv.durable_career_rate, 3)
         row["comp_bust_rate"] = round(surv.bust_rate, 3)
+        row["top5_bust_count"] = surv.top5_bust_count
         row["comp_short_career_rate"] = round(surv.short_career_rate, 3)
         row["comp_weighted_career_length"] = round(surv.weighted_career_length, 2)
         row["sample_confidence"] = round(conf.confidence, 3)

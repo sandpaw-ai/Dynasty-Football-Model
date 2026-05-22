@@ -82,13 +82,7 @@ def test_allen_top_5_sf(overlays):
     """
     rank = _sf_rank(overlays, "Josh Allen")
     assert rank is not None
-    # Updated v2.3.3 (Phil 2026-05-22): with the ≥5-NFL-season comp
-    # filter and the strengthened survival_multiplier, the elite-QB
-    # tier is more compressed at the top. Allen still hits the cleanest
-    # comp pool (survival=1.0) but sits behind WR-tier value in the
-    # overlay because the QB pool now has 7+ clean-comp-pool QBs ahead
-    # of Burrow/Lawrence/etc. Loosened to top 20.
-    assert rank <= 20, f"Allen SF overlay rank #{rank} — should be top 20 (v2.3.3)"
+    assert rank <= 12, f"Allen SF overlay rank #{rank} — should be top 12 under v2.0+v2.1"
 
 
 def test_hurts_top_15_sf(overlays):
@@ -98,9 +92,7 @@ def test_hurts_top_15_sf(overlays):
     into top 15. Engine ranks him top 10."""
     rank = _sf_rank(overlays, "Jalen Hurts")
     assert rank is not None
-    # v2.3.3: same compression as Allen — elite-QB tier widened a
-    # couple of spots after the comp-filter + stronger survival.
-    assert rank <= 22, f"Hurts SF overlay rank #{rank} — should be top 22 (v2.3.3)"
+    assert rank <= 15, f"Hurts SF overlay rank #{rank} — should be top 15 (v2.1)"
 
 
 def test_lamar_top_15_sf(overlays):
@@ -108,10 +100,7 @@ def test_lamar_top_15_sf(overlays):
     Post-2025 the QB tier is fuller; overlay rank up to ~12."""
     rank = _sf_rank(overlays, "Lamar Jackson")
     assert rank is not None
-    # v2.3.3: Lamar's comp pool now skews older long-arc dual-threat
-    # QBs after the ≥5-season filter, with slightly higher bust_rate
-    # weighting. Survival multiplier drops a touch. Loosened to top 30.
-    assert rank <= 30, f"Lamar SF overlay rank #{rank} — should be top 30 (v2.3.3)"
+    assert rank <= 18, f"Lamar SF overlay rank #{rank} — should be top 18 (v2.1)"
 
 
 def test_jayden_daniels_top_15_sf(overlays):
@@ -123,13 +112,12 @@ def test_jayden_daniels_top_15_sf(overlays):
     assert rank <= 15, f"Daniels SF rank #{rank} — should be top 15"
 
 
-def test_burrow_top_50_sf(overlays):
-    """Burrow peak fp/g ~22.5. The overlay VORP can sink him to top 50
-    after the v2.3.3 changes — the QB tier expanded and his comp pool
-    surfaces some short-career retired QBs that ding survival."""
+def test_burrow_top_30_sf(overlays):
+    """Burrow peak fp/g ~22.5. After 2025 the QB tier is fuller; the
+    overlay VORP can sink him to top 30. Engine has him in top 25."""
     rank = _sf_rank(overlays, "Joe Burrow")
     assert rank is not None
-    assert rank <= 50, f"Burrow SF overlay rank #{rank} — should be top 50 (v2.3.3)"
+    assert rank <= 40, f"Burrow SF overlay rank #{rank} — should be top 40"
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +154,7 @@ def test_pocket_qbs_still_meaningful(overlays):
         rank = _sf_rank(overlays, name)
         if rank is None:
             continue
-        # v2.3.3: Stroud in particular slid because his single-year
-        # peak (post-injury 2024-25 decline) plus a comp pool with
-        # short-career retired QBs (now visible after the ≥5-season
-        # filter cleaned things up) ding both projection and survival.
-        # Loosen to top 140 — still rosterable.
-        assert rank <= 140, (
+        assert rank <= 130, (
             f"{name} SF #{rank} — modern starting QB should be rosterable"
         )
 

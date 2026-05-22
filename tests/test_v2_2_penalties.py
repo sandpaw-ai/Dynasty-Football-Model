@@ -102,20 +102,18 @@ def test_lamar_top_15(engine):
     assert rank is not None and rank <= 15, f"Lamar rank #{rank}"
 
 
-def test_daniels_top_8(engine):
+def test_daniels_top_12(engine):
     """Jayden Daniels should rank near the top of the board: 355-PPR
     rookie plus a 7-game injury-shortened 2025.
 
-    Updated in v2.3.2 (non-QB confidence retune, 2026-05-22) from the
-    original top-5 invariant to top-8. After the retune, multi-season
-    WR producers (Puka Nacua, Ja'Marr Chase) properly capture the
-    top of the board, so Daniels naturally slips a couple of spots
-    without losing his elite tier. The pre-retune ordering was an
-    artefact of WR sample-confidence cratering, not a model preference
-    for QBs over WRs.
+    Updated in v2.3.3-final (wash-out heavy penalty, Phil 2026-05-22)
+    from top-8 to top-12. With the new top-5 bust amplifier, Daniels
+    takes a small extra hit because his nearest comps include some
+    short-career rookies. Still elite-tier; the invariant is just
+    "hasn't fallen out of the elite QB cluster."
     """
     rank = _rank(engine, "Jayden Daniels")
-    assert rank is not None and rank <= 8, f"Daniels rank #{rank}"
+    assert rank is not None and rank <= 12, f"Daniels rank #{rank}"
 
 
 def test_mahomes_top_25(engine):
@@ -128,19 +126,25 @@ def test_herbert_top_25(engine):
     assert rank is not None and rank <= 25, f"Herbert rank #{rank}"
 
 
-# Drake Maye / Caleb Williams — brief asked for top 10/15, but the
-# penalty stack (their comp pools include genuine busts like Bortles /
-# Tebow / Luck) honestly places them slightly outside. Pin to actual
-# delivered behavior; tighten in a v2.3 if Phil wants more aggressive
-# floors for #1-overall-pick QBs with limited NFL sample.
-def test_drake_maye_top_20(engine):
+# Drake Maye / Caleb Williams — the previous invariants (top 20 / top
+# 30) were set when the wash-out penalty was soft. v2.3.3-final
+# (Phil 2026-05-22) explicitly directed: "If you are being compared to
+# a player like Aaron Brooks or Desmond Ridder or Tim Tebow you should
+# be heavily de-ranked." Both QBs have multiple wash-outs in their
+# top-5 comp pool (Maye: Bortles + Luck + Freeman + Thigpen; Caleb:
+# similar bust-heavy profile), so the top-5 bust amplifier now drops
+# them deeper. We pin the looser "still inside the rosterable QB tier"
+# bound and rely on the consensus-vs-model view to flag the
+# disagreement vs the crowd, which is exactly the methodology Phil
+# asked for.
+def test_drake_maye_top_75(engine):
     rank = _rank(engine, "Drake Maye")
-    assert rank is not None and rank <= 20, f"Drake Maye rank #{rank}"
+    assert rank is not None and rank <= 75, f"Drake Maye rank #{rank}"
 
 
-def test_caleb_williams_top_30(engine):
+def test_caleb_williams_top_75(engine):
     rank = _rank(engine, "Caleb Williams")
-    assert rank is not None and rank <= 30, f"Caleb Williams rank #{rank}"
+    assert rank is not None and rank <= 75, f"Caleb Williams rank #{rank}"
 
 
 # ---------------------------------------------------------------------------

@@ -128,6 +128,15 @@ class SurvivalDiagnostics:
     weighted_career_length: float      # similarity-weighted avg comp career length
     durable_career_rate: float         # fraction of comps with ≥6 NFL seasons
     survival_multiplier: float
+    # v2.3.3-final (Phil 2026-05-22): number of wash-outs among the
+    # target's top 5 highest-similarity comps. "If you are being
+    # compared to a player like Aaron Brooks or Desmond Ridder or Tim
+    # Tebow you should be heavily de-ranked for that comparison" —
+    # this is the explicit top-K bust count that drives the bonus
+    # haircut applied on top of the rate-based formula. A wash-out
+    # being the #1 comp is a louder signal than being the #15 comp,
+    # so we count it AS WELL as weighting it by similarity.
+    top5_bust_count: int = 0
 
 
 def _comp_career_length(comp: CareerArc) -> int:
@@ -179,7 +188,29 @@ def compute_survival(
             weighted_career_length=0.0,
             durable_career_rate=0.0,
             survival_multiplier=1.0,
+            top5_bust_count=0,
         )
+
+    # Phil's directive (v2.3.3-final): count wash-outs among the TOP 5
+    # most-similar comps. A bust as the #1 comp is a far stronger
+    # signal than the same bust as the #15 comp, even after similarity
+    # weighting. We apply an EXTRA multiplicative penalty downstream
+    # based on this count: 1 → ×0.92, 2 → ×0.84, 3 → ×0.76, etc.
+    sorted_by_sim = sorted(
+        comps, key=lambda m: float(getattr(m, "similarity", 0.0)),
+        reverse=True,
+    )
+    top5_bust_count = 0
+    for m in sorted_by_sim[:5]:
+        arc = getattr(m, "arc", None)
+        if arc is None:
+            prof = getattr(m, "profile", None)
+            arc = getattr(prof, "arc", None) if prof is not None else None
+        if arc is None:
+            continue
+        retired = bool(getattr(arc, "retired", False))
+        if retired and _is_bust(arc):
+            top5_bust_count += 1
 
     total_sim = 0.0
     weighted_bust = 0.0
@@ -221,6 +252,7 @@ def compute_survival(
             weighted_career_length=0.0,
             durable_career_rate=0.0,
             survival_multiplier=1.0,
+            top5_bust_count=top5_bust_count,
         )
 
     bust_rate = weighted_bust / total_sim
@@ -254,6 +286,14 @@ def compute_survival(
         + (1.0 - short_rate) * 0.20
         + 0.30
     )
+    # v2.3.3-final top-5 amplifier: each wash-out among the highest-
+    # similarity comps applies an EXTRA 8% haircut on top of the rate-
+    # based formula. Caps at 5 (floor multiplier = 1 - 5*0.08 = 0.6).
+    # Designed so Anthony Richardson (Tebow + Manuel + Bortles in his
+    # top-5 set, weighted by similarity) takes a sizable hit beyond
+    # what the bust_rate alone produces.
+    top5_amp = 1.0 - 0.08 * min(top5_bust_count, 5)
+    survival_multiplier *= top5_amp
     survival_multiplier = max(0.30, min(1.0, survival_multiplier))
 
     return SurvivalDiagnostics(
@@ -262,6 +302,7 @@ def compute_survival(
         weighted_career_length=avg_length,
         durable_career_rate=durable_rate,
         survival_multiplier=survival_multiplier,
+        top5_bust_count=top5_bust_count,
     )
 
 

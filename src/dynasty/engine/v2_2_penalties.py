@@ -70,9 +70,27 @@ SURVIVAL_BUST_MAX_SEASONS = 8          # … fewer than this many seasons = bust
 SHORT_CAREER_MAX_SEASONS = 5           # comp career ≤ this many seasons = "short"
 
 # Confidence shrinkage parameters.
-FULL_CONFIDENCE_STARTS = 32            # ≈ 2 full seasons of starts → full confidence
-QB_MIN_FULL_CONF_STARTS = 16           # QBs with < 1 full year of starts cap confidence
-QB_MIN_FULL_CONF_CAP = 0.5             # … at this value
+#
+# QB-side calibration is unchanged from v2.2 (Phil approved this):
+# QBs need ~32 starts (2 full seasons) for full confidence, with a
+# half-confidence cap below 16 starts.
+#
+# Non-QB skill positions (RB / WR / TE) were re-tuned in v2.3.2 after
+# Phil flagged that Marvin Harrison Jr. — a top-5 draft pick with
+# 29 games and ~11.5 PPR/g — was being demolished to rank #236 by
+# the original `starts / 32` math (0.6 × 29 / 32 = 0.544).
+#
+# v2.3.2 change: use raw games-played for non-QBs (drop the 0.6
+# starter discount — WR/RB/TE don't have a clean starter concept; if
+# the player accumulated NFL fp/g it counts) and lower the full-confidence
+# threshold to 30 games (~1.75 NFL seasons). MHJ moves from
+# conf 0.531 → 0.967, which lifts him from #236 into the top-60 range.
+# Established multi-year vets (Justin Jefferson, Chase, Bijan) are
+# unaffected because they were already at conf=1.0.
+FULL_CONFIDENCE_STARTS = 32                # QB: ≈ 2 full seasons of starts
+FULL_CONFIDENCE_GAMES_NON_QB = 30          # WR/RB/TE: ≈ 1.75 NFL seasons
+QB_MIN_FULL_CONF_STARTS = 16               # QBs with < 1 full year of starts cap
+QB_MIN_FULL_CONF_CAP = 0.5                 # … at this value
 
 # Late-breakout penalty parameters.
 LATE_BREAKOUT_THRESHOLD_PASS_ATTEMPTS = 250
@@ -265,27 +283,37 @@ def _career_starts_proxy(arc: CareerArc) -> int:
     The raw stat dict does not consistently carry a 'games_started'
     field. We use position-aware proxies:
       * QB: games-played is a strong starts proxy (QB rotation is rare).
-      * RB/WR/TE: 0.6 × games-played (backups still play meaningful
-        snaps in many games but aren't "starts").
+      * RB/WR/TE: raw games-played. ``compute_confidence`` divides by a
+        smaller denominator (``FULL_CONFIDENCE_GAMES_NON_QB``) instead
+        of applying a starter discount, because skill players who
+        accumulated meaningful fp/g were on the field for snaps that
+        matter regardless of starter status (Phil 2026-05-22 critique).
     """
     games_played = sum(s.games for s in arc.career_arc)
-    if arc.position == "QB":
-        return games_played
-    return int(round(0.6 * games_played))
+    return games_played
 
 
 def compute_confidence(
     arc: CareerArc,
     position_tier_baseline: float,
 ) -> ConfidenceDiagnostics:
-    starts = _career_starts_proxy(arc)
-    raw_conf = min(starts / FULL_CONFIDENCE_STARTS, 1.0)
-    if arc.position == "QB" and starts < QB_MIN_FULL_CONF_STARTS:
-        raw_conf = min(raw_conf, QB_MIN_FULL_CONF_CAP)
+    games_proxy = _career_starts_proxy(arc)
+    # QBs keep the v2.2 math: starts (= games for QBs) / 32 with a
+    # half-confidence cap below 16 starts so unproven late-breakouts
+    # like Bo Nix don't get full credit on a small sample.
+    # Non-QBs use a more forgiving threshold so a 1.5-season skill
+    # player with real production (MHJ, Rome Odunze, Bowers) doesn't
+    # get cratered to ~50% confidence on sample size alone.
+    if arc.position == "QB":
+        raw_conf = min(games_proxy / FULL_CONFIDENCE_STARTS, 1.0)
+        if games_proxy < QB_MIN_FULL_CONF_STARTS:
+            raw_conf = min(raw_conf, QB_MIN_FULL_CONF_CAP)
+    else:
+        raw_conf = min(games_proxy / FULL_CONFIDENCE_GAMES_NON_QB, 1.0)
     return ConfidenceDiagnostics(
         name=arc.name,
         position=arc.position,
-        career_nfl_starts=starts,
+        career_nfl_starts=games_proxy,
         confidence=raw_conf,
         position_tier_baseline=position_tier_baseline,
     )

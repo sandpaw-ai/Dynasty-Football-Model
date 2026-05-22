@@ -416,14 +416,15 @@ community consensus for the same league format.</p>
 
 <div class="callout">
   <strong>How to read the delta.</strong>
-  <span class="div-chip div-up">–1</span> /
-  <span class="div-chip div-up-big">–11</span> (green) means the
+  <span class="div-chip div-up">↑ 5</span> /
+  <span class="div-chip div-up-big">↑ 15</span> (green up-arrow) means the
   <em>model</em> ranks the player <em>higher</em> than the crowd does
   (model is more bullish on the data).
-  <span class="div-chip div-down">+1</span> /
-  <span class="div-chip div-down-big">+11</span> (red) means the crowd
-  ranks them higher than the data justifies. Big deltas surface the
-  players the community is pricing on narrative rather than production.
+  <span class="div-chip div-down">↓ 5</span> /
+  <span class="div-chip div-down-big">↓ 15</span> (red down-arrow) means
+  the crowd ranks them higher than the data justifies. Big deltas
+  surface the players the community is pricing on narrative rather
+  than production.
 </div>
 
 <div class="controls">
@@ -458,16 +459,17 @@ that cannot be resolved to a model player are excluded.</p>
 const CONSENSUS = {payload_json};
 let currentFmt = 'sf_ppr';
 let currentSort = 'model';
-// Consensus-page delta semantics (per Phil 2026-05-22): model ranking a
-// player HIGHER than the crowd (negative delta because model_rank <
-// consensus_rank) is the bullish data-disagrees-with-narrative signal,
-// so it should render GREEN. Positive delta = crowd is more bullish than
-// the data → RED.
+// Consensus-page delta semantics (per Phil 2026-05-22):
+// Model ranking a player HIGHER than the crowd is the bullish
+// data-disagrees-with-narrative signal → green up-arrow.
+// Crowd ranks player higher than the data justifies → red down-arrow.
+// Delta = model_rank - consensus_rank, so a NEGATIVE delta means the
+// model has the smaller rank number = ranks the player higher.
 function chip(d) {{
-  if (d <= -10) return '<span class="div-chip div-up-big">'+d+'</span>';
-  if (d < 0)   return '<span class="div-chip div-up">'+d+'</span>';
-  if (d >= 10) return '<span class="div-chip div-down-big">+'+d+'</span>';
-  if (d > 0)   return '<span class="div-chip div-down">+'+d+'</span>';
+  if (d <= -10) return '<span class="div-chip div-up-big">↑ '+(-d)+'</span>';
+  if (d < 0)   return '<span class="div-chip div-up">↑ '+(-d)+'</span>';
+  if (d >= 10) return '<span class="div-chip div-down-big">↓ '+d+'</span>';
+  if (d > 0)   return '<span class="div-chip div-down">↓ '+d+'</span>';
   return '<span class="div-chip div-flat">0</span>';
 }}
 function posBadge(p) {{

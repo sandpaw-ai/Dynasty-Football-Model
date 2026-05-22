@@ -692,7 +692,19 @@ def run_engine(
     careers = load_corpus()
     pace = build_era_pace_table(careers)
 
-    # v1.1 long-arc corpus selection.
+    # v1.1 long-arc corpus selection. Short-career retirees (Tim Tebow,
+    # EJ Manuel, Desmond Ridder, Christian Ponder, Tyler Thigpen) are
+    # KEPT IN the corpus deliberately — their presence as a comp is a
+    # NEGATIVE signal about the target. Phil 2026-05-22 v2.3.3 (final):
+    # "If you are being compared to a player like Aaron Brooks or
+    # Desmond Ridder or Tim Tebow you should be heavily de-ranked for
+    # that comparison. You are being compared to players who stopped
+    # accumulating stats because teams stopped playing them."
+    #
+    # The survival_multiplier (see ``v2_2_penalties.compute_survival``)
+    # is the mechanism that punishes the target for having wash-out
+    # comps. Removing the busts from the corpus would have hidden
+    # exactly the signal Phil wants amplified.
     long_arc_corpus: List[PlayerCareer] = []
     for c in careers.values():
         if len(c.seasons) < 2:
@@ -1095,7 +1107,9 @@ def run_engine(
         )
         baseline = position_baselines.get(row["position"], 0.0)
         conf = compute_confidence(
-            arc=target_arc, position_tier_baseline=baseline,
+            arc=target_arc,
+            position_tier_baseline=baseline,
+            current_season=current_season,
         )
         late = compute_late_breakout(
             arc=target_arc, raw_stats_by_pid_season=raw_stats,
@@ -1123,6 +1137,12 @@ def run_engine(
             confidence=effective_conf_for_stack,
             position_tier_baseline=baseline,
             late_breakout_penalty=late.late_breakout_penalty,
+            # Stale-data flag disables the Bayesian pull-toward-baseline
+            # for backups / journeymen whose recent NFL exposure is
+            # below the starter threshold (see ConfidenceDiagnostics).
+            # 1-NFL-season rookies (rookie engine path) are exempt by
+            # design — they're actively in the league, just new.
+            is_stale_data=conf.is_stale_data and engine_kind != "rookie",
         )
 
         # Overwrite the production_score with the post-penalty value.
@@ -1131,10 +1151,13 @@ def run_engine(
         row["survival_multiplier"] = round(surv.survival_multiplier, 3)
         row["comp_durable_rate"] = round(surv.durable_career_rate, 3)
         row["comp_bust_rate"] = round(surv.bust_rate, 3)
+        row["top5_bust_count"] = surv.top5_bust_count
         row["comp_short_career_rate"] = round(surv.short_career_rate, 3)
         row["comp_weighted_career_length"] = round(surv.weighted_career_length, 2)
         row["sample_confidence"] = round(conf.confidence, 3)
         row["career_nfl_starts"] = conf.career_nfl_starts
+        row["recent_games_two_year"] = conf.recent_games
+        row["is_stale_data"] = bool(conf.is_stale_data)
         row["position_tier_baseline"] = round(baseline, 1)
         row["late_breakout_penalty"] = round(late.late_breakout_penalty, 3)
         row["breakout_age"] = late.breakout_age

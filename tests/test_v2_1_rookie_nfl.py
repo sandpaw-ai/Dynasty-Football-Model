@@ -248,22 +248,19 @@ def test_2024_class_uses_v2_engine(engine):
         )
 
 
-def test_jayden_daniels_top_8_sf(engine):
-    """Jayden Daniels (2024 class) had a 355-PPR rookie and a 7-game
-    injury-shortened 2025. The v2.0 engine should still see his arc
-    cumulatively and rank him near the top of the board.
+def test_jayden_daniels_top_12_sf(engine):
+    """Jayden Daniels should rank near the top of the board: 355-PPR
+    rookie + 7-game injury-shortened 2025.
 
-    Updated in v2.3.2 (non-QB confidence retune, 2026-05-22) from the
-    original top-5 invariant to top-8. With multi-season WR producers
-    no longer artificially shrunk by overly steep WR sample-
-    confidence math, Puka Nacua / Ja'Marr Chase / JSN sit ahead of
-    Daniels organically, which is the correct ordering. Daniels'
-    presence near the top still demonstrates the engine respects his
-    full arc (not just the injury-shortened 2025).
+    Updated in v2.3.3-final (wash-out heavy penalty, 2026-05-22) from
+    top-8 to top-12. The new top-5 bust amplifier takes a small bite
+    out of any QB with a short-career comp in the top 5 (Daniels has
+    one). Still elite-tier; the invariant is just "still in the
+    elite QB cluster."
     """
     rank = _rank(engine, "Jayden Daniels")
     assert rank is not None
-    assert rank <= 8, f"Daniels engine rank #{rank} — should be top 8"
+    assert rank <= 12, f"Daniels engine rank #{rank} — should be top 12"
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-# Dynasty Football Model — v2.0 + v2.1 Methodology
+# Kings of Dynasty — v2.0 / v2.1 / v2.2 Methodology
 
 > **TL;DR.** v1.x ranked players by per-stat z-score shape. v2.0 replaced
 > the engine with a fantasy-point-arc methodology that ranks players by
@@ -6,8 +6,44 @@
 > them to historical players whose fp/g curves match. v2.1 adds a 1-NFL-
 > season ROOKIE engine and a cohort-aware dispatcher so 2025 draft class
 > players appear in the main rankings with proper rookie-comp
-> projections, rather than being noise-matched against full-career
-> retired veterans.
+> projections. v2.2 adds the **survival / confidence / late-breakout
+> penalty stack** — multiplicative discounts that drop bust-pool, small-
+> sample, and late-breakout QBs into the rank tier their realistic
+> dynasty value warrants.
+
+## Multiplier stack (v2.2)
+
+```
+  raw                              ← from v2.0 (vets) or v2.1 (rookies)
+  × survival_multiplier            ← comp pool career-length quality
+  × confidence (asymmetric)        ← small-sample Bayesian shrinkage
+  × effective_late_breakout        ← QB only, conf-weighted
+  clamp [0.20×raw, 1.00×raw]
+  → production_score
+```
+
+Detailed formulas:
+
+- `survival_multiplier = (1 - bust_rate)×0.20 + (1 - short_career_rate)×0.10 + 0.70`,
+  clamped [0.65, 1.0]. Bust = comp's career ended by age 30 AND with
+  < 8 NFL seasons. Short = comp had ≤ 5 NFL seasons. See
+  [SURVIVAL-PENALTY.md](SURVIVAL-PENALTY.md).
+- `confidence = min(career_nfl_starts / 32, 1.0)`; QBs with < 16 starts
+  cap at 0.5. Above-baseline projections pull toward the position-tier
+  median, below-baseline straight-multiply (asymmetric). See
+  [CONFIDENCE-SHRINKAGE.md](CONFIDENCE-SHRINKAGE.md).
+- `late_breakout_penalty` table: 22 → 1.00, 23 → 0.95, 24 → 0.88,
+  25+ → 0.80; effective applied = `1 - (1 - lb) × confidence`. See
+  [LATE-BREAKOUT-QBs.md](LATE-BREAKOUT-QBs.md).
+
+Non-QB players take `late_breakout_penalty = 1.0` always. Non-QB rookies
+routed through the v2.1 rookie engine skip v2.2 confidence shrinkage
+(the rookie engine has its own games-played shrinkage).
+
+Per-player diagnostics land in `data/diagnostics/v2.2_survival.json`,
+`v2.2_confidence.json`, `v2.2_late_breakout.json`.
+
+---
 
 ---
 

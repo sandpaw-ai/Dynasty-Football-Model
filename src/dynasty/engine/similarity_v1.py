@@ -86,6 +86,13 @@ from .fantasy_arc_similarity import (
     project_remaining as arc_project_remaining,
     project_player as arc_project_player,
 )
+from .v2_2_penalties import (
+    apply_penalty_stack,
+    compute_confidence,
+    compute_late_breakout,
+    compute_position_tier_baselines,
+    compute_survival,
+)
 from .rookie_nfl_fp_arc import (
     FULL_CONFIDENCE_GAMES,
     POSITION_ENCODING as ROOKIE_POSITIONS,
@@ -781,6 +788,12 @@ def run_engine(
                 "cohort_pool_size": None,
                 "cohort_widened": None,
                 "cohort_styles_used": None,
+                # v2.2 tracking fields (consumed by the penalty
+                # post-processing pass; removed before returning).
+                "_v22_engine": "rookie",
+                "_v22_target_arc": target_arc,
+                "_v22_comps": list(rproj.comps),
+                "_v22_raw_projection": float(weighted_points),
             })
             comps_map[ap.player_id] = comp_records
             continue
@@ -893,8 +906,135 @@ def run_engine(
             "cohort_pool_size": None,
             "cohort_widened": None,
             "cohort_styles_used": None,
+            # v2.2 tracking fields (consumed by the penalty
+            # post-processing pass; removed before returning).
+            "_v22_engine": "v2",
+            "_v22_target_arc": target_arc,
+            "_v22_comps": list(proj.comps),
+            "_v22_raw_projection": float(weighted_points),
         })
         comps_map[ap.player_id] = comp_records
+
+    # ------------------------------------------------------------------
+    # v2.2.0 — survival / confidence / late-breakout penalty pass.
+    #
+    # Pre-pass: compute position-tier baselines from the RAW (pre-
+    # penalty) projections. These are used as the Bayesian prior for
+    # the confidence-shrinkage pull.
+    # ------------------------------------------------------------------
+    raw_rankings = [
+        {"position": r["position"], "production_score": r["_v22_raw_projection"]}
+        for r in rankings
+    ]
+    position_baselines = compute_position_tier_baselines(raw_rankings, top_n=50)
+
+    survival_diag: Dict[str, Dict] = {}
+    confidence_diag: Dict[str, Dict] = {}
+    late_breakout_diag: Dict[str, Dict] = {}
+
+    for row in rankings:
+        target_arc = row["_v22_target_arc"]
+        comps_v22 = row["_v22_comps"]
+        raw_proj = row["_v22_raw_projection"]
+        engine_kind = row["_v22_engine"]
+
+        surv = compute_survival(
+            name=row["name"], position=row["position"], comps=comps_v22,
+        )
+        baseline = position_baselines.get(row["position"], 0.0)
+        conf = compute_confidence(
+            arc=target_arc, position_tier_baseline=baseline,
+        )
+        late = compute_late_breakout(
+            arc=target_arc, raw_stats_by_pid_season=raw_stats,
+        )
+
+        # For 1-NFL-season rookies routed through the v2.1 rookie
+        # engine, the engine ALREADY applies its own games-played
+        # confidence factor (FULL_CONFIDENCE_GAMES=8). For RB/WR/TE
+        # rookies layering both would double-penalize them and break
+        # the v2.1 invariants (Jeanty top 25, Tetairoa top 30). Skip
+        # v2.2 confidence shrinkage for non-QB rookies. QB rookies
+        # still take the v2.2 confidence haircut because their projection
+        # is driven by extrapolation of fp/G to a 10+ year QB career
+        # — a much longer horizon than RB/WR/TE — and Phil's brief
+        # specifically calls out Shedeur Sanders (~5-8 starts) as
+        # needing a deep haircut despite playing in 8 games.
+        if engine_kind == "rookie" and target_arc.position != "QB":
+            effective_conf_for_stack = 1.0
+        else:
+            effective_conf_for_stack = conf.confidence
+
+        stack = apply_penalty_stack(
+            projection_raw=raw_proj,
+            survival_multiplier=surv.survival_multiplier,
+            confidence=effective_conf_for_stack,
+            position_tier_baseline=baseline,
+            late_breakout_penalty=late.late_breakout_penalty,
+        )
+
+        # Overwrite the production_score with the post-penalty value.
+        row["production_score"] = round(stack.projection_final, 1)
+        # Carry penalty diagnostics on the row for the UI / tests.
+        row["survival_multiplier"] = round(surv.survival_multiplier, 3)
+        row["comp_durable_rate"] = round(surv.durable_career_rate, 3)
+        row["comp_bust_rate"] = round(surv.bust_rate, 3)
+        row["comp_short_career_rate"] = round(surv.short_career_rate, 3)
+        row["comp_weighted_career_length"] = round(surv.weighted_career_length, 2)
+        row["sample_confidence"] = round(conf.confidence, 3)
+        row["career_nfl_starts"] = conf.career_nfl_starts
+        row["position_tier_baseline"] = round(baseline, 1)
+        row["late_breakout_penalty"] = round(late.late_breakout_penalty, 3)
+        row["breakout_age"] = late.breakout_age
+        row["projection_raw_pre_penalty"] = round(raw_proj, 1)
+        row["projection_after_survival"] = round(stack.projection_after_survival, 1)
+        row["projection_after_confidence"] = round(stack.projection_after_confidence, 1)
+
+        survival_diag[row["player_id"]] = {
+            "name": surv.name,
+            "position": surv.position,
+            "bust_rate": surv.bust_rate,
+            "short_career_rate": surv.short_career_rate,
+            "weighted_career_length": surv.weighted_career_length,
+            "durable_career_rate": surv.durable_career_rate,
+            "survival_multiplier": surv.survival_multiplier,
+        }
+        confidence_diag[row["player_id"]] = {
+            "name": conf.name,
+            "position": conf.position,
+            "career_nfl_starts": conf.career_nfl_starts,
+            "confidence": conf.confidence,
+            "position_tier_baseline": conf.position_tier_baseline,
+        }
+        late_breakout_diag[row["player_id"]] = {
+            "name": late.name,
+            "position": late.position,
+            "breakout_age": late.breakout_age,
+            "late_breakout_penalty": late.late_breakout_penalty,
+        }
+
+        # Strip private tracking fields before sorting / returning.
+        del row["_v22_engine"]
+        del row["_v22_target_arc"]
+        del row["_v22_comps"]
+        del row["_v22_raw_projection"]
+
+    # Persist diagnostics so the UI / users can see WHY a player got
+    # penalized. Best-effort: silently swallow filesystem errors so a
+    # read-only deploy still ranks correctly.
+    try:
+        import json as _json
+        import os as _os
+        diag_dir = _os.path.join("data", "diagnostics")
+        _os.makedirs(diag_dir, exist_ok=True)
+        with open(_os.path.join(diag_dir, "v2.2_survival.json"), "w") as f:
+            _json.dump(survival_diag, f, indent=2)
+        with open(_os.path.join(diag_dir, "v2.2_confidence.json"), "w") as f:
+            _json.dump(confidence_diag, f, indent=2)
+        with open(_os.path.join(diag_dir, "v2.2_late_breakout.json"), "w") as f:
+            _json.dump(late_breakout_diag, f, indent=2)
+    except Exception:
+        pass
 
     rankings.sort(key=lambda r: r["production_score"], reverse=True)
     n = len(rankings)

@@ -1,11 +1,25 @@
-# Dynasty Football Model
+# Kings of Dynasty — Fantasy Football
 
-A composite dynasty fantasy football ranking model. Pulls from multiple
-public data sources, weights each source by its historical accuracy, and
-publishes a blended top-300 with **buy / sell signals** based on where the
-model disagrees with the broader fantasy market.
+A dynasty fantasy football ranking model built on a fantasy-point-arc
+similarity engine (v2.0/v2.1) plus a survival / confidence / late-
+breakout penalty stack (v2.2). Active players are comped to historical
+players whose fp/G curves match under modern scoring, their projected
+remaining career fantasy points are computed, then three multiplicative
+penalties discount bust-prone comp pools, small-sample players, and
+late-breakout QBs into the rank tier their realistic dynasty value
+warrants.
 
-Output is a self-contained `dynasty_rankings.html` you can open in any browser.
+Output is a self-contained static site ("Kings of Dynasty") you can open
+in any browser — a `Similarity Scores` ranking page, a `Dynasty Rankings`
+page with format presets (Superflex PPR and 2QB PPR), a Methodology page,
+and per-player comparable pages.
+
+See [docs/V2-METHODOLOGY.md](docs/V2-METHODOLOGY.md) for the full
+pipeline,
+[docs/SURVIVAL-PENALTY.md](docs/SURVIVAL-PENALTY.md),
+[docs/CONFIDENCE-SHRINKAGE.md](docs/CONFIDENCE-SHRINKAGE.md), and
+[docs/LATE-BREAKOUT-QBs.md](docs/LATE-BREAKOUT-QBs.md) for the v2.2
+penalty mechanics.
 
 ---
 

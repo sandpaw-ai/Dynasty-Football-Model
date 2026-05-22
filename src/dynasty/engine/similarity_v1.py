@@ -123,6 +123,22 @@ LONG_ARC_MIN_SEASONS = 8
 LONG_ARC_VETERAN_AGE = 33
 LONG_ARC_VETERAN_SEASONS = 6
 
+# v2.3.3 hard comp-pool gate (Phil 2026-05-22):
+# "Any player who does not have 5 years of NFL experience should not be
+#  considered in any similarity score as a comparison to the player being
+#  evaluated."
+#
+# Applied as a HARD filter at corpus-construction time for both the
+# v2.0 cumulative-arc engine and the v2.1 rookie engine. The rationale
+# is that an active 2-3 year player (Anthony Richardson, Bo Nix,
+# CJ Stroud, Caleb Williams, Trubisky-circa-2018) has no settled
+# career arc to project from — their year-5+ outcomes are precisely
+# what the engine is trying to estimate, so using them as comps is
+# circular. Five completed NFL seasons is Phil's threshold and the
+# minimum sample where "how their career trajectory played out" is
+# meaningfully observable.
+MIN_NFL_SEASONS_FOR_COMP = 5
+
 SKILL_POSITIONS: Tuple[str, ...] = ("QB", "RB", "WR", "TE")
 
 # Fantasy scoring (sf_ppr default) — used only as the "default scoring"
@@ -692,18 +708,33 @@ def run_engine(
     careers = load_corpus()
     pace = build_era_pace_table(careers)
 
-    # v1.1 long-arc corpus selection.
+    # v1.1 long-arc corpus selection. v2.3.3 layers a HARD ≥5-NFL-season
+    # floor over the existing long-arc rules per Phil's directive:
+    # comps must have a settled career arc, not just "retired" or "8+
+    # seasons" — short-career retirees (Tim Tebow's 3 seasons, EJ
+    # Manuel's 4, Christian Ponder's 3, Tyler Thigpen's 2) were
+    # contaminating QB comp pools and the engine was treating them as
+    # legitimate signal. Five completed seasons is the minimum where
+    # "how this career trajectory played out" is observable.
     long_arc_corpus: List[PlayerCareer] = []
     for c in careers.values():
         if len(c.seasons) < 2:
             continue
         if not c.is_long_arc(through=retired_through):
             continue
+        # Count completed NFL seasons (already filtered to >= MIN_GAMES
+        # at load_corpus). The Phil-2026-05-22 directive enforces this
+        # globally so an active 2-3 year player can't be a comp.
+        n_completed_raw = sum(
+            1 for s in c.seasons if s.games >= MIN_GAMES_PER_SEASON
+        )
+        if n_completed_raw < MIN_NFL_SEASONS_FOR_COMP:
+            continue
         if c.is_retired(through=retired_through):
             long_arc_corpus.append(c)
         else:
             trimmed = c.with_completed_seasons_only(current_season)
-            if len(trimmed.seasons) >= 2:
+            if len(trimmed.seasons) >= MIN_NFL_SEASONS_FOR_COMP:
                 long_arc_corpus.append(trimmed)
 
     # Career-length era multipliers (corpus-derived).
@@ -765,6 +796,11 @@ def run_engine(
         rookie_season_by_pid=rookie_season_by_pid,
         league_format=BASE_FORMAT,
         exclude_rookie_seasons={current_season},
+        # v2.3.3 Phil directive: comps must have ≥5 completed NFL
+        # seasons. Eliminates noise from active 2-3 year players
+        # (Anthony Richardson, Bo Nix, CJ Stroud, Caleb Williams)
+        # who haven't established a settled career arc yet.
+        min_total_seasons=MIN_NFL_SEASONS_FOR_COMP,
     )
 
     rankings: List[Dict] = []
@@ -1095,7 +1131,9 @@ def run_engine(
         )
         baseline = position_baselines.get(row["position"], 0.0)
         conf = compute_confidence(
-            arc=target_arc, position_tier_baseline=baseline,
+            arc=target_arc,
+            position_tier_baseline=baseline,
+            current_season=current_season,
         )
         late = compute_late_breakout(
             arc=target_arc, raw_stats_by_pid_season=raw_stats,
@@ -1123,6 +1161,12 @@ def run_engine(
             confidence=effective_conf_for_stack,
             position_tier_baseline=baseline,
             late_breakout_penalty=late.late_breakout_penalty,
+            # Stale-data flag disables the Bayesian pull-toward-baseline
+            # for backups / journeymen whose recent NFL exposure is
+            # below the starter threshold (see ConfidenceDiagnostics).
+            # 1-NFL-season rookies (rookie engine path) are exempt by
+            # design — they're actively in the league, just new.
+            is_stale_data=conf.is_stale_data and engine_kind != "rookie",
         )
 
         # Overwrite the production_score with the post-penalty value.
@@ -1135,6 +1179,8 @@ def run_engine(
         row["comp_weighted_career_length"] = round(surv.weighted_career_length, 2)
         row["sample_confidence"] = round(conf.confidence, 3)
         row["career_nfl_starts"] = conf.career_nfl_starts
+        row["recent_games_two_year"] = conf.recent_games
+        row["is_stale_data"] = bool(conf.is_stale_data)
         row["position_tier_baseline"] = round(baseline, 1)
         row["late_breakout_penalty"] = round(late.late_breakout_penalty, 3)
         row["breakout_age"] = late.breakout_age

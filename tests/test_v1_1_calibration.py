@@ -105,11 +105,14 @@ def test_long_arc_corpus_size(engine):
     assumptions; in practice the empirical pool lands at ~1,500 with the
     8-season threshold. We pin >= 1,500 (a 5%+ expansion over v1.0's 1,431).
     """
-    assert len(engine.long_arc_corpus) >= 1500, (
+    # Updated in v2.3.3 (Phil 2026-05-22): the new ≥5-NFL-season hard
+    # comp floor drops the pool from ~1,500 to ~850 because short-career
+    # retirees (Tebow, Ponder, Thigpen, EJ Manuel, etc.) are now
+    # correctly excluded. Still plenty deep for top-K=20 selection
+    # (123 QBs / 278 RBs / 409 WRs / 230 TEs qualify).
+    assert len(engine.long_arc_corpus) >= 800, (
         f"long-arc corpus too small: {len(engine.long_arc_corpus)}"
     )
-    # Sanity floor: must strictly expand v1.0's 1,431.
-    assert len(engine.long_arc_corpus) > 1431
 
 
 def test_long_arc_includes_modern_veterans(engine):

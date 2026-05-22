@@ -428,6 +428,7 @@ def build_rookie_corpus(
     min_games: int = MIN_ROOKIE_GAMES_CORPUS,
     exclude_rookie_seasons: Optional[set] = None,
     require_post_rookie_season: bool = True,
+    min_total_seasons: int = 0,
 ) -> List[RookieProfile]:
     """Walk the full arc set, snapshot each player's rookie-year vector.
 
@@ -452,6 +453,13 @@ def build_rookie_corpus(
       require_post_rookie_season: when True, only include players with
             at least one realised year-2+ season (so projection has
             something to draw from).
+      min_total_seasons: minimum number of completed NFL seasons the
+            comp must have on the books (counts only seasons with
+            ``games >= MIN_ROOKIE_GAMES_CORPUS``). v2.3.3 Phil directive:
+            comps must have a settled career arc, not be active 2-3
+            year players whose year-5+ careers are precisely what we're
+            trying to project. Defaults to 0 for back-compat; the
+            engine passes ``MIN_NFL_SEASONS_FOR_COMP`` (5) at runtime.
     """
     out: List[RookieProfile] = []
     rs_map = rookie_season_by_pid or {}
@@ -473,6 +481,14 @@ def build_rookie_corpus(
         if require_post_rookie_season:
             has_post = any(s.season > rookie.season for s in arc.career_arc)
             if not has_post:
+                continue
+        # v2.3.3 minimum-tenure filter: every comp must have at least
+        # ``min_total_seasons`` completed NFL seasons on the books.
+        if min_total_seasons > 0:
+            total_completed = sum(
+                1 for s in arc.career_arc if s.games >= min_games
+            )
+            if total_completed < min_total_seasons:
                 continue
         key = (arc.player_id, rookie.season)
         stats = raw_stats_by_pid_season.get(key) or {}

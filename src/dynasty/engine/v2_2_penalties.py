@@ -228,31 +228,33 @@ def compute_survival(
     durable_rate = weighted_durable / total_sim
     avg_length = weighted_length / total_sim
 
-    # survival_multiplier = (1 - bust_rate) × 0.5
-    #                     + (1 - short_career_rate) × 0.3
-    #                     + 0.2
-    # Floor 0.20 (all comps bust + short), ceiling 1.0.
-    # Softened formula (v2.2 — conservative calibration per brief).
-    # Original brief formula was:
-    #     (1-bust)*0.5 + (1-short)*0.3 + 0.2
-    # That produced too-aggressive haircuts on second-year QBs (Daniels,
-    # Maye, Caleb) whose 2024-vintage comp pools necessarily skew young
-    # / still-active / not-yet-retired — inflating their "bust_rate"
-    # because active comps without 6 NFL seasons read as short-career
-    # in the corpus. Conservative reweighting:
-    #     (1-bust)*0.25 + (1-short)*0.15 + 0.60
-    # Identical 1.0 ceiling for clean comp pools (Allen, Mahomes,
-    # Hurts, Lamar all = 1.0), milder floor (0.60 vs 0.20) for the
-    # worst comp pools (Richardson, Sanders) which still applies a
-    # meaningful penalty without crushing the player to zero. Per the
-    # brief: "Be CONSERVATIVE on penalty magnitudes — better to
-    # under-penalize than over-penalize. Phil can tune knobs in a v2.3".
+    # v2.3.3 (Phil 2026-05-22): the v2.2 calibration was too conservative.
+    # With Sam Howell / Anthony Richardson / Justin Fields all ranked
+    # in the top-45 despite comp pools full of wash-outs, Phil's
+    # directive is to make the wash-out factor REALLY count. The
+    # original v2.2 formula was softened (0.20 + 0.10 + 0.70 -> floor
+    # 0.65) specifically because the pre-filter corpus contaminated
+    # bust_rate with active 2-3 year players who hadn't washed out,
+    # they just hadn't played long enough. With v2.3.3's hard
+    # ≥5-NFL-season comp filter, bust_rate is finally a CLEAN signal
+    # — every comp in the pool has a settled career arc — so we can
+    # let it bite without distorting still-developing QBs.
+    #
+    # New formula:
+    #     (1 - bust_rate)  × 0.50   (strongest signal)
+    #   + (1 - short_rate) × 0.20
+    #   + 0.30                       (floor when everyone busts)
+    # Floor 0.30, ceiling 1.0. A 60%-bust comp pool now yields
+    # survival = (0.4)*0.5 + (0.4)*0.2 + 0.3 = 0.58 (a 42% haircut)
+    # instead of v2.2's 0.79 (21% haircut). Anthony Richardson, Sam
+    # Howell, and Justin Fields drop hard. Clean comp pools (Allen,
+    # Mahomes, Hurts, Lamar at 0% bust) still resolve to 1.0.
     survival_multiplier = (
-        (1.0 - bust_rate) * 0.20
-        + (1.0 - short_rate) * 0.10
-        + 0.70
+        (1.0 - bust_rate) * 0.50
+        + (1.0 - short_rate) * 0.20
+        + 0.30
     )
-    survival_multiplier = max(0.65, min(1.0, survival_multiplier))
+    survival_multiplier = max(0.30, min(1.0, survival_multiplier))
 
     return SurvivalDiagnostics(
         name=name, position=position,
@@ -274,6 +276,33 @@ class ConfidenceDiagnostics:
     career_nfl_starts: int
     confidence: float                  # in [0, 1]
     position_tier_baseline: float      # league-average starter projection
+    # v2.3.3 (Phil 2026-05-22): "stale data" flag for journeyman backups.
+    # True when the player accumulated < ``RECENT_STARTER_GAMES_TWO_YEAR``
+    # games over the last two completed NFL seasons — i.e. they aren't
+    # currently a starter. Used by ``apply_penalty_stack`` to disable
+    # the Bayesian pull-toward-baseline for these players so we don't
+    # artificially lift backup-tier QBs like Sam Howell (1 NFL season,
+    # benched 2024-25) toward the QB top-50 median.
+    is_stale_data: bool = False
+    recent_games: int = 0
+
+
+# v2.3.3 stale-data threshold. A player who accumulated FEWER than this
+# many games across the two most recent NFL seasons (inclusive of the
+# current season) is treated as a backup / journeyman / extended-injury
+# case, NOT a current starter. The Bayesian pull-toward-baseline is
+# disabled for these players so their projection multiplies straight
+# by confidence instead of getting lifted toward the position median.
+# Calibration anchors (2026-05-22 corpus):
+#   * Sam Howell: 0 games last 2 years → STALE (correct: benched)
+#   * Anthony Richardson: 11 games last 2 years → STALE (correct:
+#     injured / split snaps, no settled starter status)
+#   * Jaxson Dart: 14 games (full rookie year) → ACTIVE
+#   * Cam Ward: 17 games (full rookie year) → ACTIVE
+#   * Drake Maye: 30 games → ACTIVE
+# 12 is the right threshold: catches Howell + Richardson, exempts every
+# active rookie who took the starting reins.
+RECENT_STARTER_GAMES_TWO_YEAR = 12
 
 
 def _career_starts_proxy(arc: CareerArc) -> int:
@@ -293,9 +322,24 @@ def _career_starts_proxy(arc: CareerArc) -> int:
     return games_played
 
 
+def _recent_games(arc: CareerArc, *, current_season: int, window: int = 2) -> int:
+    """Games accumulated across the ``window`` most recent NFL seasons,
+    INCLUSIVE of ``current_season`` (so a 2025 rookie with 17 games
+    counts as having 17 recent games, not zero). Counts seasons in
+    [current_season - window + 1, current_season]. Used to distinguish
+    current starters from journeymen who haven't accumulated meaningful
+    NFL exposure recently.
+    """
+    lo = current_season - window + 1
+    hi = current_season
+    return sum(s.games for s in arc.career_arc if lo <= s.season <= hi)
+
+
 def compute_confidence(
     arc: CareerArc,
     position_tier_baseline: float,
+    *,
+    current_season: int = 2025,
 ) -> ConfidenceDiagnostics:
     games_proxy = _career_starts_proxy(arc)
     # QBs keep the v2.2 math: starts (= games for QBs) / 32 with a
@@ -310,12 +354,16 @@ def compute_confidence(
             raw_conf = min(raw_conf, QB_MIN_FULL_CONF_CAP)
     else:
         raw_conf = min(games_proxy / FULL_CONFIDENCE_GAMES_NON_QB, 1.0)
+    recent = _recent_games(arc, current_season=current_season)
+    is_stale = recent < RECENT_STARTER_GAMES_TWO_YEAR
     return ConfidenceDiagnostics(
         name=arc.name,
         position=arc.position,
         career_nfl_starts=games_proxy,
         confidence=raw_conf,
         position_tier_baseline=position_tier_baseline,
+        is_stale_data=is_stale,
+        recent_games=recent,
     )
 
 
@@ -442,6 +490,8 @@ def apply_penalty_stack(
     confidence: float,
     position_tier_baseline: float,
     late_breakout_penalty: float,
+    *,
+    is_stale_data: bool = False,
 ) -> PenaltyStackResult:
     """Compose the three penalties as documented in the module docstring.
 
@@ -469,12 +519,23 @@ def apply_penalty_stack(
     busts like Shedeur Sanders rank deep, not get inflated.
     """
     after_surv = projection_raw * survival_multiplier
-    if after_surv > position_tier_baseline:
+    if after_surv > position_tier_baseline and not is_stale_data:
+        # Bayesian pull-toward-baseline: optimistic small-sample
+        # projections get shrunk toward the position median. Disabled
+        # for stale-data players (Phil 2026-05-22): a journeyman
+        # backup like Sam Howell (1 NFL season in 2023, benched
+        # 2024-25) should NOT get artificially lifted toward the QB
+        # top-50 median just because his single-season stat line
+        # comps to legitimate NFL careers.
         after_conf = (
             after_surv * confidence
             + position_tier_baseline * (1.0 - confidence)
         )
     else:
+        # Either raw <= baseline (already pessimistic) or the player
+        # has stale data — either way, straight-multiply by confidence
+        # so the projection actually shrinks instead of getting pulled
+        # back up by the prior.
         after_conf = after_surv * confidence
     # Apply the late-breakout penalty per the brief's spec, with a mild
     # confidence-weighted softening for sub-2nd-year QBs.

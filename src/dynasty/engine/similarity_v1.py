@@ -87,6 +87,8 @@ from .fantasy_arc_similarity import (
     project_player as arc_project_player,
 )
 from .v2_2_penalties import (
+    SURVIVAL_BUST_AGE,
+    SURVIVAL_BUST_MAX_SEASONS,
     apply_penalty_stack,
     compute_confidence,
     compute_late_breakout,
@@ -591,15 +593,43 @@ def _rookie_comp_records(
             decay = (1.0 - DISCOUNT_PER_YEAR) ** n_seasons
             pts += s.fp_total.get(league_format, 0.0) * decay
             n_seasons += 1
+        # Career-length classification used on the per-player comp table to
+        # flag wash-outs (Phil's Bo Nix → Aaron Brooks complaint). The
+        # rookie engine's corpus is full retired careers, so ``career_arc``
+        # already encodes career length and final age.
+        seasons_played = sum(
+            1 for s in arc.career_arc if s.games >= MIN_GAMES_PER_SEASON
+        )
+        final_age = max(
+            (s.age for s in arc.career_arc if s.games >= MIN_GAMES_PER_SEASON),
+            default=None,
+        )
+        washed_out = (
+            final_age is not None and final_age <= SURVIVAL_BUST_AGE
+            and seasons_played < SURVIVAL_BUST_MAX_SEASONS
+        )
         records.append({
             "player_id": arc.player_id,
             "name": arc.name,
             "position": arc.position,
             "last_season": arc.last_season,
-            "similarity": round(float(m.similarity), 4),
+            # ``similarity`` is the user-facing score: raw vector
+            # similarity in (0, 1]. The ranking-internal similarity (with
+            # breakout/recency bias) is preserved under
+            # ``ranking_similarity`` for diagnostic transparency.
+            "similarity": round(float(m.display_similarity or m.similarity), 4),
+            "ranking_similarity": round(float(m.similarity), 4),
             "career_ppr": round(arc.career_total_fp.get(league_format, 0.0), 1),
             "post_age_projected_pts": round(pts, 1),
             "post_age_seasons": n_seasons,
+            "seasons_played": seasons_played,
+            "final_age": final_age,
+            # ``washed_out`` flags comps whose career ended by age 30 with
+            # fewer than 8 NFL seasons — the same "bust" definition the
+            # survival multiplier uses. Surfaced on player pages so users
+            # can see when a high-similarity comp is a journeyman who
+            # didn't last (e.g. Bo Nix → Aaron Brooks).
+            "washed_out": bool(washed_out),
             # snapshot_age = comp's rookie age so format_overlay re-projects
             # year-2+ correctly under any format.
             "snapshot_age": m.profile.rookie_age,
@@ -906,21 +936,42 @@ def run_engine(
 
         top_comp = proj.comps[0].arc
         # Record comp list — keep the same shape as v1.x for format_overlay
-        # / report.py.
+        # / report.py. The v2.0 path already produces vector similarity
+        # in (0, 1] (see ``fantasy_arc_similarity._weighted_similarity``);
+        # we surface ``washed_out``/``seasons_played`` here so the player
+        # page can flag comps whose careers ended early.
         comp_records: List[Dict] = []
         for c in proj.comps:
             pts, n_seasons = arc_project_remaining(
                 c.arc, age_floor=c.snapshot_age, league_format=BASE_FORMAT,
+            )
+            seasons_played = sum(
+                1 for s in c.arc.career_arc if s.games >= MIN_GAMES_PER_SEASON
+            )
+            final_age = max(
+                (s.age for s in c.arc.career_arc if s.games >= MIN_GAMES_PER_SEASON),
+                default=None,
+            )
+            washed_out = (
+                final_age is not None and final_age <= SURVIVAL_BUST_AGE
+                and seasons_played < SURVIVAL_BUST_MAX_SEASONS
             )
             comp_records.append({
                 "player_id": c.arc.player_id,
                 "name": c.arc.name,
                 "position": c.arc.position,
                 "last_season": c.arc.last_season,
+                # Already in (0, 1] for the v2.0 cumulative-arc engine —
+                # no breakout boost is applied here. Mirror the rookie
+                # engine schema for downstream consumers.
                 "similarity": round(float(c.similarity), 4),
+                "ranking_similarity": round(float(c.similarity), 4),
                 "career_ppr": round(c.arc.career_total_fp.get(BASE_FORMAT, 0.0), 1),
                 "post_age_projected_pts": round(pts, 1),
                 "post_age_seasons": n_seasons,
+                "seasons_played": seasons_played,
+                "final_age": final_age,
+                "washed_out": bool(washed_out),
                 # v2.0 extras for the player page UI
                 "snapshot_age": c.snapshot_age,
                 "peak_3yr_fp_per_game": round(c.arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0), 2),

@@ -416,13 +416,14 @@ community consensus for the same league format.</p>
 
 <div class="callout">
   <strong>How to read the delta.</strong>
-  <span class="div-chip div-down">–1</span> or
-  <span class="div-chip div-down-big">–11</span> means the
+  <span class="div-chip div-up">–1</span> /
+  <span class="div-chip div-up-big">–11</span> (green) means the
   <em>model</em> ranks the player <em>higher</em> than the crowd does
-  (model is more bullish). <span class="div-chip div-up">+1</span> /
-  <span class="div-chip div-up-big">+11</span> means the crowd is more
-  bullish than the data justifies. Big deltas surface the players the
-  community is pricing on narrative rather than production.
+  (model is more bullish on the data).
+  <span class="div-chip div-down">+1</span> /
+  <span class="div-chip div-down-big">+11</span> (red) means the crowd
+  ranks them higher than the data justifies. Big deltas surface the
+  players the community is pricing on narrative rather than production.
 </div>
 
 <div class="controls">
@@ -457,11 +458,16 @@ that cannot be resolved to a model player are excluded.</p>
 const CONSENSUS = {payload_json};
 let currentFmt = 'sf_ppr';
 let currentSort = 'model';
+// Consensus-page delta semantics (per Phil 2026-05-22): model ranking a
+// player HIGHER than the crowd (negative delta because model_rank <
+// consensus_rank) is the bullish data-disagrees-with-narrative signal,
+// so it should render GREEN. Positive delta = crowd is more bullish than
+// the data → RED.
 function chip(d) {{
-  if (d > 10) return '<span class="div-chip div-up-big">+'+d+'</span>';
-  if (d > 0)  return '<span class="div-chip div-up">+'+d+'</span>';
-  if (d < -10) return '<span class="div-chip div-down-big">'+d+'</span>';
-  if (d < 0)  return '<span class="div-chip div-down">'+d+'</span>';
+  if (d <= -10) return '<span class="div-chip div-up-big">'+d+'</span>';
+  if (d < 0)   return '<span class="div-chip div-up">'+d+'</span>';
+  if (d >= 10) return '<span class="div-chip div-down-big">+'+d+'</span>';
+  if (d > 0)   return '<span class="div-chip div-down">+'+d+'</span>';
   return '<span class="div-chip div-flat">0</span>';
 }}
 function posBadge(p) {{
@@ -943,21 +949,144 @@ def _player_header(row: Dict, team: str, league_label: str) -> str:
 
 def _build_player_page(row: Dict, comps: List[Dict], team: str,
                        league_label: str, latest_ts: datetime) -> str:
+    # --- Comp table -------------------------------------------------------
+    # Show the top-10 comps with similarity, post-age production, and a
+    # "washed out" badge for comps whose career ended by age 30 with
+    # fewer than 8 NFL seasons. Phil's 2026-05-22 critique on Bo Nix →
+    # Aaron Brooks: the model picks vector-similar QBs but a wash-out
+    # comp telegraphs that the projection is fragile. Surfacing the flag
+    # lets users SEE when a high-similarity comp is a journeyman.
     comp_rows = ""
+    sum_sim = 0.0
+    sum_sim_x_pts = 0.0
+    sum_sim_x_years = 0.0
+    n_washed = 0
+    n_durable = 0
+    for c in comps[:20]:
+        sim = float(c.get("similarity", 0.0))
+        pts = float(c.get("post_age_projected_pts", 0.0))
+        years = float(c.get("post_age_seasons", 0))
+        sum_sim += sim
+        sum_sim_x_pts += sim * pts
+        sum_sim_x_years += sim * years
+        if c.get("washed_out"):
+            n_washed += 1
+        else:
+            n_durable += 1
     for c in comps[:10]:
         comp_peak = c.get("peak_3yr_fp_per_game", 0.0)
+        sim = float(c.get("similarity", 0.0))
+        seasons_played = c.get("seasons_played")
+        final_age = c.get("final_age")
+        career_note_parts = []
+        if seasons_played is not None:
+            career_note_parts.append(f"{seasons_played} seasons")
+        if final_age is not None:
+            career_note_parts.append(f"ended age {final_age}")
+        career_note = " · ".join(career_note_parts) if career_note_parts else "—"
+        washed_badge = (
+            ' <span class="div-chip div-down" title="Career ended by age 30 '
+            'with fewer than 8 NFL seasons">washed out</span>'
+            if c.get("washed_out") else ""
+        )
         comp_rows += (
             f"<tr>"
-            f"<td class='name'>{_esc(c['name'])}</td>"
+            f"<td class='name'>{_esc(c['name'])}{washed_badge}</td>"
             f"<td>{_pos_badge(c['position'])}</td>"
             f"<td class='years'>{c['last_season']}</td>"
-            f"<td class='score'>{c['similarity']:.3f}</td>"
-            f"<td class='score'>{comp_peak:.1f}</td>"
+            f"<td class='score' style='text-align:right'>{sim:.3f}</td>"
+            f"<td class='score' style='text-align:right'>{comp_peak:.1f}</td>"
+            f"<td class='years'>{career_note}</td>"
             f"<td class='years'>{c['post_age_seasons']}</td>"
             f"<td class='years'>{c['career_ppr']:.0f}</td>"
-            f"<td class='score'>{c['post_age_projected_pts']:.0f}</td>"
+            f"<td class='score' style='text-align:right'>{c['post_age_projected_pts']:.0f}</td>"
             f"</tr>"
         )
+
+    # --- Calculation breakdown -------------------------------------------
+    # Surface the EXPLICIT weighted-average so the user can audit the
+    # rank. Sourced from the same diagnostic fields the engine stamps on
+    # every row (comp_weighted_fp, peak_anchored_fp, projection_path,
+    # survival_multiplier, sample_confidence, late_breakout_penalty).
+    comp_weighted = float(row.get("comp_weighted_fp", 0.0))
+    peak_anchored = float(row.get("peak_anchored_fp", 0.0))
+    projection_path = row.get("projection_path", "—")
+    raw_pre_penalty = float(row.get("projection_raw_pre_penalty",
+                                     max(comp_weighted, peak_anchored)))
+    survival = float(row.get("survival_multiplier", 1.0))
+    confidence = float(row.get("sample_confidence", 1.0))
+    late_breakout = float(row.get("late_breakout_penalty", 1.0))
+    final = float(row.get("production_score", 0.0))
+    n_comps = int(row.get("n_comps", len(comps)))
+    avg_sim = (sum_sim / max(len(comps[:20]), 1)) if comps else 0.0
+    pct_washed = (n_washed / max(n_washed + n_durable, 1)) * 100.0
+
+    # Reconstruct the displayed weighted-average from the comp rows so the
+    # user can confirm the engine's number from the visible data. If the
+    # engine surfaced ``comp_weighted_fp`` use that as the source of truth;
+    # otherwise compute from comps.
+    if sum_sim > 0:
+        recomputed_comp_proj = sum_sim_x_pts / sum_sim
+    else:
+        recomputed_comp_proj = 0.0
+
+    # The v2.2 penalty stack uses an asymmetric Bayesian pull: if the
+    # raw post-survival projection exceeds the position-tier baseline,
+    # it shrinks TOWARD baseline; otherwise it multiplies straight.
+    # Render the actual applied math.
+    after_survival = raw_pre_penalty * survival
+    confidence_step = (
+        f"= max({after_survival:,.0f} × confidence + baseline × (1−conf), "
+        f"or {after_survival:,.0f} × {confidence:.3f}) when below baseline"
+    )
+    breakdown_html = f"""
+<h2>How this <span class="accent">number</span> is built</h2>
+<p class="lede">Every component below is sourced from the engine output
+(<code>engine_rankings.json</code>) and the displayed comp table. The
+final production score is <strong>{final:,.0f}</strong>.</p>
+
+<div class="controls" style="margin:8px 0 14px;flex-wrap:wrap;gap:8px">
+  <span class="stats">Engine: <code>{_esc(str(row.get('engine','similarity_v1')))}</code></span>
+  <span class="stats">Projection path: <code>{_esc(projection_path)}</code></span>
+  <span class="stats">Comps: <strong>{n_comps}</strong></span>
+  <span class="stats">Avg similarity (top 20): <strong>{avg_sim:.3f}</strong></span>
+  <span class="stats">Comp pool washed-out rate: <strong>{pct_washed:.0f}%</strong> ({n_washed}/{n_washed + n_durable})</span>
+</div>
+
+<table style="max-width:780px">
+<thead><tr><th>Step</th><th style="text-align:right">Value</th><th>What it is</th></tr></thead>
+<tbody>
+<tr><td class="name">Comp-weighted projection</td>
+    <td class="score" style="text-align:right">{comp_weighted:,.0f}</td>
+    <td>Σ (sim<sub>i</sub> × post-age-fp<sub>i</sub>) / Σ sim<sub>i</sub>.
+    Sanity check from the top-20 row data on this page: <strong>{recomputed_comp_proj:,.0f}</strong>.</td></tr>
+<tr><td class="name">Peak-anchored projection</td>
+    <td class="score" style="text-align:right">{peak_anchored:,.0f}</td>
+    <td>The player's own peak-3yr-fp/g × expected games × horizon ×
+    5%/yr time discount. Floors elite producers when their comps
+    happen to be light.</td></tr>
+<tr><td class="name">Raw projection (pre-penalty)</td>
+    <td class="score" style="text-align:right">{raw_pre_penalty:,.0f}</td>
+    <td>The greater of the two paths above is used (“{_esc(projection_path)}”).</td></tr>
+<tr><td class="name">× Survival</td>
+    <td class="score" style="text-align:right">{survival:.3f}</td>
+    <td>Multiplier reflecting how many comps washed out by age 30.
+    Today: 1 − 0.5 × bust_rate.</td></tr>
+<tr><td class="name">× Sample confidence</td>
+    <td class="score" style="text-align:right">{confidence:.3f}</td>
+    <td>Shrinks small-sample projections toward the position-tier baseline
+    when raw &gt; baseline; multiplies straight otherwise. {_esc(confidence_step)}.</td></tr>
+<tr><td class="name">× Late-breakout penalty</td>
+    <td class="score" style="text-align:right">{late_breakout:.3f}</td>
+    <td>QB-only. Scales by confidence so unproven late-breakout rookies
+    only pay a fraction of the discount.</td></tr>
+<tr><td class="name"><strong>= Final production score</strong></td>
+    <td class="score" style="text-align:right"><strong>{final:,.0f}</strong></td>
+    <td>Drives the player's rank on the <a href="../rankings.html">Similarity
+    Scores</a> page.</td></tr>
+</tbody>
+</table>
+"""
 
     body = f"""{_player_header(row, team, league_label)}
 <div class="container">
@@ -966,24 +1095,26 @@ def _build_player_page(row: Dict, comps: List[Dict], team: str,
 <p class="lede">The top-10 most similar <em>long-arc</em> NFL players matched by
 <strong>fantasy-point production curve</strong> at this career stage. Each
 comp's "Peak 3yr fp/g" is their best 3-season fp/g average under
-{_esc(league_label)} (era-pace-adjusted to modern). "Projected pts" is what
-their post-age-{row['age']} career would have produced under modern scoring,
-time-discounted 5%/year. The player's projected lifetime fantasy points is
-computed as the max of the similarity-weighted comp projection and the
-target's own peak-anchored projection (proven elite producers don't get
-dragged down by an occasional low-projection comp).</p>
+{_esc(league_label)} (era-pace-adjusted to modern). Similarity is bounded
+in (0, 1] — 1.0 means an identical career-stage profile vector. "Career"
+notes the comp's NFL longevity; the <span class="div-chip div-down">washed
+out</span> badge flags comps whose career ended by age 30 with fewer than
+8 NFL seasons (the engine’s bust definition).</p>
 
 <table>
 <thead><tr>
   <th>Comparable</th><th>Pos</th><th>Last season</th>
   <th style="text-align:right">Similarity</th>
   <th style="text-align:right">Peak 3yr fp/g</th>
-  <th>Their post-age seasons</th>
-  <th>Their career fp</th>
+  <th>Career</th>
+  <th>Post-age seasons</th>
+  <th>Career fp</th>
   <th style="text-align:right">Projected pts</th>
 </tr></thead>
 <tbody>{comp_rows}</tbody>
 </table>
+
+{breakdown_html}
 
 <p class="lede" style="margin-top:24px">Want this player ranked under your
 league's specific scoring + roster rules? Head to

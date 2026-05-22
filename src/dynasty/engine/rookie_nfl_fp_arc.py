@@ -553,7 +553,17 @@ def _recency_bonus(rookie_season: int) -> float:
 @dataclass
 class RookieCompMatch:
     profile: RookieProfile
+    # ``similarity`` is the RANKING score (raw vector similarity boosted
+    # by the breakout / recency factors). It drives top-K selection and
+    # the comp-weighted projection. It is NOT bounded in [0, 1] because
+    # the breakout factor can exceed 1.0 — a same-tier rookie whose
+    # post-rookie career produced 1,500+ fp gets a multiplicative bias.
     similarity: float
+    # ``display_similarity`` is the raw vector-distance similarity
+    # (1 / (1 + d/scale)) bounded in (0, 1]. This is what we surface in
+    # the per-player comp tables — "how alike are the rookie-year stat
+    # lines" — with no boost contamination.
+    display_similarity: float = 0.0
 
 
 def find_rookie_comps(
@@ -594,7 +604,9 @@ def find_rookie_comps(
         if raw_sim <= 0:
             continue
         sim = raw_sim * breakout_factor(p)
-        candidates.append(RookieCompMatch(profile=p, similarity=sim))
+        candidates.append(RookieCompMatch(
+            profile=p, similarity=sim, display_similarity=raw_sim,
+        ))
 
     # If too few comps in age window, widen by +1 (rare; mostly affects
     # 22-yo rookies whose comp pool is mostly 23-yo+).
@@ -609,7 +621,9 @@ def find_rookie_comps(
             if raw_sim <= 0:
                 continue
             sim = raw_sim * breakout_factor(p)
-            candidates.append(RookieCompMatch(profile=p, similarity=sim))
+            candidates.append(RookieCompMatch(
+                profile=p, similarity=sim, display_similarity=raw_sim,
+            ))
 
     candidates.sort(key=lambda m: m.similarity, reverse=True)
     return candidates[:k]

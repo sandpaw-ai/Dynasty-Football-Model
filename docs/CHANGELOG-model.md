@@ -15,6 +15,133 @@ Format for each entry:
 
 ---
 
+## v2.3.1 — similarity transparency + delta colour flip
+
+**Date:** 2026-05-22
+
+Phil reviewed v2.3.0 and flagged four things:
+
+  1. The delta colour on the Dynasty Rankings page was inverted. He
+     wants negative delta (model higher than consensus = model
+     bullish) to render *green*, and positive delta (crowd higher
+     than model = crowd bullish, model bearish) to render *red*.
+  2. Harold Fannin Jr.'s comp table showed similarity values > 1
+     (the rookie engine's breakout-bias was leaking into the display).
+     Similarity should be tethered to (0, 1].
+  3. The headline figures don't explain themselves. The per-player
+     page should show the explicit weighted-average and the penalty
+     stack so a user can see how a score is built.
+  4. Two specific complaints:
+     * Bo Nix's top comp is Aaron Brooks, who failed out of the
+       league (7 NFL seasons, ended age 30) — why is Nix ranked so
+       high if his most similar player washed out?
+     * Marvin Harrison Jr. has decent stats and reasonable similarity
+       scores, but the model rates him at #236 — "the model hates
+       him." Phil hypothesised a Sr/Jr data merge bug.
+
+**Findings.**
+
+  * (1) is a 2-line fix in the consensus chip function.
+  * (2) is real: the rookie engine multiplies the raw vector
+    similarity (capped at 1.0) by a breakout-bias factor that can
+    exceed 1.0 to favour high-fp post-rookie careers in top-K
+    selection. The boost is correct ranking math but should not
+    leak into the display.
+  * (3) is real: the engine already stamps every diagnostic field on
+    each row but the player page wasn't surfacing them.
+  * (4) Bo Nix's comp pool is actually strong — Wilson, Brady,
+    Brees, Dalton, Tannehill, Dak — with `comp_durable_rate = 0.903`
+    (90% durable). The displayed "top_comp = Aaron Brooks" is
+    misleading because it's the single highest-similarity comp; the
+    weighted projection draws on the whole pool. Surfacing the
+    distribution (and explicitly badging Brooks as washed-out) fixes
+    the framing without changing the math.
+  * (4) Marvin Harrison Jr.: NOT a data bug. Sr (gsis 00-0007024,
+    born 1972, HOF, last NFL season 2008) and Jr (gsis 00-0039849,
+    born 2002, ACT) are separate rows in nflverse. The reason Jr
+    ranks low is the v2.2 sample-confidence shrinkage: his career
+    starts proxy (0.6 × 29 games) yields confidence 0.531, cutting
+    his raw projection of 686 down to 364. That's the v2.2 design
+    working as approved. The transparency fix surfaces the math so
+    Phil can audit and decide whether to retune; no penalty changes
+    in this PR.
+
+**Mechanics.**
+
+  * **Colour flip.** `_build_league_consensus`'s `chip()` JS now
+    maps `d < 0 → div-up` (green) and `d > 0 → div-down` (red).
+    The callout copy is updated to match. No other tab is
+    affected (the legacy Superflex-vs-2QB overlay keeps its prior
+    semantics where positive `vs default` is genuinely good).
+
+  * **Similarity tethering.** `RookieCompMatch` now carries a
+    `display_similarity` field that holds the raw vector similarity
+    (`1 / (1 + d/scale)`, bounded in (0, 1]). The boosted score is
+    retained under `ranking_similarity` for the diagnostic transparency
+    table. The user-facing `similarity` field on each comp record now
+    sources from `display_similarity`. The v2.0 cumulative-arc engine
+    already produces similarity in (0, 1] natively (it has no
+    breakout boost), so its records are unchanged behaviorally; the
+    `ranking_similarity = similarity` mirror is added for schema
+    parity.
+
+  * **Wash-out flag.** Every comp record now carries
+    `seasons_played`, `final_age`, and `washed_out` — the last using
+    the same bust definition as the survival multiplier
+    (`final_age <= 30 AND seasons_played < 8`).
+
+  * **Player-page calculation breakdown.** `_build_player_page`
+    now renders a "How this number is built" section showing:
+      * Avg similarity across top 20 comps.
+      * Comp pool washed-out rate (e.g. "25% (5/20)").
+      * The explicit weighted-average formula
+        `Σ(sim_i × post-age-fp_i) / Σ sim_i` with a sanity-check
+        value computed from the visible top-20 rows.
+      * Comp-weighted projection vs peak-anchored projection vs the
+        raw projection (whichever the engine actually used).
+      * The full penalty stack: ×survival, ×sample-confidence,
+        ×late-breakout, with the explicit Bayesian-pull formula text.
+      * Final production score, matching what the rankings page
+        displays.
+    The comp table itself now shows each comp's career length
+    (`9 seasons · ended age 38`) and stamps a red "washed out"
+    chip on bust comps. Phil's Bo Nix → Aaron Brooks case now
+    explicitly badges Brooks AND Mark Sanchez as washed-out in
+    Nix's top-10.
+
+**Validation.** New `tests/test_similarity_transparency.py` (9 cases):
+
+  * Fannin's rookie comp similarities all in (0, 1]; at least one
+    comp has `ranking_similarity > display_similarity` (proves the
+    boost still exists internally, just doesn't leak).
+  * Bo Nix's comps (v2.0 engine) all in (0, 1] with
+    `display == ranking`.
+  * Aaron Brooks is `washed_out=True` on the Nix comp records;
+    Tom Brady is `washed_out=False`.
+  * Marvin Harrison Sr and Jr are confirmed as separate gsis_id
+    records and only Jr appears in active rankings.
+  * Consensus page chip JS uses flipped polarity (negative → div-up,
+    positive → div-down).
+  * Bo Nix, Fannin, and MHJ player pages all render the full
+    calculation-breakdown table with every penalty-stack row.
+
+All **136 prior engine tests still pass.** No penalty calibration
+changed.
+
+**Files.**
+
+  * `src/dynasty/engine/rookie_nfl_fp_arc.py` (`display_similarity`
+    field on `RookieCompMatch`)
+  * `src/dynasty/engine/similarity_v1.py` (both `_rookie_comp_records`
+    and the v2.0 comp-record emit add `seasons_played` / `final_age`
+    / `washed_out` / `ranking_similarity`)
+  * `src/dynasty/report.py` (consensus chip colour flip + per-player
+    page calculation breakdown)
+  * `tests/test_similarity_transparency.py` (new, 9 cases)
+  * `docs/CHANGELOG-model.md` (this entry)
+
+---
+
 ## v2.3.0 — Dynasty Rankings tab → consensus-vs-model diff
 
 **Date:** 2026-05-22

@@ -15,6 +15,140 @@ Format for each entry:
 
 ---
 
+## v2.3.2 — wash-out fix, delta arrows, non-QB confidence retune
+
+**Date:** 2026-05-22
+
+Phil reviewed v2.3.1 and flagged three issues:
+
+  1. **"You have to be careful on the washed out math. I see players
+     that you are calling washed out but they are still in the league.
+     We need to write some code that does not call a player washed out
+     if they are still actively in the NFL."**
+
+     Confirmed: James Cook, Zach Charbonnet, Roschon Johnson, Ray
+     Davis, Jaleel McLaughlin, Luke Schoonmaker, Cade Stover and
+     others were all being flagged because they fit the bust profile
+     (`final_age <= 30 AND seasons_played < 8`) but they are all
+     active 1–3-year players. The flag means "washed out", not
+     "hasn't played long enough yet" — the test was missing.
+
+  2. **"I don't think the delta from model to consensus looks correct.
+     Please fix that. If the model is higher on a player it should be
+     a green up arrow showing that difference."**
+
+     The v2.3.1 colour flip was correct (negative delta → green) but
+     there was no actual arrow glyph. Coloured numbers alone are
+     ambiguous because users have to remember that smaller rank
+     numbers mean higher rank.
+
+  3. **"The model is still valuing players like Marvin Harrison Jr.
+     too low. His stats through the first two seasons are pretty
+     solid and the top comps being Torrey Smith, Christian Kirk, Dez
+     Bryant… those are all solid players. Crabtree, Andre Johnson…
+     these guys are all pretty good. I think the problem is the
+     projected lifetime FP of 364… this cannot be right compared to
+     comps/similarity scores. Let's use this as an example and update
+     the model accordingly."**
+
+     Diagnosis: MHJ's comp-weighted projection of 723 is correct given
+     his comp pool (median career_fp ~1,100, mix of Andre Johnson
+     and Stefon Diggs at the top, Crabtree/Dez/Maclin in the middle).
+     The killer is the v2.2 sample-confidence shrinkage at 0.531,
+     which cut his post-survival projection of 686 down to 364.
+     `_career_starts_proxy(WR) = 0.6 × games` divided by
+     `FULL_CONFIDENCE_STARTS = 32` was too steep for skill positions:
+     a WR needed ~53 games (over 3 NFL seasons) to reach full
+     confidence. A 17-game rookie was capped at conf=0.319 — a 68%
+     haircut on production just for being early-career. That's the
+     bug Phil is flagging.
+
+**Mechanics.**
+
+  * **Wash-out fix.** New helper `_comp_washed_out` centralises the
+    flag and returns False whenever `last_season >= current_season - 1`
+    (the same "still active" definition the engine uses elsewhere).
+    Applied at both comp-record emit sites (rookie engine path and
+    v2.0 cumulative engine path).
+
+  * **Arrow glyphs.** `_build_league_consensus` chip JS now emits
+    `↑ N` for green (model bullish) chips and `↓ N` for red (crowd
+    bullish) chips. The number after the arrow is the absolute delta
+    so the direction reads as one unit ("model is 28 spots higher").
+    Callout text updated to match.
+
+  * **Non-QB confidence retune.** In
+    `dynasty.engine.v2_2_penalties.compute_confidence`:
+
+    - QB math is **unchanged** (Phil approved v2.2 QB calibration):
+      `games / FULL_CONFIDENCE_STARTS=32`, with a 0.5 cap below 16
+      starts. Bo Nix's late-breakout penalty math is unchanged.
+    - Non-QB `_career_starts_proxy` drops the `0.6 × games`
+      starter discount. WR/RB/TE don't have a clean "start" concept
+      and any game where a skill player accumulated meaningful fp/g
+      represents real NFL exposure.
+    - New `FULL_CONFIDENCE_GAMES_NON_QB = 30` (≈1.75 NFL seasons)
+      replaces the QB threshold for non-QBs. MHJ has 29 games →
+      conf 0.967 instead of 0.531. Rome Odunze same lift; Bowers,
+      LaPorta, McBride, Brian Thomas Jr. all credited at near-full
+      confidence now.
+    - 1-NFL-season rookies (Tetairoa McMillan, Ashton Jeanty) still
+      route through the rookie engine path which **already exempts
+      non-QB rookies** from `sample_confidence` shrinkage. Their
+      ranks are unchanged.
+
+**Output shifts.**
+
+  * Marvin Harrison Jr.:     #236 → #136 (score 364 → 663)
+  * Rome Odunze:             #233 → #130 (score 374 → 682)
+  * Brock Bowers:            ~#50 → #36   (score 1,085 → 1,530)
+  * Brian Thomas Jr.:        ~#80 → #59   (score 1,153 → 1,217)
+  * Sam LaPorta / Trey McBride: full confidence achieved, minor lift
+  * Puka Nacua now top-1 in superflex (no longer artificially shrunk;
+    44 games, 23.4 PPR/g in 2025 is genuinely elite). Jayden Daniels
+    slips from #5 to #6 — invariant relaxed to top-8 with rationale.
+  * Established multi-year veterans (Jefferson, Chase, St. Brown,
+    JSN, etc.) unchanged — they were already at conf=1.0.
+  * QBs unchanged across the board.
+
+**Validation.** New `tests/test_v2_3_2_confidence_retune.py` (8 cases):
+
+  * Active short-career comps (Cook, Charbonnet, Roschon, Davis,
+    McLaughlin, Schoonmaker, Stover) are NOT flagged washed_out.
+  * Aaron Brooks (retired 2006, 7 NFL seasons, ended age 30) IS
+    still flagged so the Bo Nix → Brooks framing fix holds.
+  * `league.html` chip JS contains the literal up-arrow / down-arrow
+    glyphs in the green/red branches respectively.
+  * MHJ rank ≤ 200 with sample_confidence ≥ 0.90.
+  * Rome Odunze rank ≤ 200.
+  * Jayden Daniels confidence == 0.75 (±0.02) — QB math untouched.
+  * Jefferson / Chase / Amon-Ra all still at conf ≥ 0.99.
+  * McMillan and Jeanty still top-30 (rookie engine path unchanged).
+
+`test_daniels_top_5` invariant relaxed to `top_8` in both
+`test_v2_2_penalties.py` and `test_v2_1_rookie_nfl.py` with a
+comment explaining the v2.3.2 ranking shift (WRs no longer artificially
+shrunk → Nacua takes #1 → Daniels slips 1 spot organically).
+
+All **153 affected tests pass.**
+
+**Files.**
+
+  * `src/dynasty/engine/v2_2_penalties.py` (`_career_starts_proxy` drops
+    the 0.6 multiplier; `compute_confidence` uses
+    `FULL_CONFIDENCE_GAMES_NON_QB=30` for non-QBs)
+  * `src/dynasty/engine/similarity_v1.py` (new `_comp_washed_out`
+    helper; both comp-record emit paths take `current_season` and
+    use the helper)
+  * `src/dynasty/report.py` (consensus chip JS emits arrow glyphs;
+    callout updated)
+  * `tests/test_v2_3_2_confidence_retune.py` (new, 8 cases)
+  * `tests/test_v2_2_penalties.py` (Daniels top-5 → top-8)
+  * `tests/test_v2_1_rookie_nfl.py` (Daniels top-5 → top-8)
+  * `docs/CHANGELOG-model.md` (this entry)
+
+---
+
 ## v2.3.1 — similarity transparency + delta colour flip
 
 **Date:** 2026-05-22

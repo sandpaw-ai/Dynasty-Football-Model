@@ -102,9 +102,20 @@ def test_lamar_top_15(engine):
     assert rank is not None and rank <= 15, f"Lamar rank #{rank}"
 
 
-def test_daniels_top_5(engine):
+def test_daniels_top_8(engine):
+    """Jayden Daniels should rank near the top of the board: 355-PPR
+    rookie plus a 7-game injury-shortened 2025.
+
+    Updated in v2.3.2 (non-QB confidence retune, 2026-05-22) from the
+    original top-5 invariant to top-8. After the retune, multi-season
+    WR producers (Puka Nacua, Ja'Marr Chase) properly capture the
+    top of the board, so Daniels naturally slips a couple of spots
+    without losing his elite tier. The pre-retune ordering was an
+    artefact of WR sample-confidence cratering, not a model preference
+    for QBs over WRs.
+    """
     rank = _rank(engine, "Jayden Daniels")
-    assert rank is not None and rank <= 5, f"Daniels rank #{rank}"
+    assert rank is not None and rank <= 8, f"Daniels rank #{rank}"
 
 
 def test_mahomes_top_25(engine):

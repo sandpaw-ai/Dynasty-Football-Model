@@ -558,6 +558,35 @@ def _completed_nfl_seasons(career: PlayerCareer) -> int:
     return sum(1 for s in career.seasons if s.games >= MIN_GAMES_PER_SEASON)
 
 
+def _comp_washed_out(
+    *,
+    final_age: Optional[int],
+    seasons_played: int,
+    last_season: Optional[int],
+    current_season: int,
+) -> bool:
+    """True only when the comp is no longer in the NFL AND fits the bust
+    profile (career ended by ``SURVIVAL_BUST_AGE`` with fewer than
+    ``SURVIVAL_BUST_MAX_SEASONS`` NFL seasons).
+
+    Phil's 2026-05-22 critique: previously every short-career comp got
+    flagged, including active 1–3-year players like James Cook, Zach
+    Charbonnet, and Roschon Johnson — wrong, they haven't washed out
+    yet, they just haven't played long enough. Use the same
+    "still on a roster within the last full season" rule the engine
+    uses elsewhere (``_is_active``).
+    """
+    if last_season is None or last_season >= current_season - 1:
+        # Still active (played in current_season or the prior season).
+        return False
+    if final_age is None:
+        return False
+    return (
+        final_age <= SURVIVAL_BUST_AGE
+        and seasons_played < SURVIVAL_BUST_MAX_SEASONS
+    )
+
+
 def _raw_stats_by_pid_season(careers: Dict[str, PlayerCareer]) -> Dict[Tuple[str, int], Dict[str, float]]:
     """Pid+season → raw stat-line dict. Used by rookie_nfl_fp_arc to read
     rookie-year per-category yards/TDs (the fp/G dimension comes from the
@@ -572,7 +601,10 @@ def _raw_stats_by_pid_season(careers: Dict[str, PlayerCareer]) -> Dict[Tuple[str
 
 
 def _rookie_comp_records(
-    comps: Sequence[RookieCompMatch], league_format: str,
+    comps: Sequence[RookieCompMatch],
+    league_format: str,
+    *,
+    current_season: int,
 ) -> List[Dict]:
     """Convert RookieCompMatch list to the comp-record dict shape that
     format_overlay + report.py expect. Sets snapshot_age = comp's
@@ -604,9 +636,11 @@ def _rookie_comp_records(
             (s.age for s in arc.career_arc if s.games >= MIN_GAMES_PER_SEASON),
             default=None,
         )
-        washed_out = (
-            final_age is not None and final_age <= SURVIVAL_BUST_AGE
-            and seasons_played < SURVIVAL_BUST_MAX_SEASONS
+        washed_out = _comp_washed_out(
+            final_age=final_age,
+            seasons_played=seasons_played,
+            last_season=arc.last_season,
+            current_season=current_season,
         )
         records.append({
             "player_id": arc.player_id,
@@ -829,7 +863,9 @@ def run_engine(
                 qb_rypg = career_rushing_rate(ap)
 
             top_comp = rproj.comps[0].profile.arc
-            comp_records = _rookie_comp_records(rproj.comps, BASE_FORMAT)
+            comp_records = _rookie_comp_records(
+                rproj.comps, BASE_FORMAT, current_season=current_season,
+            )
             rankings.append({
                 "player_id": ap.player_id,
                 "name": ap.name,
@@ -952,9 +988,11 @@ def run_engine(
                 (s.age for s in c.arc.career_arc if s.games >= MIN_GAMES_PER_SEASON),
                 default=None,
             )
-            washed_out = (
-                final_age is not None and final_age <= SURVIVAL_BUST_AGE
-                and seasons_played < SURVIVAL_BUST_MAX_SEASONS
+            washed_out = _comp_washed_out(
+                final_age=final_age,
+                seasons_played=seasons_played,
+                last_season=c.arc.last_season,
+                current_season=current_season,
             )
             comp_records.append({
                 "player_id": c.arc.player_id,

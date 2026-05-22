@@ -15,6 +15,63 @@ Format for each entry:
 
 ---
 
+## v2.2.1 — displayed age aligned to Pro-Football-Reference
+
+**Date:** 2026-05-22
+
+**What changed.** The `age` column in `engine_rankings.json` (and the
+rendered rankings/player pages) is now the player's CURRENT age — whole
+years between `birth_date` and today — matching what Pro-Football-Reference
+shows on the player profile.
+
+Previously the field was `last_season - birth_year`, which under-counts
+any player whose calendar-year birthday has already passed. Tetairoa
+McMillan (born 2003-04-05) flipped from `22` to `23`, agreeing with PFR's
+`23-047d` readout as of 2026-05-22.
+
+**Why.** PFR is the trusted source for player age. The previous value
+was a season-age (correct for engine internals like comp-window selection)
+but misleading as a display column for dynasty buyers reading the table.
+
+**Mechanics.**
+
+- `PlayerCareer` now carries an optional `birth_date: Optional[date]`
+  parsed from the nflverse meta row (year-only fallback retained).
+- New `PlayerCareer.current_age(as_of=date.today())` returns whole
+  years using full date arithmetic.
+- Engine emit sites (v2.0 cumulative-arc and v2.1 1-season rookie engine)
+  now stamp `"age": display_age` where `display_age = ap.current_age()`.
+  Falls back to `last_season.age` when birth metadata is missing
+  (in practice this never fires — all 735 active players have full
+  `birth_date` rows in nflverse 2025).
+- Engine internals (comp-window selection, age-cap aggregates, percentile
+  table) are unchanged: they still use `PlayerSeason.age = season -
+  birth_year`, which is the correct semantic for those calculations.
+
+**Expected output shift.** Cosmetic across the entire ranking; affects
+any player whose birthday in the current calendar year has already
+passed (≈40% of the table on any given day). No movement in rank,
+score, or comp.
+
+**Validation.** New `tests/test_current_age.py` pins:
+
+  * McMillan = 23 with birth_date=2003-04-05 as of 2026-05-22.
+  * Birthday-edge math (before / on / after).
+  * Year-only fallback when `birth_date` is missing.
+  * `with_completed_seasons_only` preserves `birth_date`.
+  * End-to-end `run_engine` emits `age=23` for McMillan.
+
+Spot-checks (today, 2026-05-22):
+
+  * Patrick Mahomes (1995-09-17) → 30 ✅
+  * Aaron Rodgers (1983-12-02) → 42 ✅
+  * Justin Jefferson (1999-06-16, birthday not yet reached) → 26 ✅
+  * Caleb Williams (2001-11-18, birthday not yet reached) → 24 ✅
+  * Brock Bowers (2002-12-13) → 23 ✅
+  * Ashton Jeanty (2003-12-18) → 22 ✅
+
+---
+
 ## v2.2.0 — survival / confidence / late-breakout penalty stack + site rebrand
 
 **Date:** 2026-05-21

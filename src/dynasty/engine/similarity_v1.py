@@ -156,6 +156,11 @@ class PlayerCareer:
     rookie_season: Optional[int]
     last_season: Optional[int]
     seasons: List[PlayerSeason] = field(default_factory=list)
+    # Full birth date when available (YYYY-MM-DD from nflverse, which agrees
+    # with Pro-Football-Reference). Used for displayed/current age. The
+    # season-grained ``birth_year`` is kept for engine internals (comping,
+    # cohort windows) and for players whose meta row lacks a full date.
+    birth_date: Optional[date] = None
 
     def is_retired(self, through: int = RETIRED_THROUGH_SEASON) -> bool:
         return self.last_season is not None and self.last_season <= through
@@ -203,7 +208,27 @@ class PlayerCareer:
             rookie_season=self.rookie_season,
             last_season=last,
             seasons=kept,
+            birth_date=self.birth_date,
         )
+
+    def current_age(self, as_of: Optional[date] = None) -> Optional[int]:
+        """Return the player's age as of ``as_of`` (default: today).
+
+        Matches Pro-Football-Reference's displayed age semantics:
+        whole years between birth_date and the reference date. Falls back
+        to ``as_of.year - birth_year`` (year-grained) when only the
+        birth year is known.
+        """
+        ref = as_of or date.today()
+        bd = self.birth_date
+        if bd is not None:
+            years = ref.year - bd.year
+            if (ref.month, ref.day) < (bd.month, bd.day):
+                years -= 1
+            return years
+        if self.birth_year is not None:
+            return ref.year - self.birth_year
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +258,24 @@ def _birth_year(meta_row: Optional[Dict[str, str]]) -> Optional[int]:
         return None
     try:
         return int(bd[:4])
+    except ValueError:
+        return None
+
+
+def _birth_date(meta_row: Optional[Dict[str, str]]) -> Optional[date]:
+    """Parse the full birth_date from a nflverse meta row.
+
+    Returns ``None`` if the row is missing, the field is blank, or the
+    format is not ``YYYY-MM-DD``. Used to compute current age on a
+    day-precision basis (matches Pro-Football-Reference).
+    """
+    if not meta_row:
+        return None
+    raw = (meta_row.get("birth_date") or "").strip()
+    if not raw or len(raw) < 10:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
     except ValueError:
         return None
 
@@ -328,6 +371,7 @@ def load_corpus(
                         rookie_season = int(m["rookie_season"])
                     if (m.get("last_season") or "").isdigit():
                         last_season = int(m["last_season"])
+                bdate = _birth_date(m)
                 c = PlayerCareer(
                     player_id=pid,
                     name=name,
@@ -336,6 +380,7 @@ def load_corpus(
                     rookie_season=rookie_season,
                     last_season=last_season,
                     seasons=[],
+                    birth_date=bdate,
                 )
                 careers[pid] = c
             c.seasons.append(ps)
@@ -662,12 +707,24 @@ def run_engine(
     comps_map: Dict[str, List[Dict]] = {}
     CURRENT_ERA = 4
 
+    # Reference date for the displayed "age" column. We match
+    # Pro-Football-Reference's player-page semantics: whole years between
+    # the player's birth_date and today. Used only for the report ``age``
+    # field; ``last_season.age`` (year-of-season minus birth_year) is
+    # still used for engine internals (comping, age-window selection).
+    age_ref_date = date.today()
+
     for ap in active_players:
         target_arc = arcs.get(ap.player_id)
         if target_arc is None or not target_arc.career_arc:
             continue
         last_season = ap.seasons[-1]
         age_now = last_season.age
+        # Current age for display (PFR-style). Falls back to ``age_now``
+        # when birth metadata is unavailable.
+        display_age = ap.current_age(as_of=age_ref_date)
+        if display_age is None:
+            display_age = age_now
 
         # ------------------------------------------------------------------
         # v2.1 cohort dispatcher — by completed NFL seasons.
@@ -747,7 +804,10 @@ def run_engine(
                 "player_id": ap.player_id,
                 "name": ap.name,
                 "position": ap.position,
-                "age": age_now,
+                # ``age`` is the player's CURRENT age (PFR-style, day-precision
+                # via ``PlayerCareer.current_age``). ``last_season.age`` is
+                # still used internally for comping/age windows.
+                "age": display_age,
                 "last_season": ap.last_season,
                 "production_score": round(weighted_points, 1),
                 "projected_years_remaining": round(weighted_seasons, 1),
@@ -875,7 +935,10 @@ def run_engine(
             "player_id": ap.player_id,
             "name": ap.name,
             "position": ap.position,
-            "age": age_now,
+            # ``age`` is the player's CURRENT age (PFR-style, day-precision
+            # via ``PlayerCareer.current_age``). ``last_season.age`` is
+            # still used internally for comping/age windows.
+            "age": display_age,
             "last_season": ap.last_season,
             "production_score": round(weighted_points, 1),
             "projected_years_remaining": round(weighted_seasons, 1),

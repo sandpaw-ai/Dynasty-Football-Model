@@ -346,29 +346,28 @@ def test_no_old_tab_names_in_nav(site):
     assert ">League Overlay<" not in nav, f"unexpected 'League Overlay' link in nav: {nav}"
 
 
-def test_dynasty_rankings_presets(site):
-    """The Dynasty Rankings page (league.html) exposes Superflex PPR and
-    1QB PPR — the two KeepTradeCut consensus formats the page diffs the
-    model against.
+def test_dynasty_rankings_superflex_only(site):
+    """The Dynasty Rankings page (league.html) shows ONLY Superflex PPR.
 
-    Updated in v2.3 (consensus-vs-model rewrite, 2026-05-22): the page
-    no longer renders a Superflex-vs-2QB format overlay; it now compares
-    the model rankings to KTC community consensus for two league
-    formats. The 2QB-PPR overlay was removed because KTC does not
-    publish a distinct 2QB consensus rank.
+    Updated in v2.3.4 (Phil 2026-05-22): "On Dynasty Rankings tab it
+    should only be Superflex PPR. Let's get rid of the 1QB PPR format
+    button." The format selector is now a static label, not a toggle.
+    1QB / 2QB / SF TE Premium buttons must all be absent.
     """
     html = _read(os.path.join(site, "league.html"))
-    assert 'id="btn-sf_ppr"' in html
-    assert 'id="btn-1qb_ppr"' in html
-    # 2QB overlay button is gone; SF TE Premium never made it to this tab.
-    assert 'id="btn-2qb_ppr"' not in html
-    assert 'id="btn-sf_te_premium"' not in html
-    # Exactly the two format buttons present.
+    # No format-toggle buttons at all on the consensus page.
     import re
     matches = re.findall(r'id="btn-([a-z0-9_]+)"', html)
-    assert sorted(set(matches)) == ["1qb_ppr", "sf_ppr"], (
-        f"unexpected preset buttons: {matches}"
+    assert matches == [], (
+        f"unexpected format toggle buttons on Dynasty Rankings: {matches}"
     )
+    # Sort buttons are still expected.
+    sort_matches = re.findall(r'id="sort-([a-z]+)"', html)
+    assert set(sort_matches) == {"model", "consensus", "bullish", "bearish"}, (
+        f"sort buttons changed: {sort_matches}"
+    )
+    # Static Superflex PPR label must be present.
+    assert "Superflex PPR" in html
 
 
 def test_dynasty_rankings_click_through(site):

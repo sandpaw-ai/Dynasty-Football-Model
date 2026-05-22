@@ -15,6 +15,120 @@ Format for each entry:
 
 ---
 
+## v2.3.0 — Dynasty Rankings tab → consensus-vs-model diff
+
+**Date:** 2026-05-22
+
+**What changed.** The **Dynasty Rankings** tab (`league.html`) is
+rewired from a Superflex-vs-2QB format overlay to a model-vs-community
+consensus diff. For each league format the page now shows:
+
+  * Model rank (production_score desc)
+  * Consensus rank (KeepTradeCut)
+  * Delta column (negative = model bullish vs crowd; positive = crowd
+    bullish vs model)
+  * KTC value + tier for context
+  * Sort options: model rank, consensus rank, most model-bullish,
+    most model-bearish
+
+Formats: **Superflex PPR** (KTC `superflexValues.rank`) and **1QB PPR**
+(KTC `oneQBValues.rank`). The 2QB overlay was dropped from this tab
+because KTC does not publish a distinct 2QB consensus.
+
+**Why.** Phil's direction (2026-05-22): "show the prognostication that
+is happening in the dynasty community when the stats do not necessarily
+back it up." The old format-overlay view (Superflex-vs-2QB) was useful
+for league context but didn't surface the larger question — where does
+the data disagree with the crowd? The format overlay remains available
+for consumers of `engine.overlays` and renders as the fallback when no
+KTC snapshot is cached locally.
+
+**Mechanics.**
+
+- New `src/dynasty/sources/keeptradecut.py` adapter: one polite GET
+  against `https://keeptradecut.com/dynasty-rankings`, regex-extracts
+  the embedded `playersArray`, normalizes to `KTCSnapshot` with
+  per-format ranks/values/tiers/ADP. ~1.3 MB / 500 players per scrape.
+- New `scripts/refresh_ktc_consensus.py`: refreshes the KTC snapshot
+  AND the dynastyprocess `db_playerids.csv` crosswalk (which provides
+  `ktc_id→gsis_id` directly). Cached under `data/consensus/`.
+- New `src/dynasty/consensus.py`: joins KTC + crosswalk + model output
+  into a `ConsensusComparison` row set. Resolution order:
+  `ktc_id→gsis_id` (preferred), then `mfl_id→gsis_id`, then
+  normalized `(name, position)` fallback. Unresolved KTC rows are
+  counted (`n_unmatched_consensus`) rather than dropped silently so
+  we'll notice mapping decay.
+- `dynasty.report._build_league` now dispatches to a consensus body
+  when a snapshot is cached, with a graceful fallback to the legacy
+  overlay body when offline.
+- `dynasty.launcher_headless` runs `refresh_ktc_consensus.refresh()`
+  as step `[3b/5]` between the engine run and the site build, so the
+  daily refresh kicks in automatically.
+
+**Insights from the first snapshot (2026-05-22).**
+
+Most model-bullish vs crowd (Superflex PPR):
+  * Sam Howell:           model #38,  KTC #419,  Δ −381
+  * Kareem Hunt:          model #147, KTC #455,  Δ −308
+  * Joe Mixon:            model #98,  KTC #405,  Δ −307
+  * Joe Flacco:           model #113, KTC #414,  Δ −301
+  * Anthony Richardson:   model #35,  KTC #234,  Δ −199
+
+  Pattern: career-accumulator QBs/RBs whose comp pool credits past
+  production while the crowd treats them as backups. Real takeaway
+  is conditional — they matter only if a starting opportunity opens.
+
+Most model-bearish vs crowd (Superflex PPR):
+  * Ricky Pearsall:       model #490, KTC #119,  Δ +371
+  * Ben Sinnott:          model #659, KTC #306,  Δ +353
+  * Will Shipley:         model #667, KTC #325,  Δ +342
+  * Blake Corum:          model #476, KTC #138,  Δ +338
+  * Chris Rodriguez Jr.:  model #521, KTC #206,  Δ +315
+
+  Pattern: late-round 2024/25 picks with minimal NFL production yet.
+  The crowd prices in draft capital + upside; the model credits only
+  observed fantasy output. Known structural blind spot for
+  pre-rookie / 0-NFL-season players.
+
+**Anchor disagreements:**
+
+  * Bo Nix:               model #3,   KTC #32,   Δ −29
+  * Anthony Richardson:   model #35,  KTC #234,  Δ −199
+  * Ashton Jeanty:        model #22,  KTC #16,   Δ +6 (SF) / +12 (1QB)
+  * Tetairoa McMillan:    model #21,  KTC #26,   Δ −5 (SF) / +2 (1QB)
+
+**Validation.** New `tests/test_consensus.py` (9 cases) covers:
+  * `playersArray` extraction yields ≥400 rows from the fixture HTML.
+  * McMillan resolves to position WR, SF rank 26, 1QB rank 19, mfl_id
+    17071.
+  * Snapshot serialization round-trips losslessly.
+  * Name normalizer handles suffixes (`Jr./Sr./II/III/IV/V`),
+    apostrophes, periods, and diacritics.
+  * End-to-end: model row + KTC row + crosswalk produces a paired diff
+    with the correct delta sign.
+  * 1QB format selector uses `oneQBValues.rank` not superflex.
+  * Name-only fallback resolves when no id crosswalk hits.
+  * Unmatched KTC rows and consensus-only players are counted, not
+    dropped silently.
+
+`tests/test_v2_2_penalties.py` updated to assert the new preset set
+(`sf_ppr` + `1qb_ppr`), anchor click-through via `<a href>` rather
+than row-onclick, and verify the consensus framing (KTC attribution,
+Model/Consensus column headers).
+
+**Files.**
+
+  * `src/dynasty/sources/keeptradecut.py` (new)
+  * `src/dynasty/consensus.py` (new)
+  * `scripts/refresh_ktc_consensus.py` (new)
+  * `docs/CONSENSUS-VS-MODEL.md` (new)
+  * `src/dynasty/report.py` (`_build_league` rewrite + legacy fallback)
+  * `src/dynasty/launcher_headless.py` (step `[3b/5]` refresh)
+  * `tests/test_consensus.py` (new) + `tests/fixtures/ktc_sample.html`
+  * `tests/test_v2_2_penalties.py` (updated for new tab contract)
+
+---
+
 ## v2.2.1 — displayed age aligned to Pro-Football-Reference
 
 **Date:** 2026-05-22

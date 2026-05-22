@@ -59,3 +59,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Consensus snapshots: dated history is regenerated daily, keep only the
+# latest pointer + the crosswalk in git so the site builds offline.
+data/consensus/ktc_[0-9]*-[0-9]*-[0-9]*.json

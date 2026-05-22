@@ -19,6 +19,12 @@ from typing import Dict, Iterable, List, Optional
 
 from .engine.similarity_v1 import EngineResult, OUT_ROOT, run_engine
 from .engine.format_overlay import PRESETS, OverlayResult, all_format_overlays
+from .consensus import (
+    ConsensusComparison,
+    compare_to_consensus,
+    load_crosswalk,
+)
+from .sources.keeptradecut import load_latest as load_latest_ktc
 
 
 # ---------------------------------------------------------------------------
@@ -312,14 +318,223 @@ q.addEventListener('input', update); pos.addEventListener('change', update); upd
 # League overlay page
 # ---------------------------------------------------------------------------
 
-def _build_league(overlays: Dict[str, OverlayResult], latest_ts: datetime,
-                  league_label: str, team_lookup: Dict[str, str]) -> str:
-    # v2.2 preset cleanup — KEEP only Superflex PPR and 2QB PPR (the two
-    # formats Phil's leagues use). Drop 1QB PPR / SF TE Premium /
-    # Half PPR / Standard from the preset row.
+def _build_league(
+    overlays: Dict[str, OverlayResult],
+    latest_ts: datetime,
+    league_label: str,
+    team_lookup: Dict[str, str],
+    *,
+    engine: Optional[EngineResult] = None,
+) -> str:
+    """Render the **Dynasty Rankings** tab as a consensus-vs-model diff.
+
+    The previous behavior (re-rank under a per-league overlay) was useful
+    but the consensus comparison is the higher-value view per Phil's
+    direction (2026-05-22): "show the prognostication that is happening
+    in the dynasty community when the stats do not necessarily back it
+    up."
+
+    Surface:
+      - Superflex: model vs KeepTradeCut ``superflexValues.rank``.
+      - 1QB:       model vs KeepTradeCut ``oneQBValues.rank``.
+      - Delta column: positive = model is more BEARISH than the crowd,
+                      negative = model is more BULLISH than the crowd.
+
+    Falls back to the legacy overlay (Superflex vs 2QB) when no KTC
+    snapshot is cached locally, so the site still builds in offline /
+    CI environments where ``scripts/refresh_ktc_consensus.py`` has not
+    been run.
+    """
+    ktc_snap = load_latest_ktc()
+    if ktc_snap is not None and engine is not None:
+        return _build_league_consensus(
+            engine=engine,
+            ktc_snap=ktc_snap,
+            latest_ts=latest_ts,
+            league_label=league_label,
+            team_lookup=team_lookup,
+        )
+    return _build_league_overlay_legacy(
+        overlays=overlays,
+        latest_ts=latest_ts,
+        league_label=league_label,
+        team_lookup=team_lookup,
+    )
+
+
+def _build_league_consensus(
+    *,
+    engine: EngineResult,
+    ktc_snap,
+    latest_ts: datetime,
+    league_label: str,
+    team_lookup: Dict[str, str],
+) -> str:
+    """Consensus-vs-model diff body for the Dynasty Rankings tab."""
+    crosswalk = load_crosswalk()
+    formats = ("sf_ppr", "1qb_ppr")
+    payload: Dict[str, Dict] = {}
+    for fmt in formats:
+        cmp = compare_to_consensus(
+            model_rankings=engine.rankings,
+            ktc_snapshot=ktc_snap,
+            crosswalk=crosswalk,
+            league_format=fmt,
+        )
+        payload[fmt] = {
+            "label": "Superflex PPR" if fmt == "sf_ppr" else "1QB PPR",
+            "matched": len(cmp.rows),
+            "unmatched": cmp.n_unmatched_consensus,
+            "rows": [
+                {
+                    "name": r.name,
+                    "pos": r.position,
+                    "age": r.age,
+                    "team": r.team or team_lookup.get(r.gsis_id, "—"),
+                    "model_rank": r.model_rank,
+                    "consensus_rank": r.consensus_rank,
+                    "delta": r.delta,
+                    "score": round(r.production_score, 1),
+                    "ktc_value": r.consensus_value,
+                    "tier": r.consensus_tier,
+                    "pos_rank": r.consensus_positional_rank,
+                    "slug": r.slug,
+                }
+                for r in cmp.rows
+            ],
+        }
+    payload_json = json.dumps(payload)
+    consensus_ts = ktc_snap.captured_at.strftime("%b %d, %Y at %H:%M UTC")
+
+    body = f"""<div class="container">
+
+<h2>Dynasty <span class="accent">Rankings</span> · Consensus vs Model</h2>
+<p class="lede">Where does the data agree with the dynasty community, and
+where does it disagree? Each row pairs the model's similarity-score rank
+with the <a href="https://keeptradecut.com/dynasty-rankings">KeepTradeCut</a>
+community consensus for the same league format.</p>
+
+<div class="callout">
+  <strong>How to read the delta.</strong>
+  <span class="div-chip div-down">–1</span> or
+  <span class="div-chip div-down-big">–11</span> means the
+  <em>model</em> ranks the player <em>higher</em> than the crowd does
+  (model is more bullish). <span class="div-chip div-up">+1</span> /
+  <span class="div-chip div-up-big">+11</span> means the crowd is more
+  bullish than the data justifies. Big deltas surface the players the
+  community is pricing on narrative rather than production.
+</div>
+
+<div class="controls">
+  Format: <button onclick="setFormat('sf_ppr')" id="btn-sf_ppr">Superflex PPR</button>
+  <button onclick="setFormat('1qb_ppr')" id="btn-1qb_ppr">1QB PPR</button>
+  &nbsp;· Sort:
+  <button onclick="setSort('model')" id="sort-model">Model rank</button>
+  <button onclick="setSort('consensus')" id="sort-consensus">Consensus rank</button>
+  <button onclick="setSort('bullish')" id="sort-bullish">Model bullish</button>
+  <button onclick="setSort('bearish')" id="sort-bearish">Model bearish</button>
+  <span class="stats" id="ov-stats"></span>
+</div>
+
+<table>
+<thead><tr>
+  <th>Model #</th><th>Player</th><th>Pos</th><th>Team</th>
+  <th>Age</th>
+  <th style="text-align:right">Consensus #</th>
+  <th style="text-align:right">Δ</th>
+  <th style="text-align:right">Score</th>
+  <th style="text-align:right">KTC value</th>
+</tr></thead>
+<tbody id="ov-body"></tbody>
+</table>
+
+<p class="footnote">Consensus snapshot: KeepTradeCut, captured {_esc(consensus_ts)}.
+Refresh with <code>python3 scripts/refresh_ktc_consensus.py</code>.
+Matching uses dynastyprocess <code>ktc_id→gsis_id</code> crosswalk; rows
+that cannot be resolved to a model player are excluded.</p>
+
+<script>
+const CONSENSUS = {payload_json};
+let currentFmt = 'sf_ppr';
+let currentSort = 'model';
+function chip(d) {{
+  if (d > 10) return '<span class="div-chip div-up-big">+'+d+'</span>';
+  if (d > 0)  return '<span class="div-chip div-up">+'+d+'</span>';
+  if (d < -10) return '<span class="div-chip div-down-big">'+d+'</span>';
+  if (d < 0)  return '<span class="div-chip div-down">'+d+'</span>';
+  return '<span class="div-chip div-flat">0</span>';
+}}
+function posBadge(p) {{
+  const colors = {{ QB: '#e74c3c', RB: '#27ae60', WR: '#3498db', TE: '#f39c12' }};
+  const c = colors[p] || '#9ca3af';
+  return '<span class="pos-badge" style="background:'+c+'">'+p+'</span>';
+}}
+function sortedRows(fmt, sort) {{
+  const rows = CONSENSUS[fmt].rows.slice();
+  if (sort === 'consensus') rows.sort((a, b) => a.consensus_rank - b.consensus_rank);
+  else if (sort === 'bullish') rows.sort((a, b) => a.delta - b.delta);
+  else if (sort === 'bearish') rows.sort((a, b) => b.delta - a.delta);
+  else rows.sort((a, b) => a.model_rank - b.model_rank);
+  return rows;
+}}
+function render() {{
+  const data = CONSENSUS[currentFmt];
+  const rows = sortedRows(currentFmt, currentSort);
+  const body = document.getElementById('ov-body');
+  body.innerHTML = rows.map(r => {{
+    const slugCell = r.slug
+      ? '<a href="players/'+r.slug+'.html">'+r.name+'</a>'
+      : r.name;
+    return '<tr class="player-row"><td class="rank">'+r.model_rank+'</td>'+
+      '<td class="name">'+slugCell+'</td>'+
+      '<td>'+posBadge(r.pos)+'</td>'+
+      '<td class="team">'+(r.team||'—')+'</td>'+
+      '<td class="years">'+(r.age==null?'—':r.age)+'</td>'+
+      '<td class="years" style="text-align:right">'+r.consensus_rank+'</td>'+
+      '<td class="years" style="text-align:right">'+chip(r.delta)+'</td>'+
+      '<td class="score" style="text-align:right">'+r.score.toFixed(0)+'</td>'+
+      '<td class="score" style="text-align:right">'+(r.ktc_value==null?'—':r.ktc_value)+'</td>'+
+      '</tr>';
+  }}).join('');
+  document.getElementById('ov-stats').textContent =
+    data.label + ' · ' + data.matched + ' players matched';
+  ['sf_ppr','1qb_ppr'].forEach(k => {{
+    const b = document.getElementById('btn-'+k);
+    if (b) b.style.opacity = (k === currentFmt) ? '1' : '0.55';
+  }});
+  ['model','consensus','bullish','bearish'].forEach(k => {{
+    const b = document.getElementById('sort-'+k);
+    if (b) b.style.opacity = (k === currentSort) ? '1' : '0.55';
+  }});
+}}
+function setFormat(fmt) {{ currentFmt = fmt; render(); }}
+function setSort(s) {{ currentSort = s; render(); }}
+render();
+</script>
+
+</div>"""
+
+    return _page(
+        "Kings of Dynasty — Dynasty Rankings",
+        _site_header("league", latest_ts, league_label),
+        body,
+    )
+
+
+def _build_league_overlay_legacy(
+    *,
+    overlays: Dict[str, OverlayResult],
+    latest_ts: datetime,
+    league_label: str,
+    team_lookup: Dict[str, str],
+) -> str:
+    """Fallback Dynasty Rankings body (Superflex-vs-2QB overlay).
+
+    Used when no KTC consensus snapshot is cached locally. Preserves the
+    pre-v2.3 behaviour so the site still builds in offline / CI envs.
+    """
     DYNASTY_RANKINGS_PRESETS = ("sf_ppr", "2qb_ppr")
-    # Precompute overlay data for every kept preset, embed as JSON.
-    overlay_payload = {}
+    overlay_payload: Dict[str, Dict] = {}
     for fmt in DYNASTY_RANKINGS_PRESETS:
         ov = overlays.get(fmt)
         if ov is None:
@@ -340,39 +555,20 @@ def _build_league(overlays: Dict[str, OverlayResult], latest_ts: datetime,
             ],
         }
     payload_json = json.dumps(overlay_payload)
-
     preset_buttons = "".join(
         f'<button onclick="setFormat(\'{fmt}\')" id="btn-{fmt}">{_esc(PRESETS[fmt]["label"])}</button> '
         for fmt in DYNASTY_RANKINGS_PRESETS if fmt in PRESETS
     )
-
     body = f"""<div class="container">
-
 <h2>Dynasty <span class="accent">Rankings</span></h2>
-<p class="lede">Re-rank the engine's projections under your league's exact
-scoring + roster rules. Switching format does NOT change which retired comps
-each active player has — it just re-scores those comps' careers under your
-settings and recomputes positional VORP.</p>
-
-<div class="callout"><strong>Tip.</strong> Compare the <em>vs default</em> column
-to see who's overvalued/undervalued in your league relative to the default
-Superflex PPR ranking.</div>
-
-<div class="controls">
-  Preset: {preset_buttons}
-  <span class="stats" id="ov-stats"></span>
-</div>
-
-<table>
-<thead><tr>
-  <th>#</th><th>Player</th><th>Pos</th><th>Team</th>
-  <th>Age</th>
-  <th style="text-align:right">vs default</th>
-  <th style="text-align:right">League value</th>
-</tr></thead>
-<tbody id="ov-body"></tbody>
-</table>
-
+<p class="lede">No consensus snapshot is cached locally yet. Showing the
+legacy format overlay (Superflex PPR vs 2QB PPR). Run
+<code>python3 scripts/refresh_ktc_consensus.py</code> and rebuild to
+enable the consensus-vs-model view.</p>
+<div class="controls">Preset: {preset_buttons}<span class="stats" id="ov-stats"></span></div>
+<table><thead><tr><th>#</th><th>Player</th><th>Pos</th><th>Team</th><th>Age</th>
+<th style="text-align:right">vs default</th><th style="text-align:right">League value</th></tr></thead>
+<tbody id="ov-body"></tbody></table>
 <script>
 const OVERLAY = {payload_json};
 function chip(d) {{
@@ -407,9 +603,7 @@ function setFormat(fmt) {{
 }}
 setFormat('sf_ppr');
 </script>
-
 </div>"""
-
     return _page(
         "Kings of Dynasty — Dynasty Rankings",
         _site_header("league", latest_ts, league_label),
@@ -633,6 +827,17 @@ ranking.</p>
     <td><span class="tag">metadata</span></td>
     <td>Draft round/pick for current players (shown on player pages). Not in
     the composite.</td></tr>
+<tr><td class="name"><a href="https://keeptradecut.com/dynasty-rankings">KeepTradeCut</a></td>
+    <td><span class="tag">consensus</span></td>
+    <td>Community-driven dynasty rankings. Used only on the
+    <a href="league.html">Dynasty Rankings</a> tab to diff the model
+    against the crowd — explicitly NOT a model input. Refreshed daily;
+    see <a href="https://github.com/pstiehl/Dynasty-Football-Model/blob/main/docs/CONSENSUS-VS-MODEL.md">CONSENSUS-VS-MODEL.md</a>.</td></tr>
+<tr><td class="name">dynastyprocess <code>db_playerids.csv</code></td>
+    <td><span class="tag">metadata</span></td>
+    <td>Free player-id crosswalk maintained by <a href="https://github.com/dynastyprocess/data">dynastyprocess</a>.
+    Provides the <code>ktc_id → gsis_id</code> mapping that joins the
+    KeepTradeCut consensus snapshot to model players.</td></tr>
 </tbody>
 </table>
 
@@ -850,7 +1055,7 @@ def generate_site(
     (out_root / "index.html").write_text(rankings_html, encoding="utf-8")
 
     (out_root / "league.html").write_text(
-        _build_league(overlays, latest_ts, label, team_lookup),
+        _build_league(overlays, latest_ts, label, team_lookup, engine=engine),
         encoding="utf-8",
     )
     (out_root / "methodology.html").write_text(

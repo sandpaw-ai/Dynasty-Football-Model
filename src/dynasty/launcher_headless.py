@@ -76,6 +76,20 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
+    # Step 3b: Refresh the KeepTradeCut consensus snapshot. Non-fatal:
+    # if the network call fails we keep the previous day's cache and the
+    # site falls back to the legacy overlay automatically.
+    print("\n[3b/5] Refreshing KTC consensus snapshot...")
+    try:
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parent.parent.parent / "scripts"))
+        import refresh_ktc_consensus  # type: ignore
+        n = refresh_ktc_consensus.refresh()
+        print(f"  OK · {n} consensus players cached")
+    except Exception as e:
+        print(f"  WARN: KTC refresh failed: {e}")
+        print("  (Site will use cached snapshot if available, otherwise overlay fallback.)")
+
     # Step 4: Build the static site.
     print("\n[4/5] Building site...")
     try:

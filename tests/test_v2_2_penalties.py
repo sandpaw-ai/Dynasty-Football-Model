@@ -332,35 +332,57 @@ def test_no_old_tab_names_in_nav(site):
 
 
 def test_dynasty_rankings_presets(site):
-    """The Dynasty Rankings page (league.html) must expose EXACTLY two
-    preset buttons: Superflex PPR and 2QB PPR."""
+    """The Dynasty Rankings page (league.html) exposes Superflex PPR and
+    1QB PPR — the two KeepTradeCut consensus formats the page diffs the
+    model against.
+
+    Updated in v2.3 (consensus-vs-model rewrite, 2026-05-22): the page
+    no longer renders a Superflex-vs-2QB format overlay; it now compares
+    the model rankings to KTC community consensus for two league
+    formats. The 2QB-PPR overlay was removed because KTC does not
+    publish a distinct 2QB consensus rank.
+    """
     html = _read(os.path.join(site, "league.html"))
-    # Each kept preset has an id="btn-<fmt>" attribute.
     assert 'id="btn-sf_ppr"' in html
-    assert 'id="btn-2qb_ppr"' in html
-    # The dropped ones must NOT appear.
-    assert 'id="btn-1qb_ppr"' not in html
+    assert 'id="btn-1qb_ppr"' in html
+    # 2QB overlay button is gone; SF TE Premium never made it to this tab.
+    assert 'id="btn-2qb_ppr"' not in html
     assert 'id="btn-sf_te_premium"' not in html
-    # Two and only two btn-<fmt> ids should be present in the page.
+    # Exactly the two format buttons present.
     import re
     matches = re.findall(r'id="btn-([a-z0-9_]+)"', html)
-    assert sorted(set(matches)) == ["2qb_ppr", "sf_ppr"], (
+    assert sorted(set(matches)) == ["1qb_ppr", "sf_ppr"], (
         f"unexpected preset buttons: {matches}"
     )
 
 
 def test_dynasty_rankings_click_through(site):
-    """Each row in the Dynasty Rankings table must be clickable —
-    mirror of the Similarity Scores page click-through."""
+    """Each row in the Dynasty Rankings table must link to the player
+    page. In v2.3 the renderer uses a real anchor tag (``<a href=...>``)
+    around the player name instead of a row-level ``onclick`` handler,
+    which gives users proper keyboard / middle-click semantics.
+    """
     html = _read(os.path.join(site, "league.html"))
-    # The setFormat JS template uses onclick="location='players/<slug>.html'".
-    # The single-quoted variant is what the JS emits (we escape '_quotes_'
-    # by chaining string fragments). Confirm the literal pattern exists.
-    assert "onclick=\\'location=\\'players/" in html or \
-           "onclick=\"location='players/" in html or \
-           "location=\\'players/" in html, (
-        "Dynasty Rankings table rows must have click-through to player pages"
+    # The render() JS embeds player slugs into anchor hrefs.
+    assert 'players/' in html, "expected player-page links on Dynasty Rankings"
+    assert (
+        'href="players/' in html
+        or "href='players/" in html
+        or "href=\\'players/" in html
+        or "href=\\\"players/" in html
+    ), "Dynasty Rankings rows must include anchors to /players/<slug>.html"
+
+
+def test_dynasty_rankings_consensus_view(site):
+    """The page must surface the consensus-vs-model framing:
+    KTC attribution, delta semantics, and the diff table headers.
+    """
+    html = _read(os.path.join(site, "league.html"))
+    assert "KeepTradeCut" in html or "keeptradecut" in html, (
+        "Dynasty Rankings must attribute consensus to KeepTradeCut"
     )
+    assert "Consensus #" in html, "missing Consensus rank column header"
+    assert "Model #" in html, "missing Model rank column header"
 
 
 def test_player_pages_still_generated(site):

@@ -224,14 +224,30 @@ FEATURE_WEIGHTS: Tuple[float, ...] = (
     0.3,   # v[6]  rookie_rushing_TDs_pg     (scale: 0-0.8)
     0.3,   # v[7]  rookie_receiving_TDs_pg   (scale: 0-0.8)
     0.1,   # v[8]  rookie_completion_rate (QB only)
-    2.5,   # v[9]  age_at_rookie_year — STRONG: prior research
+    20.0,  # v[9]  age_at_rookie_year — STRONG: prior research
            #       consistently shows age is one of the strongest
-           #       skill-position predictors. Bumped from 0.2 in v2.3.5
-           #       after Phil identified the Johnny-Wilson-vs-Steve-
-           #       Smith-Sr. age-blind bug. At weight 2.5 a 2-year age
-           #       gap contributes 2.5 * 4 = 10 to squared distance,
-           #       vs ~0.72 from a 0.3-fp/G match — age now dominates a
-           #       small fp/G match instead of being washed out by it.
+           #       skill-position predictors. Bumped from 0.2 → 20.0 in
+           #       v2.3.5 after Phil's Johnny Wilson age-blind bug.
+           #
+           #       Calibration story: initial passes at 2.5, 6.0, 12.0
+           #       reduced but did not eliminate the Steve Smith /
+           #       Santana Moss problem on Wilson's comp list. The
+           #       required magnitude is large because (1) Wilson and
+           #       Smith are only 1 year apart in rookie age (23 vs 22)
+           #       so the squared gap is just 1, and (2) the
+           #       BREAKOUT_BIAS re-rank multiplies high-post-rookie-fp
+           #       comps' similarity by up to 1.30x, which previously
+           #       outran any age penalty smaller than 12.0. At weight
+           #       20.0 a 1-yr gap contributes 20 to squared distance,
+           #       a 2-yr gap 80, a 3-yr gap 180 — enough to dominate
+           #       the breakout multiplier on any age-gap ≥1 year.
+           #
+           #       Pre-v2.3.5 the weight was 0.2: a 2-year age gap
+           #       contributed 0.8 to squared distance, equivalent to
+           #       a 0.3 fp/G match — age was completely washed out by
+           #       trivial fp/G noise.
+           #
+           #       Empirical validation in docs/V2.3.5-VALIDATION.md.
     0.0,   # v[10] position_encoded (informational; position-filter applies)
 )
 

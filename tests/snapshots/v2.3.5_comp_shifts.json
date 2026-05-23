@@ -1,0 +1,1462 @@
+{
+  "note": "Top-25 comps before/after the v2.3.5 age-aware similarity + bust-inclusive rookie corpus fix. before = upstream/main HEAD, after = ada/v2.3.5-age-comp-fix branch.",
+  "targets": {
+    "Adonai Mitchell": {
+      "after_top25": [
+        {
+          "name": "Nelson Agholor",
+          "rookie_season": null,
+          "similarity": 0.9136
+        },
+        {
+          "name": "Golden Tate",
+          "rookie_season": null,
+          "similarity": 0.9088
+        },
+        {
+          "name": "Bobby Wade",
+          "rookie_season": null,
+          "similarity": 0.8933
+        },
+        {
+          "name": "Arrelious Benn",
+          "rookie_season": null,
+          "similarity": 0.8882
+        },
+        {
+          "name": "Derek Hagan",
+          "rookie_season": null,
+          "similarity": 0.8808
+        },
+        {
+          "name": "Albert Wilson",
+          "rookie_season": null,
+          "similarity": 0.8757
+        },
+        {
+          "name": "Troy Williamson",
+          "rookie_season": null,
+          "similarity": 0.8641
+        },
+        {
+          "name": "Kendrick Bourne",
+          "rookie_season": null,
+          "similarity": 0.8528
+        },
+        {
+          "name": "Jabar Gaffney",
+          "rookie_season": null,
+          "similarity": 0.852
+        },
+        {
+          "name": "Shaun McDonald",
+          "rookie_season": null,
+          "similarity": 0.8445
+        },
+        {
+          "name": "Devin Thomas",
+          "rookie_season": null,
+          "similarity": 0.8439
+        },
+        {
+          "name": "Emmanuel Sanders",
+          "rookie_season": null,
+          "similarity": 0.8396
+        },
+        {
+          "name": "Jason Hill",
+          "rookie_season": null,
+          "similarity": 0.8378
+        },
+        {
+          "name": "Sammie Coates",
+          "rookie_season": null,
+          "similarity": 0.8367
+        },
+        {
+          "name": "Dennis Northcutt",
+          "rookie_season": null,
+          "similarity": 0.8352
+        },
+        {
+          "name": "Peerless Price",
+          "rookie_season": null,
+          "similarity": 0.8349
+        },
+        {
+          "name": "Corey Brown",
+          "rookie_season": null,
+          "similarity": 0.834
+        },
+        {
+          "name": "Hank Baskett",
+          "rookie_season": null,
+          "similarity": 0.8338
+        },
+        {
+          "name": "Chester Rogers",
+          "rookie_season": null,
+          "similarity": 0.833
+        },
+        {
+          "name": "David Nelson",
+          "rookie_season": null,
+          "similarity": 0.8328
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Nelson Agholor",
+          "rookie_season": null,
+          "similarity": 0.9136
+        },
+        {
+          "name": "Golden Tate",
+          "rookie_season": null,
+          "similarity": 0.9088
+        },
+        {
+          "name": "Bobby Wade",
+          "rookie_season": null,
+          "similarity": 0.8933
+        },
+        {
+          "name": "Arrelious Benn",
+          "rookie_season": null,
+          "similarity": 0.8882
+        },
+        {
+          "name": "Derek Hagan",
+          "rookie_season": null,
+          "similarity": 0.8808
+        },
+        {
+          "name": "Albert Wilson",
+          "rookie_season": null,
+          "similarity": 0.8757
+        },
+        {
+          "name": "Troy Williamson",
+          "rookie_season": null,
+          "similarity": 0.8641
+        },
+        {
+          "name": "Kendrick Bourne",
+          "rookie_season": null,
+          "similarity": 0.8528
+        },
+        {
+          "name": "Jabar Gaffney",
+          "rookie_season": null,
+          "similarity": 0.852
+        },
+        {
+          "name": "Shaun McDonald",
+          "rookie_season": null,
+          "similarity": 0.8445
+        },
+        {
+          "name": "Devin Thomas",
+          "rookie_season": null,
+          "similarity": 0.8439
+        },
+        {
+          "name": "Emmanuel Sanders",
+          "rookie_season": null,
+          "similarity": 0.8396
+        },
+        {
+          "name": "Hank Baskett",
+          "rookie_season": null,
+          "similarity": 0.8394
+        },
+        {
+          "name": "David Nelson",
+          "rookie_season": null,
+          "similarity": 0.8383
+        },
+        {
+          "name": "Danny Amendola",
+          "rookie_season": null,
+          "similarity": 0.8379
+        },
+        {
+          "name": "Jason Hill",
+          "rookie_season": null,
+          "similarity": 0.8378
+        },
+        {
+          "name": "Sammie Coates",
+          "rookie_season": null,
+          "similarity": 0.8367
+        },
+        {
+          "name": "Dennis Northcutt",
+          "rookie_season": null,
+          "similarity": 0.8352
+        },
+        {
+          "name": "Peerless Price",
+          "rookie_season": null,
+          "similarity": 0.8349
+        },
+        {
+          "name": "Corey Brown",
+          "rookie_season": null,
+          "similarity": 0.834
+        }
+      ],
+      "note": "WR rookie age ~22 \u2014 age-matched control",
+      "pid": "00-0039890"
+    },
+    "Bo Nix": {
+      "after_top25": [
+        {
+          "name": "Aaron Brooks",
+          "rookie_season": null,
+          "similarity": 0.7883
+        },
+        {
+          "name": "Russell Wilson",
+          "rookie_season": null,
+          "similarity": 0.7808
+        },
+        {
+          "name": "Andy Dalton",
+          "rookie_season": null,
+          "similarity": 0.7431
+        },
+        {
+          "name": "Tom Brady",
+          "rookie_season": null,
+          "similarity": 0.7228
+        },
+        {
+          "name": "Carson Wentz",
+          "rookie_season": null,
+          "similarity": 0.685
+        },
+        {
+          "name": "Ryan Tannehill",
+          "rookie_season": null,
+          "similarity": 0.6793
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.6762
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.6496
+        },
+        {
+          "name": "Mark Sanchez",
+          "rookie_season": null,
+          "similarity": 0.6347
+        },
+        {
+          "name": "Drew Brees",
+          "rookie_season": null,
+          "similarity": 0.6325
+        },
+        {
+          "name": "Brian Griese",
+          "rookie_season": null,
+          "similarity": 0.6236
+        },
+        {
+          "name": "Vince Young",
+          "rookie_season": null,
+          "similarity": 0.6232
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.6204
+        },
+        {
+          "name": "Peyton Manning",
+          "rookie_season": null,
+          "similarity": 0.6178
+        },
+        {
+          "name": "Nick Foles",
+          "rookie_season": null,
+          "similarity": 0.6121
+        },
+        {
+          "name": "Baker Mayfield",
+          "rookie_season": null,
+          "similarity": 0.6011
+        },
+        {
+          "name": "Donovan McNabb",
+          "rookie_season": null,
+          "similarity": 0.594
+        },
+        {
+          "name": "Derek Carr",
+          "rookie_season": null,
+          "similarity": 0.5913
+        },
+        {
+          "name": "Joe Flacco",
+          "rookie_season": null,
+          "similarity": 0.5849
+        },
+        {
+          "name": "Mitchell Trubisky",
+          "rookie_season": null,
+          "similarity": 0.5761
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Aaron Brooks",
+          "rookie_season": null,
+          "similarity": 0.7883
+        },
+        {
+          "name": "Russell Wilson",
+          "rookie_season": null,
+          "similarity": 0.7808
+        },
+        {
+          "name": "Andy Dalton",
+          "rookie_season": null,
+          "similarity": 0.7431
+        },
+        {
+          "name": "Tom Brady",
+          "rookie_season": null,
+          "similarity": 0.7228
+        },
+        {
+          "name": "Carson Wentz",
+          "rookie_season": null,
+          "similarity": 0.685
+        },
+        {
+          "name": "Ryan Tannehill",
+          "rookie_season": null,
+          "similarity": 0.6793
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.6762
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.6496
+        },
+        {
+          "name": "Mark Sanchez",
+          "rookie_season": null,
+          "similarity": 0.6347
+        },
+        {
+          "name": "Drew Brees",
+          "rookie_season": null,
+          "similarity": 0.6325
+        },
+        {
+          "name": "Vince Young",
+          "rookie_season": null,
+          "similarity": 0.6242
+        },
+        {
+          "name": "Brian Griese",
+          "rookie_season": null,
+          "similarity": 0.6236
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.6204
+        },
+        {
+          "name": "Peyton Manning",
+          "rookie_season": null,
+          "similarity": 0.6178
+        },
+        {
+          "name": "Nick Foles",
+          "rookie_season": null,
+          "similarity": 0.6121
+        },
+        {
+          "name": "Baker Mayfield",
+          "rookie_season": null,
+          "similarity": 0.6011
+        },
+        {
+          "name": "Donovan McNabb",
+          "rookie_season": null,
+          "similarity": 0.594
+        },
+        {
+          "name": "Derek Carr",
+          "rookie_season": null,
+          "similarity": 0.5913
+        },
+        {
+          "name": "Joe Flacco",
+          "rookie_season": null,
+          "similarity": 0.5849
+        },
+        {
+          "name": "Mitchell Trubisky",
+          "rookie_season": null,
+          "similarity": 0.5761
+        }
+      ],
+      "note": "QB rookie age ~25",
+      "pid": "00-0039732"
+    },
+    "Brock Purdy": {
+      "after_top25": [
+        {
+          "name": "Aaron Brooks",
+          "rookie_season": null,
+          "similarity": 0.7915
+        },
+        {
+          "name": "Andy Dalton",
+          "rookie_season": null,
+          "similarity": 0.7757
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.7597
+        },
+        {
+          "name": "Ryan Tannehill",
+          "rookie_season": null,
+          "similarity": 0.7582
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.7282
+        },
+        {
+          "name": "Peyton Manning",
+          "rookie_season": null,
+          "similarity": 0.7041
+        },
+        {
+          "name": "Carson Wentz",
+          "rookie_season": null,
+          "similarity": 0.702
+        },
+        {
+          "name": "Matthew Stafford",
+          "rookie_season": null,
+          "similarity": 0.6918
+        },
+        {
+          "name": "Brian Griese",
+          "rookie_season": null,
+          "similarity": 0.6795
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.6791
+        },
+        {
+          "name": "Jameis Winston",
+          "rookie_season": null,
+          "similarity": 0.6781
+        },
+        {
+          "name": "Tom Brady",
+          "rookie_season": null,
+          "similarity": 0.6587
+        },
+        {
+          "name": "Jared Goff",
+          "rookie_season": null,
+          "similarity": 0.642
+        },
+        {
+          "name": "Drew Brees",
+          "rookie_season": null,
+          "similarity": 0.6207
+        },
+        {
+          "name": "Sam Bradford",
+          "rookie_season": null,
+          "similarity": 0.6196
+        },
+        {
+          "name": "Andrew Luck",
+          "rookie_season": null,
+          "similarity": 0.5934
+        },
+        {
+          "name": "Mitchell Trubisky",
+          "rookie_season": null,
+          "similarity": 0.5932
+        },
+        {
+          "name": "Ben Roethlisberger",
+          "rookie_season": null,
+          "similarity": 0.5887
+        },
+        {
+          "name": "Russell Wilson",
+          "rookie_season": null,
+          "similarity": 0.5607
+        },
+        {
+          "name": "Chad Henne",
+          "rookie_season": null,
+          "similarity": 0.5579
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Aaron Brooks",
+          "rookie_season": null,
+          "similarity": 0.7915
+        },
+        {
+          "name": "Andy Dalton",
+          "rookie_season": null,
+          "similarity": 0.7757
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.7597
+        },
+        {
+          "name": "Ryan Tannehill",
+          "rookie_season": null,
+          "similarity": 0.7582
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.7282
+        },
+        {
+          "name": "Peyton Manning",
+          "rookie_season": null,
+          "similarity": 0.7041
+        },
+        {
+          "name": "Carson Wentz",
+          "rookie_season": null,
+          "similarity": 0.702
+        },
+        {
+          "name": "Matthew Stafford",
+          "rookie_season": null,
+          "similarity": 0.6918
+        },
+        {
+          "name": "Jameis Winston",
+          "rookie_season": null,
+          "similarity": 0.6797
+        },
+        {
+          "name": "Brian Griese",
+          "rookie_season": null,
+          "similarity": 0.6795
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.6791
+        },
+        {
+          "name": "Tom Brady",
+          "rookie_season": null,
+          "similarity": 0.6587
+        },
+        {
+          "name": "Jared Goff",
+          "rookie_season": null,
+          "similarity": 0.642
+        },
+        {
+          "name": "Drew Brees",
+          "rookie_season": null,
+          "similarity": 0.6207
+        },
+        {
+          "name": "Sam Bradford",
+          "rookie_season": null,
+          "similarity": 0.6196
+        },
+        {
+          "name": "Andrew Luck",
+          "rookie_season": null,
+          "similarity": 0.5934
+        },
+        {
+          "name": "Mitchell Trubisky",
+          "rookie_season": null,
+          "similarity": 0.5932
+        },
+        {
+          "name": "Ben Roethlisberger",
+          "rookie_season": null,
+          "similarity": 0.5887
+        },
+        {
+          "name": "Russell Wilson",
+          "rookie_season": null,
+          "similarity": 0.5607
+        },
+        {
+          "name": "Chad Henne",
+          "rookie_season": null,
+          "similarity": 0.5579
+        }
+      ],
+      "note": "QB age ~22 rookie / age ~23 first-start \u2014 should still shift slightly",
+      "pid": "00-0037834"
+    },
+    "C.J. Stroud": {
+      "after_top25": [
+        {
+          "name": "Marcus Mariota",
+          "rookie_season": null,
+          "similarity": 0.8109
+        },
+        {
+          "name": "Josh Freeman",
+          "rookie_season": null,
+          "similarity": 0.801
+        },
+        {
+          "name": "Jameis Winston",
+          "rookie_season": null,
+          "similarity": 0.7645
+        },
+        {
+          "name": "Blake Bortles",
+          "rookie_season": null,
+          "similarity": 0.7344
+        },
+        {
+          "name": "Ben Roethlisberger",
+          "rookie_season": null,
+          "similarity": 0.6971
+        },
+        {
+          "name": "Jared Goff",
+          "rookie_season": null,
+          "similarity": 0.6657
+        },
+        {
+          "name": "Vince Young",
+          "rookie_season": null,
+          "similarity": 0.6404
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.6257
+        },
+        {
+          "name": "Byron Leftwich",
+          "rookie_season": null,
+          "similarity": 0.6235
+        },
+        {
+          "name": "Derek Carr",
+          "rookie_season": null,
+          "similarity": 0.6214
+        },
+        {
+          "name": "Baker Mayfield",
+          "rookie_season": null,
+          "similarity": 0.6163
+        },
+        {
+          "name": "Derek Anderson",
+          "rookie_season": null,
+          "similarity": 0.6149
+        },
+        {
+          "name": "Mitchell Trubisky",
+          "rookie_season": null,
+          "similarity": 0.6083
+        },
+        {
+          "name": "Geno Smith",
+          "rookie_season": null,
+          "similarity": 0.6029
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.5996
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.5909
+        },
+        {
+          "name": "Sam Darnold",
+          "rookie_season": null,
+          "similarity": 0.5847
+        },
+        {
+          "name": "Christian Ponder",
+          "rookie_season": null,
+          "similarity": 0.5817
+        },
+        {
+          "name": "EJ Manuel",
+          "rookie_season": null,
+          "similarity": 0.58
+        },
+        {
+          "name": "Joe Flacco",
+          "rookie_season": null,
+          "similarity": 0.5766
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Marcus Mariota",
+          "rookie_season": null,
+          "similarity": 0.8109
+        },
+        {
+          "name": "Josh Freeman",
+          "rookie_season": null,
+          "similarity": 0.801
+        },
+        {
+          "name": "Jameis Winston",
+          "rookie_season": null,
+          "similarity": 0.7645
+        },
+        {
+          "name": "Blake Bortles",
+          "rookie_season": null,
+          "similarity": 0.7344
+        },
+        {
+          "name": "Ben Roethlisberger",
+          "rookie_season": null,
+          "similarity": 0.6971
+        },
+        {
+          "name": "Jared Goff",
+          "rookie_season": null,
+          "similarity": 0.6657
+        },
+        {
+          "name": "Vince Young",
+          "rookie_season": null,
+          "similarity": 0.6404
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.6257
+        },
+        {
+          "name": "Byron Leftwich",
+          "rookie_season": null,
+          "similarity": 0.6235
+        },
+        {
+          "name": "Derek Carr",
+          "rookie_season": null,
+          "similarity": 0.6214
+        },
+        {
+          "name": "Baker Mayfield",
+          "rookie_season": null,
+          "similarity": 0.6163
+        },
+        {
+          "name": "Derek Anderson",
+          "rookie_season": null,
+          "similarity": 0.6149
+        },
+        {
+          "name": "Mitchell Trubisky",
+          "rookie_season": null,
+          "similarity": 0.6083
+        },
+        {
+          "name": "Geno Smith",
+          "rookie_season": null,
+          "similarity": 0.6029
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.5996
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.5909
+        },
+        {
+          "name": "Sam Darnold",
+          "rookie_season": null,
+          "similarity": 0.5847
+        },
+        {
+          "name": "Christian Ponder",
+          "rookie_season": null,
+          "similarity": 0.5817
+        },
+        {
+          "name": "EJ Manuel",
+          "rookie_season": null,
+          "similarity": 0.58
+        },
+        {
+          "name": "Joe Flacco",
+          "rookie_season": null,
+          "similarity": 0.5766
+        }
+      ],
+      "note": "QB sanity check \u2014 elite, age-appropriate",
+      "pid": "00-0039163"
+    },
+    "Johnny Wilson": {
+      "after_top25": [
+        {
+          "name": "Johnny Wilson",
+          "rookie_season": null,
+          "similarity": 1.0
+        },
+        {
+          "name": "Xavier Hutchinson",
+          "rookie_season": null,
+          "similarity": 0.9361
+        },
+        {
+          "name": "Derius Davis",
+          "rookie_season": null,
+          "similarity": 0.9291
+        },
+        {
+          "name": "Mike Williams",
+          "rookie_season": null,
+          "similarity": 0.8962
+        },
+        {
+          "name": "Jermaine Burton",
+          "rookie_season": null,
+          "similarity": 0.9293
+        },
+        {
+          "name": "Nick Westbrook-Ikhine",
+          "rookie_season": null,
+          "similarity": 0.8717
+        },
+        {
+          "name": "Eric Decker",
+          "rookie_season": null,
+          "similarity": 0.9105
+        },
+        {
+          "name": "Deven Thompkins",
+          "rookie_season": null,
+          "similarity": 0.8848
+        },
+        {
+          "name": "K.J. Hill",
+          "rookie_season": null,
+          "similarity": 0.9477
+        },
+        {
+          "name": "Tyrie Cleveland",
+          "rookie_season": null,
+          "similarity": 0.9471
+        },
+        {
+          "name": "Jacob Cowing",
+          "rookie_season": null,
+          "similarity": 0.893
+        },
+        {
+          "name": "Isaiah Zuber",
+          "rookie_season": null,
+          "similarity": 0.9466
+        },
+        {
+          "name": "Steve Smith",
+          "rookie_season": null,
+          "similarity": 0.7664
+        },
+        {
+          "name": "Dareke Young",
+          "rookie_season": null,
+          "similarity": 0.8765
+        },
+        {
+          "name": "Ronnie Bell",
+          "rookie_season": null,
+          "similarity": 0.8563
+        },
+        {
+          "name": "Todd Pinkston",
+          "rookie_season": null,
+          "similarity": 0.9569
+        },
+        {
+          "name": "Ventell Bryant",
+          "rookie_season": null,
+          "similarity": 0.9326
+        },
+        {
+          "name": "Wes Welker",
+          "rookie_season": null,
+          "similarity": 0.7815
+        },
+        {
+          "name": "Chad Williams",
+          "rookie_season": null,
+          "similarity": 0.9789
+        },
+        {
+          "name": "Richie James",
+          "rookie_season": null,
+          "similarity": 0.8911
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Steve Smith",
+          "rookie_season": null,
+          "similarity": 0.9343
+        },
+        {
+          "name": "Santana Moss",
+          "rookie_season": null,
+          "similarity": 0.9025
+        },
+        {
+          "name": "Malachi Corley",
+          "rookie_season": null,
+          "similarity": 0.9644
+        },
+        {
+          "name": "Rakim Jarrett",
+          "rookie_season": null,
+          "similarity": 0.965
+        },
+        {
+          "name": "Xavier Hutchinson",
+          "rookie_season": null,
+          "similarity": 0.9361
+        },
+        {
+          "name": "Mike Woods",
+          "rookie_season": null,
+          "similarity": 0.9537
+        },
+        {
+          "name": "Russell Gage",
+          "rookie_season": null,
+          "similarity": 0.9479
+        },
+        {
+          "name": "Vincent Jackson",
+          "rookie_season": null,
+          "similarity": 0.9099
+        },
+        {
+          "name": "Derius Davis",
+          "rookie_season": null,
+          "similarity": 0.9291
+        },
+        {
+          "name": "Charlie Jones",
+          "rookie_season": null,
+          "similarity": 0.9379
+        },
+        {
+          "name": "Jameson Williams",
+          "rookie_season": null,
+          "similarity": 0.8291
+        },
+        {
+          "name": "Jerricho Cotchery",
+          "rookie_season": null,
+          "similarity": 0.9237
+        },
+        {
+          "name": "Mike Williams",
+          "rookie_season": null,
+          "similarity": 0.8962
+        },
+        {
+          "name": "Jaelon Darden",
+          "rookie_season": null,
+          "similarity": 0.9519
+        },
+        {
+          "name": "Nick Westbrook-Ikhine",
+          "rookie_season": null,
+          "similarity": 0.8717
+        },
+        {
+          "name": "Ben Skowronek",
+          "rookie_season": null,
+          "similarity": 0.9006
+        },
+        {
+          "name": "Eric Decker",
+          "rookie_season": null,
+          "similarity": 0.9105
+        },
+        {
+          "name": "Jamari Thrash",
+          "rookie_season": null,
+          "similarity": 0.8932
+        },
+        {
+          "name": "Deven Thompkins",
+          "rookie_season": null,
+          "similarity": 0.8848
+        },
+        {
+          "name": "K.J. Hill",
+          "rookie_season": null,
+          "similarity": 0.9477
+        }
+      ],
+      "note": "WR rookie age ~24 \u2014 the bug Phil reported",
+      "pid": "00-0039236"
+    },
+    "Josh Allen": {
+      "after_top25": [
+        {
+          "name": "Cam Newton",
+          "rookie_season": null,
+          "similarity": 0.7111
+        },
+        {
+          "name": "Patrick Mahomes",
+          "rookie_season": null,
+          "similarity": 0.6423
+        },
+        {
+          "name": "Donovan McNabb",
+          "rookie_season": null,
+          "similarity": 0.5863
+        },
+        {
+          "name": "Peyton Manning",
+          "rookie_season": null,
+          "similarity": 0.5658
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.5285
+        },
+        {
+          "name": "Daunte Culpepper",
+          "rookie_season": null,
+          "similarity": 0.5067
+        },
+        {
+          "name": "Matthew Stafford",
+          "rookie_season": null,
+          "similarity": 0.4841
+        },
+        {
+          "name": "Baker Mayfield",
+          "rookie_season": null,
+          "similarity": 0.4699
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.4653
+        },
+        {
+          "name": "Drew Brees",
+          "rookie_season": null,
+          "similarity": 0.4568
+        },
+        {
+          "name": "Ben Roethlisberger",
+          "rookie_season": null,
+          "similarity": 0.4213
+        },
+        {
+          "name": "Jared Goff",
+          "rookie_season": null,
+          "similarity": 0.4047
+        },
+        {
+          "name": "Derek Carr",
+          "rookie_season": null,
+          "similarity": 0.3955
+        },
+        {
+          "name": "Joe Flacco",
+          "rookie_season": null,
+          "similarity": 0.3907
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.3799
+        },
+        {
+          "name": "Alex Smith",
+          "rookie_season": null,
+          "similarity": 0.3697
+        },
+        {
+          "name": "Eli Manning",
+          "rookie_season": null,
+          "similarity": 0.3576
+        },
+        {
+          "name": "Matt Schaub",
+          "rookie_season": null,
+          "similarity": 0.3461
+        },
+        {
+          "name": "Mike Vick",
+          "rookie_season": null,
+          "similarity": 0.3249
+        },
+        {
+          "name": "Marcus Mariota",
+          "rookie_season": null,
+          "similarity": 0.3187
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Cam Newton",
+          "rookie_season": null,
+          "similarity": 0.7111
+        },
+        {
+          "name": "Patrick Mahomes",
+          "rookie_season": null,
+          "similarity": 0.6423
+        },
+        {
+          "name": "Donovan McNabb",
+          "rookie_season": null,
+          "similarity": 0.5863
+        },
+        {
+          "name": "Peyton Manning",
+          "rookie_season": null,
+          "similarity": 0.5658
+        },
+        {
+          "name": "Dak Prescott",
+          "rookie_season": null,
+          "similarity": 0.5285
+        },
+        {
+          "name": "Daunte Culpepper",
+          "rookie_season": null,
+          "similarity": 0.5067
+        },
+        {
+          "name": "Matthew Stafford",
+          "rookie_season": null,
+          "similarity": 0.4841
+        },
+        {
+          "name": "Baker Mayfield",
+          "rookie_season": null,
+          "similarity": 0.4699
+        },
+        {
+          "name": "Matt Ryan",
+          "rookie_season": null,
+          "similarity": 0.4653
+        },
+        {
+          "name": "Drew Brees",
+          "rookie_season": null,
+          "similarity": 0.4568
+        },
+        {
+          "name": "Ben Roethlisberger",
+          "rookie_season": null,
+          "similarity": 0.4213
+        },
+        {
+          "name": "Jared Goff",
+          "rookie_season": null,
+          "similarity": 0.4047
+        },
+        {
+          "name": "Derek Carr",
+          "rookie_season": null,
+          "similarity": 0.3955
+        },
+        {
+          "name": "Joe Flacco",
+          "rookie_season": null,
+          "similarity": 0.3907
+        },
+        {
+          "name": "Jay Cutler",
+          "rookie_season": null,
+          "similarity": 0.3799
+        },
+        {
+          "name": "Alex Smith",
+          "rookie_season": null,
+          "similarity": 0.3697
+        },
+        {
+          "name": "Eli Manning",
+          "rookie_season": null,
+          "similarity": 0.3576
+        },
+        {
+          "name": "Matt Schaub",
+          "rookie_season": null,
+          "similarity": 0.3461
+        },
+        {
+          "name": "Mike Vick",
+          "rookie_season": null,
+          "similarity": 0.3249
+        },
+        {
+          "name": "Marcus Mariota",
+          "rookie_season": null,
+          "similarity": 0.3187
+        }
+      ],
+      "note": "QB vet sanity check (cumulative engine)",
+      "pid": "00-0034857"
+    },
+    "Justin Jefferson": {
+      "after_top25": [
+        {
+          "name": "Odell Beckham Jr.",
+          "rookie_season": null,
+          "similarity": 0.6529
+        },
+        {
+          "name": "Larry Fitzgerald",
+          "rookie_season": null,
+          "similarity": 0.6095
+        },
+        {
+          "name": "DeAndre Hopkins",
+          "rookie_season": null,
+          "similarity": 0.5891
+        },
+        {
+          "name": "Julio Jones",
+          "rookie_season": null,
+          "similarity": 0.583
+        },
+        {
+          "name": "Chris Godwin Jr.",
+          "rookie_season": null,
+          "similarity": 0.581
+        },
+        {
+          "name": "Calvin Johnson",
+          "rookie_season": null,
+          "similarity": 0.5726
+        },
+        {
+          "name": "Dez Bryant",
+          "rookie_season": null,
+          "similarity": 0.572
+        },
+        {
+          "name": "Randy Moss",
+          "rookie_season": null,
+          "similarity": 0.5716
+        },
+        {
+          "name": "Mike Evans",
+          "rookie_season": null,
+          "similarity": 0.5632
+        },
+        {
+          "name": "Tyreek Hill",
+          "rookie_season": null,
+          "similarity": 0.5552
+        },
+        {
+          "name": "DJ Moore",
+          "rookie_season": null,
+          "similarity": 0.5394
+        },
+        {
+          "name": "Brandon Marshall",
+          "rookie_season": null,
+          "similarity": 0.5391
+        },
+        {
+          "name": "Antonio Brown",
+          "rookie_season": null,
+          "similarity": 0.5362
+        },
+        {
+          "name": "Davante Adams",
+          "rookie_season": null,
+          "similarity": 0.531
+        },
+        {
+          "name": "Andre Johnson",
+          "rookie_season": null,
+          "similarity": 0.5306
+        },
+        {
+          "name": "Keenan Allen",
+          "rookie_season": null,
+          "similarity": 0.5291
+        },
+        {
+          "name": "Alshon Jeffery",
+          "rookie_season": null,
+          "similarity": 0.5092
+        },
+        {
+          "name": "Stefon Diggs",
+          "rookie_season": null,
+          "similarity": 0.5082
+        },
+        {
+          "name": "Jarvis Landry",
+          "rookie_season": null,
+          "similarity": 0.5046
+        },
+        {
+          "name": "Amari Cooper",
+          "rookie_season": null,
+          "similarity": 0.4922
+        }
+      ],
+      "before_top25": [
+        {
+          "name": "Odell Beckham Jr.",
+          "rookie_season": null,
+          "similarity": 0.6529
+        },
+        {
+          "name": "Larry Fitzgerald",
+          "rookie_season": null,
+          "similarity": 0.6095
+        },
+        {
+          "name": "DeAndre Hopkins",
+          "rookie_season": null,
+          "similarity": 0.5891
+        },
+        {
+          "name": "Julio Jones",
+          "rookie_season": null,
+          "similarity": 0.583
+        },
+        {
+          "name": "Chris Godwin Jr.",
+          "rookie_season": null,
+          "similarity": 0.581
+        },
+        {
+          "name": "Calvin Johnson",
+          "rookie_season": null,
+          "similarity": 0.5726
+        },
+        {
+          "name": "Dez Bryant",
+          "rookie_season": null,
+          "similarity": 0.572
+        },
+        {
+          "name": "Randy Moss",
+          "rookie_season": null,
+          "similarity": 0.5716
+        },
+        {
+          "name": "Mike Evans",
+          "rookie_season": null,
+          "similarity": 0.5632
+        },
+        {
+          "name": "Tyreek Hill",
+          "rookie_season": null,
+          "similarity": 0.5552
+        },
+        {
+          "name": "DJ Moore",
+          "rookie_season": null,
+          "similarity": 0.5394
+        },
+        {
+          "name": "Brandon Marshall",
+          "rookie_season": null,
+          "similarity": 0.5391
+        },
+        {
+          "name": "Antonio Brown",
+          "rookie_season": null,
+          "similarity": 0.5362
+        },
+        {
+          "name": "Davante Adams",
+          "rookie_season": null,
+          "similarity": 0.531
+        },
+        {
+          "name": "Andre Johnson",
+          "rookie_season": null,
+          "similarity": 0.5306
+        },
+        {
+          "name": "Keenan Allen",
+          "rookie_season": null,
+          "similarity": 0.5291
+        },
+        {
+          "name": "Alshon Jeffery",
+          "rookie_season": null,
+          "similarity": 0.5092
+        },
+        {
+          "name": "Stefon Diggs",
+          "rookie_season": null,
+          "similarity": 0.5082
+        },
+        {
+          "name": "Jarvis Landry",
+          "rookie_season": null,
+          "similarity": 0.5046
+        },
+        {
+          "name": "Amari Cooper",
+          "rookie_season": null,
+          "similarity": 0.4922
+        }
+      ],
+      "note": "WR vet sanity check (cumulative engine)",
+      "pid": "00-0036322"
+    }
+  },
+  "version": "v2.3.5"
+}

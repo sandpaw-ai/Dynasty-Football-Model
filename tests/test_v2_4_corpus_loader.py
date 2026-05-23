@@ -71,16 +71,17 @@ def test_unified_loader_disabled_by_default(monkeypatch):
 
 
 def test_unified_loader_flag_env_var_honoured(monkeypatch):
-    """``USE_PRE1999_CORPUS=true`` env var alone (no override arg)
-    should also enable the unification.
+    """``USE_PRE1999_CORPUS=true`` enables; ``=false`` disables; env-unset
+    follows the v2.4 PR 4 default (True).
     """
     monkeypatch.setenv("USE_PRE1999_CORPUS", "true")
-    rows_env, _ = load_unified_player_stats()
+    rows_env_on, _ = load_unified_player_stats()
 
-    monkeypatch.delenv("USE_PRE1999_CORPUS", raising=False)
-    rows_off, _ = load_unified_player_stats()
+    # v2.4 PR 4: explicit ``false`` must opt out (env-unset is now True).
+    monkeypatch.setenv("USE_PRE1999_CORPUS", "false")
+    rows_env_off, _ = load_unified_player_stats()
 
-    assert len(rows_env) > len(rows_off)
+    assert len(rows_env_on) > len(rows_env_off)
 
 
 # ---------------------------------------------------------------------------

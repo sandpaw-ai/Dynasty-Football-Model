@@ -54,6 +54,7 @@ from .era_pace import (
     FALLBACK_MULTIPLIERS,
     era_for_season,
     fallback_table,
+    load_empirical_table,
 )
 from .career_length_era import (
     CareerLengthEraTable,
@@ -647,7 +648,37 @@ def load_corpus(
 # Era-pace calibration (corpus-derived) — unchanged from v1.x
 # ---------------------------------------------------------------------------
 
-def build_era_pace_table(careers: Dict[str, PlayerCareer]) -> EraPaceTable:
+def build_era_pace_table(
+    careers: Dict[str, PlayerCareer],
+    *,
+    use_pre1999: Optional[bool] = None,
+    prefer_snapshot: bool = True,
+) -> EraPaceTable:
+    """Build the era-pace multiplier table.
+
+    v2.4 behaviour:
+
+      * When ``USE_PRE1999_CORPUS`` is on (or ``use_pre1999=True``) AND
+        ``prefer_snapshot=True`` AND the JSON snapshot at
+        ``EMPIRICAL_MULTIPLIERS_PATH`` exists, return the snapshotted
+        empirical table. This makes era-pace changes reviewable in PRs
+        (the JSON file is diffable) instead of silently drifting with
+        the corpus.
+      * Otherwise: derive multipliers from ``careers`` exactly as v1.x
+        did. This path remains active for the flag-OFF default (so the
+        v2.0+v2.3.5 calibration is byte-for-byte unchanged) and for any
+        caller that wants a freshly-computed table (tests).
+
+    For both paths, ``EraPaceTable.get`` falls back to FALLBACK_MULTIPLIERS
+    cell-by-cell for any missing (position, stat, era) entry — the
+    fallback table is the safety net, not a wholesale replacement.
+    """
+    enabled = _pre1999_enabled(use_pre1999)
+    if enabled and prefer_snapshot:
+        snapshot = load_empirical_table()
+        if snapshot is not None:
+            return snapshot
+
     samples: Dict[Tuple[str, str, int], List[float]] = defaultdict(list)
     for c in careers.values():
         for s in c.seasons:

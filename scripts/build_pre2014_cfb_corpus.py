@@ -241,13 +241,19 @@ def merge_leaderboard_rows(
                 bucket["conference"] = r["conference"]
 
     # Second pass: infer position from tables seen.
+    #
+    # 'passing' leaderboard → QB only if the player has a real passing
+    # workload. Sports-reference's passing leaderboard cuts off at very
+    # low attempt thresholds, which inflates RBs/WRs who threw a single
+    # trick-play pass (Reggie Bush 2005 USC threw 2 passes). We require
+    # >= 50 pass attempts before flipping someone to QB; below that,
+    # they fall through to the rush/rec inference and become RB/WR.
     for bucket in merged.values():
         tables = bucket["_tables_seen"]
-        if "passing" in tables:
-            # Anyone on the passing leaderboard with significant volume
-            # is a QB. Player-page fetch will refine for WRs / RBs who
-            # threw the occasional pass (rare on the leaderboard since
-            # it filters by Att).
+        passing_real = (
+            "passing" in tables and _to_int_safe(bucket.get("pass_att")) >= 50
+        )
+        if passing_real:
             bucket["_inferred_position"] = "QB"
         elif "rushing" in tables and "receiving" in tables:
             # Both tables \u2014 use volume to decide. More rush att than

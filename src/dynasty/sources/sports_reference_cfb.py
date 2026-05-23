@@ -350,18 +350,40 @@ def _parse_table_rows(
     return rows
 
 
+# Sports-reference quietly migrated their stat tables in August 2024 to
+# include a ``_standard`` suffix and richer column metadata. Older
+# Wayback snapshots use the legacy table ids (``passing`` /
+# ``rushing`` / ``receiving`` / ``scoring`` without a suffix) plus
+# legacy column names (``player`` instead of ``name_display``,
+# ``school_name`` instead of ``team_name_abbr``, ``g`` instead of
+# ``games``). We accept both shapes.
+
+# Old data-stat → new data-stat alias mapping. Anything not in this map
+# passes through unchanged.
+_LEGACY_COLUMN_ALIASES = {
+    "player": "name_display",
+    "school_name": "team_name_abbr",
+    "g": "games",
+}
+
+
 def parse_year_leaderboard(
     html: str, table: str, year: int
 ) -> list[dict]:
     """Parse one SR-CFB per-year leaderboard into row dicts.
 
-    Returns one dict per ranked player. Keys are SR's native
-    ``data-stat`` strings, plus:
+    Returns one dict per ranked player. Keys are SR's modern
+    ``data-stat`` names (we alias legacy snapshot columns automatically),
+    plus:
 
     * ``sr_slug`` — sports-reference player slug
     * ``player_name`` — cleaned of award markers
     * ``season`` / ``table`` — copied from arguments
     * ``team`` / ``conference`` — normalized aliases
+
+    Handles both the post-August-2024 ``{table}_standard`` table ids
+    and the legacy ``{table}`` ids. (Wayback occasionally serves a
+    pre-upgrade capture even for a 2024 timestamp.)
 
     Leaderboards do **not** expose player position; that has to come
     from the per-player page (or be inferred from which table the
@@ -371,18 +393,30 @@ def parse_year_leaderboard(
         raise ValueError(f"unsupported table: {table!r}")
 
     soup = BeautifulSoup(html, "lxml")
-    table_id = f"{table}_standard"
-    raws = _parse_table_rows(soup, table_id, require_slug=True)
+
+    # Try the modern id first, fall back to the legacy id.
+    raws = _parse_table_rows(soup, f"{table}_standard", require_slug=True)
+    if not raws:
+        raws = _parse_table_rows(soup, table, require_slug=True)
 
     out: list[dict] = []
     for raw in raws:
-        raw_name = raw.get("name_display") or raw.get("player") or ""
-        row = dict(raw)
+        # Alias legacy columns to the modern names.
+        norm = {}
+        for k, v in raw.items():
+            norm[_LEGACY_COLUMN_ALIASES.get(k, k)] = v
+        raw_name = norm.get("name_display") or norm.get("player") or ""
+        row = dict(norm)
         row["season"] = year
         row["table"] = table
         row["player_name"] = _clean_name(raw_name)
-        row["team"] = raw.get("team_name_abbr") or raw.get("team_name") or ""
-        row["conference"] = raw.get("conf_abbr") or raw.get("conf") or ""
+        row["team"] = (
+            norm.get("team_name_abbr")
+            or norm.get("team_name")
+            or norm.get("school_name")
+            or ""
+        )
+        row["conference"] = norm.get("conf_abbr") or norm.get("conf") or ""
         out.append(row)
     return out
 

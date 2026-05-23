@@ -58,6 +58,11 @@ data/diagnostics/
 # the cache is regenerable by re-running scripts/build_pre1999_corpus.py.
 data/pfr_cache/
 
+# v3.0 sports-reference HTML cache. Cache only; the parsed/normalized
+# data lives at data/sos/*.csv(.gz) and is regenerable by re-running
+# scripts/build_cfb_sos_corpus.py. Shared with v3.0 PR 1 by convention.
+data/sr_cache/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

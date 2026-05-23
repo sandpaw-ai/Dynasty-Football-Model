@@ -428,6 +428,83 @@ class CompMatch:
     arc: CareerArc
     similarity: float
     snapshot_age: int
+    # v2.4 diagnostics: the pre-haircut similarity and whether the
+    # 0.9× pre-1999 confidence haircut was applied to ``similarity``.
+    # Default to no-haircut so existing constructor sites and tests
+    # that build CompMatch directly remain compatible.
+    raw_similarity: float = 0.0
+    pre1999_haircut_applied: bool = False
+
+    def __post_init__(self):
+        if self.raw_similarity == 0.0:
+            # Default ``raw_similarity`` to ``similarity`` when not
+            # explicitly set — keeps old call sites consistent.
+            self.raw_similarity = self.similarity
+
+
+# v2.4 — 0.9× confidence haircut for pre-1999 comps.
+#
+# Phil's decision (V2.4-PRE1999-LEGENDS section 10.3): "Conservative;
+# era-pace is principled but not perfect." Comps whose SNAPSHOT season
+# (the season the comp's age matched the target's age) lies before 1999
+# get their similarity weight multiplied by 0.9 in the weighted comp
+# average. This shrinks the influence of pre-1999 comps relative to
+# 1999+ comps WITHOUT removing them from the pool.
+#
+# CRITICAL nuance: the haircut is about pre-1999 DATA QUALITY
+# UNCERTAINTY, not about the player. When an Emmitt-Smith-style
+# crossover player's snapshot age lands in his 1999+ years (age 30+),
+# we do NOT apply the haircut — a 2000-season comp is a 2000-season
+# comp, regardless of who lived through 1990-1998 to reach it.
+PRE1999_COMP_WEIGHT_HAIRCUT = 0.9
+PRE1999_SNAPSHOT_CUTOFF = 1999
+
+
+def snapshot_season_for_comp(arc: CareerArc, snapshot_age: int) -> Optional[int]:
+    """Return the comp's NFL season that lines up with ``snapshot_age``.
+
+    We look for a qualifying season (``games >= MIN_GAMES_PER_SEASON``)
+    whose age exactly matches ``snapshot_age``. Returns ``None`` if the
+    snapshot age isn't present in the arc — the caller should treat
+    this as "no pre-1999 haircut applies" (we couldn't resolve it; be
+    conservative and don't penalise the comp).
+    """
+    for s in arc.career_arc:
+        if s.age == snapshot_age and s.games >= MIN_GAMES_PER_SEASON:
+            return s.season
+    # Fallback: closest qualifying season (used only when snapshot age
+    # was widened by the AGE_WINDOW slack inside ``find_comps`` and we
+    # need the closest available year).
+    candidates = [s for s in arc.career_arc if s.games >= MIN_GAMES_PER_SEASON]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda s: abs(s.age - snapshot_age)).season
+
+
+def is_pre1999_comp(arc: CareerArc, snapshot_age: int) -> bool:
+    """True iff the comp's snapshot season is strictly before 1999.
+
+    The haircut is gated on the SNAPSHOT season (the season whose age
+    matched the target's), NOT on the comp's overall career window.
+    This is intentional: an Emmitt-Smith crossover comp used at a
+    1999+ snapshot age (30+) is a modern-data comp and gets no
+    haircut; the same player used at a 1995 snapshot age (Emmitt at 26)
+    is a pre-1999 comp and DOES get the haircut.
+    """
+    season = snapshot_season_for_comp(arc, snapshot_age)
+    if season is None:
+        return False
+    return season < PRE1999_SNAPSHOT_CUTOFF
+
+
+def pre1999_haircut_weight(arc: CareerArc, snapshot_age: int) -> float:
+    """Return the multiplicative weight haircut for this comp.
+
+    ``PRE1999_COMP_WEIGHT_HAIRCUT`` (0.9) for pre-1999-snapshot comps,
+    1.0 otherwise. Designed to be applied to the raw similarity weight
+    BEFORE comp-pool aggregation in ``project_player``.
+    """
+    return PRE1999_COMP_WEIGHT_HAIRCUT if is_pre1999_comp(arc, snapshot_age) else 1.0
 
 
 def find_comps(
@@ -482,7 +559,23 @@ def find_comps(
         sim = _weighted_similarity(tv.values, comp_v.values)
         if sim <= 0:
             continue
-        candidates.append(CompMatch(arc=comp, similarity=sim, snapshot_age=snapshot_age))
+        # v2.4: bake the pre-1999 confidence haircut INTO the similarity
+        # weight here so every downstream consumer (project_player
+        # weighted average, compute_survival sim-weighted bust rate,
+        # the top-K sort) sees one consistent set of haircut-adjusted
+        # weights. ``raw_similarity`` is preserved on the CompMatch
+        # for diagnostics; ``similarity`` is the effective weight.
+        haircut = pre1999_haircut_weight(comp, snapshot_age)
+        adj_sim = sim * haircut
+        if adj_sim <= 0:
+            continue
+        candidates.append(CompMatch(
+            arc=comp,
+            similarity=adj_sim,
+            snapshot_age=snapshot_age,
+            raw_similarity=sim,
+            pre1999_haircut_applied=haircut < 1.0,
+        ))
 
     candidates.sort(key=lambda m: m.similarity, reverse=True)
     return candidates[:k]
@@ -713,6 +806,13 @@ def project_player(
             n_comps=0,
             comps=[],
         )
+    # v2.4 note: the 0.9× pre-1999 confidence haircut is applied INSIDE
+    # ``find_comps`` (the haircut is baked into ``c.similarity`` for
+    # pre-1999-snapshot comps), so this comp-pool aggregation already
+    # sees haircut-adjusted weights. The same haircut therefore flows
+    # consistently into ``compute_survival`` (sim-weighted bust rate)
+    # and the top-K sort — every downstream consumer sees one
+    # consistent set of weights instead of having to re-apply the haircut.
     total_sim = sum(c.similarity for c in comps) or 1.0
     weighted_pts = 0.0
     weighted_seasons = 0.0

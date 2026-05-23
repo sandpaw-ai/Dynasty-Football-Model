@@ -57,6 +57,7 @@ data/diagnostics/
 # normalised CSV at data/nflverse/player_stats_season_pre1999.csv.gz;
 # the cache is regenerable by re-running scripts/build_pre1999_corpus.py.
 data/pfr_cache/
+data/sr_cache/
 
 # OS / editor cruft
 .DS_Store

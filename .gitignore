@@ -53,6 +53,11 @@ data/engine_v2/
 # left behind on a dev machine.
 data/diagnostics/
 
+# v2.4 PFR scraper HTML cache (~60 MB). Source of truth is the
+# normalised CSV at data/nflverse/player_stats_season_pre1999.csv.gz;
+# the cache is regenerable by re-running scripts/build_pre1999_corpus.py.
+data/pfr_cache/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

@@ -116,6 +116,40 @@ OUT_ROOT.mkdir(parents=True, exist_ok=True)
 OUT_ROOT_V2 = Path("data/engine_v2")
 OUT_ROOT_V2.mkdir(parents=True, exist_ok=True)
 
+# ---------------------------------------------------------------------------
+# v2.4: pre-1999 corpus extension (feature-flagged)
+# ---------------------------------------------------------------------------
+#
+# When ``USE_PRE1999_CORPUS=True`` (env var or call-site override), the
+# corpus loader concatenates ``player_stats_season_pre1999.csv.gz``
+# (1980-1998, scraped from Pro-Football-Reference in PR 1) with the
+# canonical 1999+ nflverse file. Pre-1999 rows use ``player_id`` of the
+# form ``pfr_SmitEm00``. Where a row's ``pfr_id`` suffix maps to a
+# gsis_id (via the nflverse PFR↔gsis crosswalk in ``players.csv.gz``),
+# the loader rewrites the ``player_id`` to that gsis_id so crossover
+# players (Emmitt Smith, Jerry Rice, Brett Favre, ...) stitch into ONE
+# continuous career arc instead of two short ones.
+#
+# The flag defaults to False for PR 2 — the unification logic is built,
+# tested, and ready to flip in PR 4 after the validation snapshot.
+PRE1999_STATS_FILENAME = "player_stats_season_pre1999.csv.gz"
+PRE1999_PLAYERS_SIDECAR_FILENAME = "players_pre1999.csv.gz"
+PRE1999_BIRTH_DATES_PATH = Path("data/pfr_birth_dates.csv")
+
+
+def _pre1999_enabled(override: Optional[bool] = None) -> bool:
+    """Resolve the ``USE_PRE1999_CORPUS`` feature flag.
+
+    Precedence:
+      1. Explicit ``override`` argument (highest priority — used by tests).
+      2. ``USE_PRE1999_CORPUS`` environment variable (truthy = 1/true/yes/on).
+      3. Default: False.
+    """
+    if override is not None:
+        return bool(override)
+    raw = os.environ.get("USE_PRE1999_CORPUS", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
 # Long-arc corpus thresholds — UNCHANGED from v1.1.
 RETIRED_THROUGH_SEASON = 2022
 LONG_ARC_THROUGH_SEASON = 2022
@@ -237,9 +271,32 @@ class PlayerCareer:
 # Loaders (unchanged from v1.x)
 # ---------------------------------------------------------------------------
 
-def _load_players_meta(path: Path) -> Dict[str, Dict[str, str]]:
+def _load_players_meta(
+    path: Path,
+    sidecar_path: Optional[Path] = None,
+    birth_date_overrides_path: Optional[Path] = None,
+) -> Dict[str, Dict[str, str]]:
+    """Load nflverse ``players.csv.gz`` keyed by ``gsis_id``.
+
+    v2.4 additions:
+      * Concatenates an optional ``sidecar_path`` (e.g.
+        ``players_pre1999.csv.gz``) onto the main file. Rows from the
+        sidecar use the same column schema; their ``gsis_id`` is a
+        synthetic ``pfr_X`` token matching the corpus ``player_id``.
+      * Also indexes every row by ``pfr_id`` under a synthetic
+        ``pfr_{pfr_id}`` key, so the corpus loader can resolve
+        ``player_id = pfr_SmitEm00`` rows to their nflverse meta
+        (birth_date, rookie_season, last_season) without rewriting the
+        id. PFR-only retirees like Walter Payton are reachable this way.
+      * Optionally overlays ``birth_date`` from
+        ``birth_date_overrides_path`` (CSV with ``pfr_id, birth_date``)
+        when the nflverse row is missing one or carries a different
+        value. Partial-file friendly — it reads whatever rows are
+        present, doesn't block on completeness.
+    """
     out: Dict[str, Dict[str, str]] = {}
-    with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
+
+    def _ingest(fh):
         r = csv.DictReader(fh)
         for row in r:
             gid = row.get("gsis_id") or ""
@@ -249,6 +306,51 @@ def _load_players_meta(path: Path) -> Dict[str, Dict[str, str]]:
             pos = (row.get("position") or "").upper()
             if existing is None or pos in SKILL_POSITIONS:
                 out[gid] = row
+
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
+        _ingest(fh)
+
+    if sidecar_path is not None and sidecar_path.exists():
+        with gzip.open(sidecar_path, "rt", encoding="utf-8", newline="") as fh:
+            _ingest(fh)
+
+    # Optional birth-date overlay (PFR scrape). Honoured per-pfr_id;
+    # only fills in when the nflverse row is missing one or empty.
+    if birth_date_overrides_path is not None and birth_date_overrides_path.exists():
+        try:
+            with open(birth_date_overrides_path, "rt", encoding="utf-8", newline="") as fh:
+                r = csv.DictReader(fh)
+                bd_overrides: Dict[str, str] = {}
+                for row in r:
+                    pfr = (row.get("pfr_id") or "").strip()
+                    bd = (row.get("birth_date") or "").strip()
+                    if pfr and bd:
+                        bd_overrides[pfr] = bd
+            if bd_overrides:
+                for meta in out.values():
+                    pfr = (meta.get("pfr_id") or "").strip()
+                    if not pfr:
+                        continue
+                    existing_bd = (meta.get("birth_date") or "").strip()
+                    if existing_bd and len(existing_bd) >= 10:
+                        continue  # nflverse already has a full date
+                    if pfr in bd_overrides:
+                        meta["birth_date"] = bd_overrides[pfr]
+        except OSError:
+            pass
+
+    # Second pass: also expose meta under ``pfr_{pfr_id}`` synthetic keys
+    # so the corpus loader can resolve PFR-keyed ``player_id`` values
+    # without rewriting them. We don't overwrite an existing real
+    # ``pfr_X`` key (sidecar rows already use that as their gsis_id).
+    for gid, meta in list(out.items()):
+        pfr = (meta.get("pfr_id") or "").strip()
+        if not pfr:
+            continue
+        synth = f"pfr_{pfr}"
+        if synth not in out:
+            out[synth] = meta
+
     return out
 
 
@@ -297,95 +399,230 @@ def _safe_float(v) -> float:
         return 0.0
 
 
-def load_corpus(
-    stats_path: Path = DATA_ROOT / "player_stats_season.csv.gz",
-    players_path: Path = DATA_ROOT / "players.csv.gz",
-) -> Dict[str, PlayerCareer]:
-    meta = _load_players_meta(players_path)
-    careers: Dict[str, PlayerCareer] = {}
+def _build_pfr_to_gsis_map(meta: Dict[str, Dict[str, str]]) -> Dict[str, str]:
+    """Build a ``pfr_id -> gsis_id`` mapping from a loaded meta dict.
 
+    Only includes rows whose ``gsis_id`` is a real nflverse id (starts
+    with ``00-`` or is otherwise not a synthetic ``pfr_X`` placeholder),
+    AND whose ``pfr_id`` is non-empty. The sidecar's synthetic gsis_ids
+    (``pfr_AndeKe00`` style) are skipped — those rows aren't stitched
+    because they never appear in the post-1999 file by definition.
+    """
+    out: Dict[str, str] = {}
+    for gid, row in meta.items():
+        # Skip the synthetic ``pfr_X`` reverse-lookup keys we added.
+        if gid.startswith("pfr_"):
+            continue
+        pfr = (row.get("pfr_id") or "").strip()
+        real_gid = (row.get("gsis_id") or "").strip()
+        if pfr and real_gid:
+            out[pfr] = real_gid
+    return out
+
+
+def _iter_stat_rows(
+    stats_path: Path,
+    pre1999_stats_path: Optional[Path],
+    pfr_to_gsis: Dict[str, str],
+) -> Tuple[Iterable[Dict[str, str]], int]:
+    """Yield stat rows from the canonical 1999+ file, optionally followed
+    by stitched rows from the pre-1999 file.
+
+    Crossover stitching is RESTRICTED to true crossover players — those
+    whose gsis_id (resolved via the nflverse PFR↔gsis crosswalk) ALSO
+    appears in the post-1999 stat file. Players whose gsis_id never
+    shows up in the post-1999 file (Walter Payton, Earl Campbell, etc.
+    — they retired before 1999) keep their ``pfr_X`` ``player_id`` so
+    their pre-1999 arc stays its own thing.
+
+    Why restrict it: only crossover players gain from id rewriting. For
+    a strictly pre-1999 retiree, rewriting ``pfr_PaytWa00`` to the
+    synthetic gsis_id ``PAY738296`` would change the corpus key for
+    something that adds no new connections — and noise the
+    ``test_walter_payton_no_crossover`` invariant.
+
+    Returns (sorted_rows, stitched_count). The stitched_count is
+    reported in summary logs so anyone running this can see how many
+    crossover players got merged.
+    """
+    rows: List[Dict[str, str]] = []
+
+    post_ids: set[str] = set()
     with gzip.open(stats_path, "rt", encoding="utf-8", newline="") as fh:
         r = csv.DictReader(fh)
         for row in r:
-            if (row.get("season_type") or "REG") != "REG":
-                continue
+            rows.append(row)
             pid = row.get("player_id") or ""
-            if not pid:
-                continue
-            position = (row.get("position") or "").upper()
-            if position not in SKILL_POSITIONS:
-                continue
-            try:
-                season = int(row.get("season") or 0)
-            except ValueError:
-                continue
-            if season < 1980:
-                continue
-            games = int(_safe_float(row.get("games") or 0))
-            if games < MIN_GAMES_PER_SEASON:
-                continue
+            if pid:
+                post_ids.add(pid)
 
-            stats = {
-                "passing_yards":   _safe_float(row.get("passing_yards")),
-                "passing_tds":     _safe_float(row.get("passing_tds")),
-                "interceptions":   _safe_float(row.get("interceptions")),
-                "rushing_yards":   _safe_float(row.get("rushing_yards")),
-                "rushing_tds":     _safe_float(row.get("rushing_tds")),
-                "receptions":      _safe_float(row.get("receptions")),
-                "receiving_yards": _safe_float(row.get("receiving_yards")),
-                "receiving_tds":   _safe_float(row.get("receiving_tds")),
-                "games":           float(games),
-            }
-            fp_ppr = _safe_float(row.get("fantasy_points_ppr"))
-            m = meta.get(pid)
-            by = _birth_year(m)
-            age = _age_for_season(by, season)
-            if age is None:
-                rs = None
-                if m and (m.get("rookie_season") or "").isdigit():
-                    rs = int(m["rookie_season"])
-                if rs is not None:
-                    age = 22 + (season - rs)
-            if age is None:
-                continue
-            ps = PlayerSeason(
-                player_id=pid,
-                season=season,
-                age=age,
-                position=position,
-                games=games,
-                stats=stats,
-                fantasy_points_ppr=fp_ppr,
+    stitched = 0
+    stitched_players: set[str] = set()
+    if pre1999_stats_path is not None and pre1999_stats_path.exists():
+        with gzip.open(pre1999_stats_path, "rt", encoding="utf-8", newline="") as fh:
+            r = csv.DictReader(fh)
+            for row in r:
+                pid = row.get("player_id") or ""
+                if pid.startswith("pfr_"):
+                    pfr_suffix = pid[4:]
+                    gid = pfr_to_gsis.get(pfr_suffix)
+                    if gid and gid in post_ids:
+                        # Stitch: rewrite to gsis_id so this row joins the
+                        # crossover player's post-1999 career arc.
+                        row["player_id"] = gid
+                        stitched += 1
+                        stitched_players.add(gid)
+                rows.append(row)
+
+    rows.sort(key=lambda r: (r.get("player_id") or "", int(r.get("season") or 0)))
+    return rows, len(stitched_players)
+
+
+def load_unified_player_stats(
+    stats_path: Path = DATA_ROOT / "player_stats_season.csv.gz",
+    players_path: Path = DATA_ROOT / "players.csv.gz",
+    use_pre1999: Optional[bool] = None,
+    pre1999_stats_path: Optional[Path] = None,
+    pre1999_players_sidecar_path: Optional[Path] = None,
+    birth_date_overrides_path: Optional[Path] = None,
+) -> Tuple[List[Dict[str, str]], Dict[str, Dict[str, str]]]:
+    """Return (stat_rows, meta) for the configured corpus.
+
+    Single entry point for v2.4's unified corpus loading. Returns the
+    list of stat rows (post-stitching) AND the merged player meta dict
+    in one call so callers don't have to coordinate the two reads.
+
+    Arguments:
+      stats_path: canonical 1999+ nflverse stat file
+      players_path: canonical nflverse players.csv.gz
+      use_pre1999: override for the ``USE_PRE1999_CORPUS`` env flag
+      pre1999_stats_path: optional override (defaults to the path next
+        to ``stats_path``). Only consulted when the feature flag is on.
+      pre1999_players_sidecar_path: optional override for the players
+        sidecar; defaults to ``players_pre1999.csv.gz`` next to
+        ``players_path``.
+      birth_date_overrides_path: optional CSV with ``pfr_id, birth_date``
+        rows to overlay onto nflverse meta entries. Defaults to
+        ``data/pfr_birth_dates.csv`` when the flag is on.
+
+    When the flag is OFF, behaves exactly as the 1.x loader: returns
+    only 1999+ rows and the unmodified nflverse meta (still indexed by
+    pfr_id for free — the index is harmless when no pre-1999 rows ask
+    about it).
+    """
+    enabled = _pre1999_enabled(use_pre1999)
+
+    if enabled:
+        sidecar = pre1999_players_sidecar_path or (players_path.parent / PRE1999_PLAYERS_SIDECAR_FILENAME)
+        bd_overrides = birth_date_overrides_path or PRE1999_BIRTH_DATES_PATH
+        pre_stats = pre1999_stats_path or (stats_path.parent / PRE1999_STATS_FILENAME)
+    else:
+        sidecar = None
+        bd_overrides = None
+        pre_stats = None
+
+    meta = _load_players_meta(
+        players_path,
+        sidecar_path=sidecar,
+        birth_date_overrides_path=bd_overrides,
+    )
+    pfr_to_gsis = _build_pfr_to_gsis_map(meta)
+    rows, _stitched_count = _iter_stat_rows(stats_path, pre_stats, pfr_to_gsis)
+    return rows, meta
+
+
+def load_corpus(
+    stats_path: Path = DATA_ROOT / "player_stats_season.csv.gz",
+    players_path: Path = DATA_ROOT / "players.csv.gz",
+    use_pre1999: Optional[bool] = None,
+) -> Dict[str, PlayerCareer]:
+    rows, meta = load_unified_player_stats(
+        stats_path=stats_path,
+        players_path=players_path,
+        use_pre1999=use_pre1999,
+    )
+    careers: Dict[str, PlayerCareer] = {}
+
+    for row in rows:
+        if (row.get("season_type") or "REG") != "REG":
+            continue
+        pid = row.get("player_id") or ""
+        if not pid:
+            continue
+        position = (row.get("position") or "").upper()
+        if position not in SKILL_POSITIONS:
+            continue
+        try:
+            season = int(row.get("season") or 0)
+        except ValueError:
+            continue
+        if season < 1980:
+            continue
+        games = int(_safe_float(row.get("games") or 0))
+        if games < MIN_GAMES_PER_SEASON:
+            continue
+
+        stats = {
+            "passing_yards":   _safe_float(row.get("passing_yards")),
+            "passing_tds":     _safe_float(row.get("passing_tds")),
+            "interceptions":   _safe_float(row.get("interceptions")),
+            "rushing_yards":   _safe_float(row.get("rushing_yards")),
+            "rushing_tds":     _safe_float(row.get("rushing_tds")),
+            "receptions":      _safe_float(row.get("receptions")),
+            "receiving_yards": _safe_float(row.get("receiving_yards")),
+            "receiving_tds":   _safe_float(row.get("receiving_tds")),
+            "games":           float(games),
+        }
+        fp_ppr = _safe_float(row.get("fantasy_points_ppr"))
+        m = meta.get(pid)
+        by = _birth_year(m)
+        age = _age_for_season(by, season)
+        if age is None:
+            rs = None
+            if m and (m.get("rookie_season") or "").isdigit():
+                rs = int(m["rookie_season"])
+            if rs is not None:
+                age = 22 + (season - rs)
+        if age is None:
+            continue
+        ps = PlayerSeason(
+            player_id=pid,
+            season=season,
+            age=age,
+            position=position,
+            games=games,
+            stats=stats,
+            fantasy_points_ppr=fp_ppr,
+        )
+
+        c = careers.get(pid)
+        if c is None:
+            name = (
+                (m.get("display_name") if m else None)
+                or row.get("player_display_name")
+                or row.get("player_name")
+                or pid
             )
-
-            c = careers.get(pid)
-            if c is None:
-                name = (
-                    (m.get("display_name") if m else None)
-                    or row.get("player_display_name")
-                    or row.get("player_name")
-                    or pid
-                )
-                rookie_season = None
-                last_season = None
-                if m:
-                    if (m.get("rookie_season") or "").isdigit():
-                        rookie_season = int(m["rookie_season"])
-                    if (m.get("last_season") or "").isdigit():
-                        last_season = int(m["last_season"])
-                bdate = _birth_date(m)
-                c = PlayerCareer(
-                    player_id=pid,
-                    name=name,
-                    position=position,
-                    birth_year=by,
-                    rookie_season=rookie_season,
-                    last_season=last_season,
-                    seasons=[],
-                    birth_date=bdate,
-                )
-                careers[pid] = c
-            c.seasons.append(ps)
+            rookie_season = None
+            last_season = None
+            if m:
+                if (m.get("rookie_season") or "").isdigit():
+                    rookie_season = int(m["rookie_season"])
+                if (m.get("last_season") or "").isdigit():
+                    last_season = int(m["last_season"])
+            bdate = _birth_date(m)
+            c = PlayerCareer(
+                player_id=pid,
+                name=name,
+                position=position,
+                birth_year=by,
+                rookie_season=rookie_season,
+                last_season=last_season,
+                seasons=[],
+                birth_date=bdate,
+            )
+            careers[pid] = c
+        c.seasons.append(ps)
 
     for c in careers.values():
         c.seasons.sort(key=lambda s: s.season)
@@ -393,6 +630,15 @@ def load_corpus(
             c.last_season = c.seasons[-1].season
         if c.rookie_season is None and c.seasons:
             c.rookie_season = c.seasons[0].season
+        # v2.4: for stitched crossover players, recompute rookie_season
+        # from the earliest season we actually observed. The nflverse meta
+        # row for, e.g., Emmitt Smith says rookie_season=1990, which is
+        # correct — but if the pre-1999 stitch goes wrong we want the
+        # tests to surface it.
+        if c.seasons:
+            observed_first = c.seasons[0].season
+            if c.rookie_season is None or observed_first < c.rookie_season:
+                c.rookie_season = observed_first
 
     return careers
 

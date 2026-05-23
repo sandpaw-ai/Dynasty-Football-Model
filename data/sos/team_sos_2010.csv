@@ -1,0 +1,121 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2010,Florida State,florida-state,ACC,P5,10,4,14.2,5.06,12,11
+2010,Maryland,maryland,ACC,P5,9,4,7.02,1.33,36,50
+2010,North Carolina State,north-carolina-state,ACC,P5,9,4,11.0,2.92,20,33
+2010,Boston College,boston-college,ACC,P5,7,6,2.15,3.0,52,31
+2010,Clemson,clemson,ACC,P5,6,7,7.35,3.74,35,25
+2010,Wake Forest,wake-forest,ACC,P5,3,9,-5.07,4.26,87,22
+2010,Virginia Tech,virginia-tech,ACC,P5,11,3,14.03,2.74,13,35
+2010,Miami (FL),miami-fl,ACC,P5,7,6,8.26,4.72,30,17
+2010,North Carolina,north-carolina,ACC,P5,8,5,5.15,2.84,44,34
+2010,Georgia Tech,georgia-tech,ACC,P5,6,7,0.8,0.8,63,56
+2010,Virginia,virginia,ACC,P5,4,8,-3.29,0.37,75,65
+2010,Duke,duke,ACC,P5,3,9,-4.59,2.66,84,36
+2010,Missouri,missouri,Big 12,P5,10,3,13.98,3.29,15,27
+2010,Nebraska,nebraska,Big 12,P5,10,4,12.85,2.42,17,42
+2010,Kansas State,kansas-state,Big 12,P5,7,6,4.11,1.26,47,52
+2010,Iowa State,iowa-state,Big 12,P5,5,7,0.43,4.27,66,21
+2010,Colorado,colorado,Big 12,P5,5,7,0.75,4.33,64,20
+2010,Kansas,kansas,Big 12,P5,3,9,-8.61,2.47,95,41
+2010,Oklahoma,oklahoma,Big 12,P5,12,2,17.11,5.4,8,10
+2010,Oklahoma State,oklahoma-state,Big 12,P5,11,2,16.62,2.39,9,43
+2010,Texas A&M,texas-am,Big 12,P5,9,4,11.39,4.85,19,15
+2010,Baylor,baylor,Big 12,P5,7,6,1.62,1.93,59,47
+2010,Texas Tech,texas-tech,Big 12,P5,8,5,3.06,1.83,49,48
+2010,Texas,texas,Big 12,P5,5,7,1.71,2.63,57,39
+2010,West Virginia,west-virginia,Big East,P5,9,4,9.51,0.12,25,67
+2010,Connecticut,connecticut,Big East,P5,8,5,1.63,-1.21,58,77
+2010,Pitt,pittsburgh,Big East,P5,8,5,7.4,1.25,34,53
+2010,Syracuse,syracuse,Big East,P5,8,5,1.3,-2.16,62,85
+2010,South Florida,south-florida,Big East,P5,8,5,2.15,-0.69,53,70
+2010,Louisville,louisville,Big East,P5,7,6,2.71,-1.45,51,78
+2010,Cincinnati,cincinnati,Big East,P5,4,8,-1.93,1.99,70,45
+2010,Rutgers,rutgers,Big East,P5,4,8,-6.76,-0.76,91,72
+2010,Ohio State,ohio-state,Big Ten,P5,12,1,17.37,0.75,7,57
+2010,Michigan State,michigan-state,Big Ten,P5,11,2,9.91,1.29,23,51
+2010,Wisconsin,wisconsin,Big Ten,P5,11,2,14.02,0.64,14,59
+2010,Iowa,iowa,Big Ten,P5,8,5,10.15,1.99,22,46
+2010,Illinois,illinois,Big Ten,P5,7,6,7.77,1.47,32,49
+2010,Penn State,penn-state,Big Ten,P5,7,6,2.96,2.65,50,37
+2010,Michigan,michigan,Big Ten,P5,7,6,1.41,3.1,60,29
+2010,Northwestern,northwestern,Big Ten,P5,7,6,-1.44,-1.06,68,74
+2010,Purdue,purdue,Big Ten,P5,4,8,-5.18,1.23,88,54
+2010,Minnesota,minnesota,Big Ten,P5,3,9,-5.06,3.53,86,26
+2010,Indiana,indiana,Big Ten,P5,5,7,-4.49,-1.15,83,75
+2010,UCF,central-florida,Conference USA,G5,11,3,5.79,-6.0,41,104
+2010,Southern Mississippi,southern-mississippi,Conference USA,G5,8,5,1.79,-4.68,55,95
+2010,East Carolina,east-carolina,Conference USA,G5,6,7,-4.48,0.13,82,66
+2010,Marshall,marshall,Conference USA,G5,5,7,-9.73,-3.73,100,90
+2010,UAB,alabama-birmingham,Conference USA,G5,4,8,-9.2,-4.7,97,96
+2010,Memphis,memphis,Conference USA,G5,1,11,-19.43,-1.51,119,80
+2010,Tulsa,tulsa,Conference USA,G5,10,3,4.95,-4.51,45,93
+2010,SMU,southern-methodist,Conference USA,G5,7,7,-2.04,-2.11,71,84
+2010,Houston,houston,Conference USA,G5,5,7,-2.11,-3.77,72,91
+2010,UTEP,texas-el-paso,Conference USA,G5,6,7,-8.13,-7.59,94,115
+2010,Rice,rice,Conference USA,G5,4,8,-11.08,-3.41,105,88
+2010,Tulane,tulane,Conference USA,G5,4,8,-13.42,-4.01,108,92
+2010,Navy,navy,FBS Independents,P5,9,4,3.49,-1.98,48,82
+2010,Notre Dame,notre-dame,FBS Independents,P5,8,5,10.35,5.04,21,12
+2010,Army,army,FBS Independents,P5,7,6,-2.43,-4.73,73,97
+2010,Miami (OH),miami-oh,Mid-American,G5,10,4,-5.86,-7.15,90,109
+2010,Ohio,ohio,Mid-American,G5,8,5,-5.79,-9.86,89,119
+2010,Temple,temple,Mid-American,G5,8,4,-3.39,-8.14,76,116
+2010,Kent State,kent-state,Mid-American,G5,5,7,-8.82,-7.48,96,112
+2010,Bowling Green,bowling-green-state,Mid-American,G5,2,10,-16.76,-5.67,113,101
+2010,Buffalo,buffalo,Mid-American,G5,2,10,-19.2,-7.53,118,113
+2010,Akron,akron,Mid-American,G5,1,11,-21.54,-6.29,120,107
+2010,Northern Illinois,northern-illinois,Mid-American,G5,11,3,4.32,-8.19,46,117
+2010,Toledo,toledo,Mid-American,G5,8,5,-3.7,-5.17,77,99
+2010,Western Michigan,western-michigan,Mid-American,G5,6,6,-4.1,-7.43,79,111
+2010,Ball State,ball-state,Mid-American,G5,4,8,-14.83,-9.16,110,118
+2010,Central Michigan,central-michigan,Mid-American,G5,3,9,-9.74,-5.32,101,100
+2010,Eastern Michigan,eastern-michigan,Mid-American,G5,2,10,-19.07,-4.74,117,98
+2010,Texas Christian,texas-christian,Mountain West,G5_top,13,0,17.96,-1.73,6,81
+2010,Utah,utah,Mountain West,G5_top,10,3,8.3,0.53,29,61
+2010,Air Force,air-force,Mountain West,G5_top,9,4,6.87,-1.05,37,73
+2010,San Diego State,san-diego-state,Mountain West,G5_top,9,4,6.07,-3.09,40,87
+2010,BYU,brigham-young,Mountain West,G5_top,7,6,1.33,0.41,61,64
+2010,Colorado State,colorado-state,Mountain West,G5_top,3,9,-10.86,0.47,103,62
+2010,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,2,11,-11.86,3.22,106,28
+2010,Wyoming,wyoming,Mountain West,G5_top,3,9,-9.31,0.02,98,68
+2010,New Mexico,new-mexico,Mountain West,G5_top,1,11,-17.76,0.57,115,60
+2010,Oregon,oregon,Pac-10,P5,12,1,21.54,3.92,2,24
+2010,Stanford,stanford,Pac-10,P5,12,1,21.8,5.03,1,13
+2010,USC,southern-california,Pac-10,P5,8,5,9.57,6.41,24,5
+2010,Washington,washington,Pac-10,P5,7,6,5.55,8.24,42,2
+2010,Arizona,arizona,Pac-10,P5,7,6,8.14,6.37,31,6
+2010,Arizona State,arizona-state,Pac-10,P5,6,6,8.42,4.75,28,16
+2010,Oregon State,oregon-state,Pac-10,P5,5,7,7.6,9.68,33,1
+2010,California,california,Pac-10,P5,5,7,5.35,6.27,43,7
+2010,UCLA,ucla,Pac-10,P5,4,8,0.62,7.29,65,3
+2010,Washington State,washington-state,Pac-10,P5,2,10,-4.2,7.22,81,4
+2010,South Carolina,south-carolina,SEC,P5,9,5,12.97,6.18,16,8
+2010,Florida,florida,SEC,P5,8,5,9.3,4.07,26,23
+2010,Georgia,georgia,SEC,P5,6,7,6.35,2.65,39,38
+2010,Tennessee,tennessee,SEC,P5,6,7,1.78,2.62,56,40
+2010,Kentucky,kentucky,SEC,P5,6,7,1.88,0.42,54,63
+2010,Vanderbilt,vanderbilt,SEC,P5,2,10,-9.57,3.01,99,30
+2010,Auburn,auburn,SEC,P5,14,0,20.66,5.95,3,9
+2010,LSU,louisiana-state,SEC,P5,11,2,15.13,4.67,10,19
+2010,Arkansas,arkansas,SEC,P5,10,3,14.48,4.94,11,14
+2010,Alabama,alabama,SEC,P5,10,3,18.31,4.69,5,18
+2010,Mississippi State,mississippi-state,SEC,P5,9,4,9.11,2.96,27,32
+2010,Ole Miss,mississippi,SEC,P5,4,8,-1.83,2.09,69,44
+2010,Troy,troy,Sun Belt,G5_top,8,5,-4.1,-7.56,80,114
+2010,Florida International,florida-international,Sun Belt,G5_top,7,6,-4.71,-6.17,85,106
+2010,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,6,7,-10.59,-10.44,102,120
+2010,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,5,7,-11.04,-4.62,104,94
+2010,Arkansas State,arkansas-state,Sun Belt,G5_top,4,8,-7.45,-5.87,92,103
+2010,Florida Atlantic,florida-atlantic,Sun Belt,G5_top,4,8,-15.9,-6.65,112,108
+2010,Louisiana,louisiana-lafayette,Sun Belt,G5_top,3,9,-16.92,-5.67,114,102
+2010,North Texas,north-texas,Sun Belt,G5_top,3,9,-14.18,-7.34,109,110
+2010,Western Kentucky,western-kentucky,Sun Belt,G5_top,2,10,-15.37,-6.04,111,105
+2010,Nevada,nevada,WAC,G5,13,1,11.96,-3.54,18,89
+2010,Boise State,boise-state,WAC,G5,12,1,18.69,-0.7,4,71
+2010,Hawaii,hawaii,WAC,G5,10,4,6.55,-2.1,38,83
+2010,Fresno State,fresno-state,WAC,G5,8,5,0.18,-1.2,67,76
+2010,Louisiana Tech,louisiana-tech,WAC,G5,5,7,-3.7,-0.28,78,69
+2010,Idaho,idaho,WAC,G5,6,7,-2.77,-2.69,74,86
+2010,Utah State,utah-state,WAC,G5,4,8,-7.64,0.7,93,58
+2010,New Mexico State,new-mexico-state,WAC,G5,2,10,-18.13,-1.46,116,79
+2010,San Jose State,san-jose-state,WAC,G5,1,12,-12.4,0.98,107,55

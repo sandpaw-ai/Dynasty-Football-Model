@@ -1,0 +1,118 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2002,Florida State,florida-state,ACC,P5,9,5,14.86,7.15,10,3
+2002,Maryland,maryland,ACC,P5,11,3,12.73,0.94,15,56
+2002,Virginia,virginia,ACC,P5,9,5,8.6,5.1,28,12
+2002,North Carolina State,north-carolina-state,ACC,P5,11,3,12.86,0.22,14,60
+2002,Clemson,clemson,ACC,P5,7,6,4.16,4.23,48,18
+2002,Georgia Tech,georgia-tech,ACC,P5,7,6,4.56,3.86,45,27
+2002,Wake Forest,wake-forest,ACC,P5,7,6,4.81,2.89,43,39
+2002,North Carolina,north-carolina,ACC,P5,3,9,-5.52,6.15,77,6
+2002,Duke,duke,ACC,P5,2,10,-7.05,2.54,82,44
+2002,Colorado,colorado,Big 12,P5,9,5,11.77,6.56,18,5
+2002,Kansas State,kansas-state,Big 12,P5,11,2,16.49,-0.12,7,64
+2002,Iowa State,iowa-state,Big 12,P5,7,7,6.17,5.67,38,9
+2002,Nebraska,nebraska,Big 12,P5,7,7,4.09,2.45,50,45
+2002,Missouri,missouri,Big 12,P5,5,7,3.69,3.77,51,28
+2002,Kansas,kansas,Big 12,P5,2,10,-14.87,0.05,109,62
+2002,Oklahoma,oklahoma,Big 12,P5,12,2,19.02,4.31,3,17
+2002,Texas,texas,Big 12,P5,11,2,17.32,4.01,6,19
+2002,Texas Tech,texas-tech,Big 12,P5,9,5,9.53,5.6,24,10
+2002,Oklahoma State,oklahoma-state,Big 12,P5,8,5,4.81,0.66,44,57
+2002,Texas A&M,texas-am,Big 12,P5,6,6,6.4,2.4,37,49
+2002,Baylor,baylor,Big 12,P5,3,9,-11.02,3.31,100,34
+2002,Miami (FL),miami-fl,Big East,P5,12,1,20.35,3.04,2,37
+2002,West Virginia,west-virginia,Big East,P5,9,4,7.3,2.3,35,51
+2002,Pitt,pittsburgh,Big East,P5,9,4,9.99,2.45,23,46
+2002,Virginia Tech,virginia-tech,Big East,P5,10,4,11.16,2.31,19,50
+2002,Boston College,boston-college,Big East,P5,9,4,9.22,0.53,26,58
+2002,Syracuse,syracuse,Big East,P5,4,8,-4.63,1.45,74,54
+2002,Temple,temple,Big East,P5,4,8,-5.22,2.44,76,47
+2002,Rutgers,rutgers,Big East,P5,1,11,-16.85,0.32,112,59
+2002,Ohio State,ohio-state,Big Ten,P5,14,0,18.13,3.99,5,21
+2002,Iowa,iowa,Big Ten,P5,11,2,15.94,2.87,8,41
+2002,Michigan,michigan,Big Ten,P5,10,3,13.44,6.82,13,4
+2002,Penn State,penn-state,Big Ten,P5,9,4,14.59,3.98,11,22
+2002,Purdue,purdue,Big Ten,P5,7,6,7.59,2.44,33,48
+2002,Illinois,illinois,Big Ten,P5,5,7,2.56,2.89,57,40
+2002,Minnesota,minnesota,Big Ten,P5,8,5,5.02,1.17,42,55
+2002,Wisconsin,wisconsin,Big Ten,P5,8,6,8.55,4.77,30,13
+2002,Michigan State,michigan-state,Big Ten,P5,4,8,-2.67,3.09,70,36
+2002,Indiana,indiana,Big Ten,P5,3,9,-10.42,2.25,97,52
+2002,Northwestern,northwestern,Big Ten,P5,3,9,-8.05,3.36,90,33
+2002,Texas Christian,texas-christian,Conference USA,G5,10,2,5.9,-4.93,39,97
+2002,Cincinnati,cincinnati,Conference USA,G5,7,7,2.84,-0.02,55,63
+2002,Louisville,louisville,Conference USA,G5,7,6,0.77,-1.93,61,70
+2002,Southern Mississippi,southern-mississippi,Conference USA,G5,7,6,-0.24,-1.93,66,71
+2002,Tulane,tulane,Conference USA,G5,8,5,0.91,-5.47,59,105
+2002,UAB,alabama-birmingham,Conference USA,G5,5,7,-8.78,-3.86,92,91
+2002,East Carolina,east-carolina,Conference USA,G5,4,8,-7.15,-1.4,84,67
+2002,Houston,houston,Conference USA,G5,5,7,-7.7,-2.95,89,77
+2002,Memphis,memphis,Conference USA,G5,3,9,-7.61,-3.69,88,90
+2002,Army,army,Conference USA,G5,1,11,-22.64,-5.8,117,108
+2002,South Florida,south-florida,FBS Independents,P5,9,2,7.11,-2.71,36,75
+2002,Notre Dame,notre-dame,FBS Independents,P5,10,3,10.89,5.51,20,11
+2002,Connecticut,connecticut,FBS Independents,P5,6,6,-0.75,-5.0,68,98
+2002,Utah State,utah-state,FBS Independents,P5,4,7,-11.97,-3.34,103,86
+2002,Troy,troy,FBS Independents,P5,4,8,-10.29,-6.62,96,111
+2002,Navy,navy,FBS Independents,P5,2,10,-12.2,-1.95,104,72
+2002,Marshall,marshall,Mid-American,G5,11,2,2.97,-7.03,53,114
+2002,UCF,central-florida,Mid-American,G5,7,5,0.29,-5.13,64,100
+2002,Miami (OH),miami-oh,Mid-American,G5,7,5,0.23,-2.44,65,74
+2002,Ohio,ohio,Mid-American,G5,4,8,-10.71,-5.21,99,101
+2002,Akron,akron,Mid-American,G5,4,8,-9.42,-4.92,94,96
+2002,Kent State,kent-state,Mid-American,G5,3,9,-16.47,-4.72,111,94
+2002,Buffalo,buffalo,Mid-American,G5,1,11,-20.36,-6.69,115,112
+2002,Northern Illinois,northern-illinois,Mid-American,G5,8,4,-0.42,-4.75,67,95
+2002,Toledo,toledo,Mid-American,G5,9,5,3.24,-3.12,52,80
+2002,Bowling Green,bowling-green-state,Mid-American,G5,9,3,2.7,-7.96,56,117
+2002,Ball State,ball-state,Mid-American,G5,6,6,-8.3,-5.3,91,102
+2002,Western Michigan,western-michigan,Mid-American,G5,4,8,-6.65,-3.57,81,89
+2002,Central Michigan,central-michigan,Mid-American,G5,4,8,-11.89,-5.8,102,109
+2002,Eastern Michigan,eastern-michigan,Mid-American,G5,3,9,-20.64,-5.89,116,110
+2002,Colorado State,colorado-state,Mountain West,G5_top,10,4,5.42,-0.29,40,65
+2002,New Mexico,new-mexico,Mountain West,G5_top,7,7,-3.03,-3.03,72,79
+2002,Air Force,air-force,Mountain West,G5_top,8,5,2.96,-3.27,54,84
+2002,San Diego State,san-diego-state,Mountain West,G5_top,4,9,-7.44,-0.44,87,66
+2002,Utah,utah,Mountain West,G5_top,5,6,-2.23,-3.5,69,88
+2002,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,5,7,-6.46,-1.88,80,69
+2002,BYU,brigham-young,Mountain West,G5_top,5,7,-5.99,-3.24,78,83
+2002,Wyoming,wyoming,Mountain West,G5_top,2,10,-12.27,-1.69,105,68
+2002,USC,southern-california,Pac-10,P5,11,2,24.19,9.49,1,1
+2002,Washington State,washington-state,Pac-10,P5,10,3,13.47,4.01,12,20
+2002,Arizona State,arizona-state,Pac-10,P5,8,6,5.38,3.67,41,30
+2002,Oregon State,oregon-state,Pac-10,P5,8,5,9.45,2.6,25,42
+2002,UCLA,ucla,Pac-10,P5,8,5,8.97,5.74,27,8
+2002,California,california,Pac-10,P5,7,5,10.32,3.9,22,26
+2002,Washington,washington,Pac-10,P5,7,6,8.36,4.75,31,14
+2002,Oregon,oregon,Pac-10,P5,7,6,4.51,2.13,46,53
+2002,Arizona,arizona,Pac-10,P5,4,8,-2.73,3.6,71,31
+2002,Stanford,stanford,Pac-10,P5,2,9,-4.5,7.87,73,2
+2002,Georgia,georgia,SEC,P5,13,1,18.18,3.96,4,24
+2002,Florida,florida,SEC,P5,8,5,8.58,5.97,29,7
+2002,Tennessee,tennessee,SEC,P5,8,5,7.41,2.94,34,38
+2002,Kentucky,kentucky,SEC,P5,7,5,4.12,0.2,49,61
+2002,South Carolina,south-carolina,SEC,P5,5,7,0.9,3.73,60,29
+2002,Vanderbilt,vanderbilt,SEC,P5,2,10,-7.34,3.91,86,25
+2002,Alabama,alabama,SEC,P5,10,3,15.8,4.57,9,16
+2002,Auburn,auburn,SEC,P5,9,4,12.36,3.98,16,23
+2002,Arkansas,arkansas,SEC,P5,9,5,10.33,4.61,21,15
+2002,LSU,louisiana-state,SEC,P5,8,5,8.35,3.42,32,32
+2002,Ole Miss,mississippi,SEC,P5,7,6,4.44,3.13,47,35
+2002,Mississippi State,mississippi-state,SEC,P5,3,9,-7.28,2.55,85,43
+2002,North Texas,north-texas,Sun Belt,G5_top,8,5,0.61,-3.0,63,78
+2002,New Mexico State,new-mexico-state,Sun Belt,G5_top,7,5,-5.05,-5.3,75,103
+2002,Arkansas State,arkansas-state,Sun Belt,G5_top,6,7,-10.48,-7.79,98,116
+2002,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,4,8,-8.97,-5.64,93,107
+2002,Louisiana,louisiana-lafayette,Sun Belt,G5_top,3,9,-13.8,-3.13,107,81
+2002,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,3,9,-13.8,-4.05,108,92
+2002,Idaho,idaho,Sun Belt,G5_top,2,10,-13.5,-3.33,106,85
+2002,Boise State,boise-state,WAC,G5,12,1,12.28,-6.87,17,113
+2002,Hawaii,hawaii,WAC,G5,10,4,2.56,-5.51,58,106
+2002,Fresno State,fresno-state,WAC,G5,9,5,0.67,-2.12,62,73
+2002,San Jose State,san-jose-state,WAC,G5,6,7,-7.13,-3.13,83,82
+2002,Nevada,nevada,WAC,G5,5,7,-6.33,-3.41,79,87
+2002,Rice,rice,WAC,G5,4,7,-10.21,-7.03,95,115
+2002,Louisiana Tech,louisiana-tech,WAC,G5,4,8,-11.13,-2.8,101,76
+2002,SMU,southern-methodist,WAC,G5,3,9,-16.34,-5.0,110,99
+2002,UTEP,texas-el-paso,WAC,G5,2,10,-18.11,-4.69,113,93
+2002,Tulsa,tulsa,WAC,G5,1,11,-18.4,-5.4,114,104

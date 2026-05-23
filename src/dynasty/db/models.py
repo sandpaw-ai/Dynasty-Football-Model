@@ -36,7 +36,7 @@ class Player(Base):
     fantasycalc_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
     espn_id: Mapped[Optional[str]] = mapped_column(String(32))
     yahoo_id: Mapped[Optional[str]] = mapped_column(String(32))
-    pfr_id: Mapped[Optional[str]] = mapped_column(String(32))  # pro-football-reference
+    pfr_id: Mapped[Optional[str]] = mapped_column(String(32), index=True)  # pro-football-reference id, e.g. 'SmitEm00' for Emmitt Smith. Indexed in v2.4 because the unified corpus loader maps pre-1999 PFR-only player_ids back to gsis_id via this column.
     gsis_id: Mapped[Optional[str]] = mapped_column(String(32), index=True)  # nflverse / NFL GSIS id, e.g. "00-0033280"
 
     full_name: Mapped[str] = mapped_column(String(128))
@@ -49,6 +49,17 @@ class Player(Base):
     nfl_team: Mapped[Optional[str]] = mapped_column(String(8))
 
     birthdate: Mapped[Optional[date]] = mapped_column(Date)
+    # v2.4 (PR 2): explicit ISO 8601 YYYY-MM-DD string mirror of ``birthdate``.
+    # Added because the v2.4 pre-1999 PFR backfill sidecar files
+    # (``data/pfr_birth_dates.csv``) carry birth dates as strings, and the
+    # similarity engine's meta loader reads them as strings before converting
+    # to ``date`` objects. Keeping a string column alongside the date column
+    # lets us preserve raw partial dates (e.g. when PFR only exposes the
+    # year for an older player) without lossy coercion through SQLAlchemy's
+    # Date type. Either column is acceptable as the source of truth; downstream
+    # consumers should prefer ``birthdate`` (typed) and fall back to
+    # ``birth_date`` (raw string).
+    birth_date: Mapped[Optional[str]] = mapped_column(String(10))
     height_inches: Mapped[Optional[int]] = mapped_column(Integer)
     weight_lbs: Mapped[Optional[int]] = mapped_column(Integer)
     college: Mapped[Optional[str]] = mapped_column(String(128))

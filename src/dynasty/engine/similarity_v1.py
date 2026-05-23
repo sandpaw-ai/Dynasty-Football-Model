@@ -143,13 +143,21 @@ def _pre1999_enabled(override: Optional[bool] = None) -> bool:
 
     Precedence:
       1. Explicit ``override`` argument (highest priority — used by tests).
-      2. ``USE_PRE1999_CORPUS`` environment variable (truthy = 1/true/yes/on).
-      3. Default: False.
+      2. ``USE_PRE1999_CORPUS`` environment variable (truthy = 1/true/yes/on;
+         falsey = 0/false/no/off; anything else falls through to default).
+      3. Default: True since v2.4 PR 4. Pre-1999 legends (Payton, Smith,
+         Allen, etc.) are now part of the comp pool by default. Set
+         ``USE_PRE1999_CORPUS=false`` to opt back into the 1999+-only
+         behaviour.
     """
     if override is not None:
         return bool(override)
     raw = os.environ.get("USE_PRE1999_CORPUS", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return True
 
 # Long-arc corpus thresholds — UNCHANGED from v1.1.
 RETIRED_THROUGH_SEASON = 2022
@@ -1289,11 +1297,24 @@ def run_engine(
                 last_season=c.arc.last_season,
                 current_season=current_season,
             )
+            # v2.4 PR 4: tag pre-1999-snapshot comps so the player page
+            # can render an ⏳ era badge for transparency. The 0.9x
+            # confidence haircut from PR 3 is already applied upstream
+            # in find_comps; this field is purely for UI display.
+            snapshot_season = next(
+                (s.season for s in c.arc.career_arc if s.age == c.snapshot_age),
+                None,
+            )
+            is_pre1999_snapshot = (
+                snapshot_season is not None and snapshot_season < 1999
+            )
             comp_records.append({
                 "player_id": c.arc.player_id,
                 "name": c.arc.name,
                 "position": c.arc.position,
                 "last_season": c.arc.last_season,
+                "snapshot_season": snapshot_season,
+                "is_pre1999_snapshot": is_pre1999_snapshot,
                 # Already in (0, 1] for the v2.0 cumulative-arc engine —
                 # no breakout boost is applied here. Mirror the rookie
                 # engine schema for downstream consumers.

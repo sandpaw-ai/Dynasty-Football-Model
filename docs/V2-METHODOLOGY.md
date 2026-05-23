@@ -258,7 +258,7 @@ rookie-year stats:
 | 6 | rushing_TDs / G | 0.3 | Fantasy-significant (6 pts each) |
 | 7 | receiving_TDs / G | 0.3 | |
 | 8 | completion_rate (QB only) | 0.1 | QB tier signal |
-| 9 | age_at_rookie_year | **2.5** | **v2.3.5**: bumped from 0.2. Age is a primary skill-position predictor; pre-v2.3.5 it was a tie-breaker against trivial fp/G noise. |
+| 9 | age_at_rookie_year | **20.0** | **v2.3.5**: bumped from 0.2. Age is a primary skill-position predictor; pre-v2.3.5 it was a tie-breaker against trivial fp/G noise. Calibrated empirically against Phil's Johnny Wilson bug-report: weight 20.0 makes a 1-year age gap cost enough distance to overcome the BREAKOUT_BIAS multiplier (≤1.3×) that previously kept late-bloomer survivors at the top of bust-tier rookies' comp lists. |
 | 10 | position_encoded | 0.0 | Informational; position-filter applies upstream |
 
 **v2.3.5 corpus change**: `build_rookie_corpus` default flipped to

@@ -80,7 +80,7 @@ projects from those comps' realised year-2+ careers.
 | 6 | rushing_TDs_per_game | 0.3 | Each rushing TD is 6 fp — small absolute differences are fantasy-significant. |
 | 7 | receiving_TDs_per_game | 0.3 | |
 | 8 | rookie_completion_rate (QB only, else 0) | 0.1 | Currently set to 0 in practice — the simplified `PlayerSeason.stats` dict doesn't carry attempts. fp/G + passing_TDs/G capture most of the same signal. |
-| 9 | age_at_rookie_year | **2.5** | **v2.3.5**: bumped from 0.2. A 21-yo and 25-yo rookie at the same fp/G profile have very different career horizons. At weight 2.5, a 2-year age gap contributes ~10 to squared distance — dominates a small fp/G match instead of being washed out by it (fix for Phil's Johnny-Wilson-vs-Steve-Smith-Sr. age-blind bug report). |
+| 9 | age_at_rookie_year | **20.0** | **v2.3.5**: bumped from 0.2. A 21-yo and 25-yo rookie at the same fp/G profile have very different career horizons. At weight 20.0, a 1-year age gap contributes 20 to squared distance, a 2-year gap 80 — enough to dominate the BREAKOUT_BIAS multiplier (≤1.3×) that previously kept late-bloomer survivors at the top of bust-tier rookies' comp lists. Calibrated against Phil's Johnny Wilson bug-report (23-yo rookie comping to 22-yo Steve Smith Sr. and Santana Moss); the empirically-required weight to push both out of Wilson's top-10 was ≈20. |
 | 10 | position_encoded | 0.0 | Informational only; position-filter applies upstream. |
 
 ## Similarity function

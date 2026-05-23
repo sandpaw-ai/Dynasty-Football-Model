@@ -19,12 +19,17 @@ Format for each entry:
 
 **Date:** 2026-05-23
 
-Phil 2026-05-23 bug report: *Johnny Wilson (WR, 2024 rookie, age 24,
-~0.6 fp/G) was being comped to Steve Smith Sr. (rookie age 22) and
-Santana Moss (rookie age 22). Both broke out later — neither is a
-plausible Wilson outcome. The reported comps were systematically biased
-toward late-bloomer survivors. Intuition: the model wasn't considering
-age properly, and the comp pool only contained survivors.*
+Phil 2026-05-23 bug report:
+
+> *"Johnny Wilson is being comped to Steve Smith Sr. and Santana Moss.
+> The model doesn't seem to consider age properly, and the comp pool
+> seems to only contain late-bloomer survivors instead of including
+> actual busts."*
+
+Ada's diagnosis below — Phil was right on both counts. (Note: our
+nflverse-derived rookie age for Wilson is 23, not 24 — the 24 figure
+in Phil's writeup is the offset-by-one calendar-vs-season-start view.
+The bug and the fix are identical either way.)
 
 Ada's diagnosis confirmed two compounding bugs and applied the
 hotfix on the same branch.
@@ -46,8 +51,14 @@ hotfix on the same branch.
   (age_at_rookie_year) was 0.2 with `v[0]` (fp/G) at 8.0. A 2-year
   age gap contributed 0.8 to squared distance while a 0.3-fp/G gap
   contributed 0.72 — age was the same weight as a tiny fp/G match.
-  Bumped to 2.5; a 2-year age gap now contributes 10. Age dominates a
-  small fp/G match instead of being washed out by it.
+  Bumped to **20.0** (calibrated empirically against Phil's Johnny
+  Wilson bug-report). A 1-year age gap now contributes 20 to squared
+  distance, a 2-year gap 80. The bump is large because the
+  BREAKOUT_BIAS multiplier (≤1.3× for high-post-rookie-fp comps) was
+  previously enough to keep late-bloomer survivors at the top of
+  bust-tier rookies' lists even with a small age weight; the new
+  weight makes age dominant enough to overcome that multiplier on
+  any age-gap ≥1 year.
 
 **Bug B — rookie comp pool excluded year-1-only busts.**
 

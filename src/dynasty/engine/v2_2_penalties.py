@@ -69,6 +69,46 @@ SURVIVAL_BUST_AGE = 30                 # comp final NFL age <= this AND
 SURVIVAL_BUST_MAX_SEASONS = 8          # … fewer than this many seasons = bust
 SHORT_CAREER_MAX_SEASONS = 5           # comp career ≤ this many seasons = "short"
 
+# v2.4: per-position bust-rate baselines computed from the UNIFIED
+# 1980-2025 retired-long-arc corpus (USE_PRE1999_CORPUS=True), with
+# the comparable 1999+ baselines kept as ``BUST_RATE_BASELINE_V231``
+# for diff visibility. These are DIAGNOSTIC anchors — the survival
+# multiplier formula still consumes the comp-pool-derived
+# ``bust_rate`` directly (not a deviation from the baseline) — so
+# changing the baselines does NOT silently move scores. The point is
+# transparency: rankings consumers can compare a player's comp-pool
+# bust rate (e.g. Sam Howell ~0.85) against the league baseline (RB
+# 0.786, WR 0.697, etc.) to see whether the comp pool is structurally
+# bust-heavy or unusually bust-heavy.
+#
+# Method: count retired (last_season ≤ 2022) careers with ≥2 seasons
+# per position; bust = age ≤ SURVIVAL_BUST_AGE AND career_length <
+# SURVIVAL_BUST_MAX_SEASONS. Computed 2026-05-23 against the corpus
+# committed in this PR.
+BUST_RATE_BASELINE: Dict[str, float] = {
+    "QB": 0.421,
+    "RB": 0.786,
+    "WR": 0.697,
+    "TE": 0.665,
+}
+# v2.3 baseline (1999+ only) — kept for diff visibility. Document any
+# noticeable shift between the two columns in V2.4-PENALTY-RETUNE.md.
+BUST_RATE_BASELINE_V231: Dict[str, float] = {
+    "QB": 0.459,
+    "RB": 0.778,
+    "WR": 0.726,
+    "TE": 0.669,
+}
+# Per-position avg retired career length in the unified corpus.
+# Used as a sanity-check anchor in the diagnostics JSON. NOT consumed
+# by the survival formula.
+DURABLE_CAREER_BASELINE: Dict[str, float] = {
+    "QB": 0.447,
+    "RB": 0.350,
+    "WR": 0.389,
+    "TE": 0.412,
+}
+
 # Confidence shrinkage parameters.
 #
 # QB-side calibration is unchanged from v2.2 (Phil approved this):

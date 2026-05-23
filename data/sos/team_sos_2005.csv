@@ -1,0 +1,120 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2005,Florida State,florida-state,ACC,P5,8,5,9.36,5.05,27,19
+2005,Boston College,boston-college,ACC,P5,9,3,12.01,4.17,16,31
+2005,Clemson,clemson,ACC,P5,8,4,11.09,3.42,25,38
+2005,North Carolina State,north-carolina-state,ACC,P5,7,5,5.73,3.73,36,36
+2005,Maryland,maryland,ACC,P5,5,6,5.11,5.83,41,15
+2005,Wake Forest,wake-forest,ACC,P5,4,7,0.21,5.03,62,21
+2005,Virginia Tech,virginia-tech,ACC,P5,11,2,18.96,4.27,5,29
+2005,Miami (FL),miami-fl,ACC,P5,9,3,15.09,4.5,7,27
+2005,Georgia Tech,georgia-tech,ACC,P5,7,5,7.31,6.48,33,11
+2005,North Carolina,north-carolina,ACC,P5,5,6,3.44,7.71,47,4
+2005,Virginia,virginia,ACC,P5,7,5,5.61,3.19,38,41
+2005,Duke,duke,ACC,P5,1,10,-10.71,4.29,101,28
+2005,Colorado,colorado,Big 12,P5,7,6,6.6,5.37,35,17
+2005,Nebraska,nebraska,Big 12,P5,8,4,7.57,3.57,32,37
+2005,Iowa State,iowa-state,Big 12,P5,7,5,8.48,1.32,30,56
+2005,Missouri,missouri,Big 12,P5,7,5,3.68,1.59,45,53
+2005,Kansas,kansas,Big 12,P5,7,5,5.22,2.39,40,47
+2005,Kansas State,kansas-state,Big 12,P5,5,6,-1.42,1.22,67,58
+2005,Texas,texas,Big 12,P5,13,0,24.98,4.98,1,23
+2005,Texas Tech,texas-tech,Big 12,P5,9,3,11.4,0.32,18,63
+2005,Oklahoma,oklahoma,Big 12,P5,8,4,11.24,6.99,21,6
+2005,Texas A&M,texas-am,Big 12,P5,5,6,2.16,3.89,51,32
+2005,Baylor,baylor,Big 12,P5,5,6,0.76,3.03,61,44
+2005,Oklahoma State,oklahoma-state,Big 12,P5,4,7,-6.28,1.72,89,52
+2005,West Virginia,west-virginia,Big East,P5,11,1,13.05,0.71,13,60
+2005,Louisville,louisville,Big East,P5,9,3,11.12,-0.63,24,70
+2005,Rutgers,rutgers,Big East,P5,7,5,1.3,-2.37,57,78
+2005,South Florida,south-florida,Big East,P5,6,6,5.07,1.9,42,50
+2005,Pitt,pittsburgh,Big East,P5,5,6,0.97,0.24,60,64
+2005,Connecticut,connecticut,Big East,P5,5,6,-1.88,-2.51,70,79
+2005,Cincinnati,cincinnati,Big East,P5,4,7,-9.2,1.26,98,57
+2005,Syracuse,syracuse,Big East,P5,1,10,-10.95,2.87,102,45
+2005,Penn State,penn-state,Big Ten,P5,11,1,20.41,6.91,4,7
+2005,Ohio State,ohio-state,Big Ten,P5,10,2,22.97,8.89,3,2
+2005,Wisconsin,wisconsin,Big Ten,P5,10,3,11.81,4.19,17,30
+2005,Iowa,iowa,Big Ten,P5,7,5,11.3,5.05,20,20
+2005,Michigan,michigan,Big Ten,P5,7,5,14.86,9.36,8,1
+2005,Northwestern,northwestern,Big Ten,P5,7,5,9.27,8.44,28,3
+2005,Minnesota,minnesota,Big Ten,P5,7,5,11.31,6.81,19,8
+2005,Purdue,purdue,Big Ten,P5,5,6,7.13,6.68,34,10
+2005,Michigan State,michigan-state,Big Ten,P5,5,6,8.32,6.32,31,12
+2005,Indiana,indiana,Big Ten,P5,4,7,-3.5,4.68,78,25
+2005,Illinois,illinois,Big Ten,P5,2,9,-7.54,7.37,95,5
+2005,UCF,central-florida,Conference USA,G5,8,5,-3.6,-4.22,79,90
+2005,Memphis,memphis,Conference USA,G5,7,5,-1.76,-4.34,69,92
+2005,Southern Mississippi,southern-mississippi,Conference USA,G5,7,5,1.26,-4.49,58,93
+2005,East Carolina,east-carolina,Conference USA,G5,5,6,-6.49,-2.86,90,80
+2005,UAB,alabama-birmingham,Conference USA,G5,5,6,-4.04,-6.77,80,104
+2005,Marshall,marshall,Conference USA,G5,4,7,-9.86,-3.58,99,86
+2005,Tulsa,tulsa,Conference USA,G5,9,4,3.95,-3.2,44,83
+2005,UTEP,texas-el-paso,Conference USA,G5,8,4,-2.45,-7.62,71,111
+2005,Houston,houston,Conference USA,G5,6,6,-2.93,-3.85,74,87
+2005,SMU,southern-methodist,Conference USA,G5,5,6,-4.87,-3.5,82,85
+2005,Tulane,tulane,Conference USA,G5,2,9,-15.82,-5.27,109,97
+2005,Rice,rice,Conference USA,G5,1,10,-15.03,0.16,108,66
+2005,Notre Dame,notre-dame,FBS Independents,P5,9,3,17.46,6.13,6,14
+2005,Navy,navy,FBS Independents,P5,8,4,1.77,-5.31,53,98
+2005,Army,army,FBS Independents,P5,4,7,-5.81,-0.9,88,71
+2005,Temple,temple,FBS Independents,P5,0,11,-17.06,5.12,112,18
+2005,Akron,akron,Mid-American,G5,7,6,-5.5,-4.96,85,95
+2005,Miami (OH),miami-oh,Mid-American,G5,7,4,1.35,-6.11,56,102
+2005,Bowling Green,bowling-green-state,Mid-American,G5,6,5,-3.17,-6.07,76,101
+2005,Ohio,ohio,Mid-American,G5,4,7,-11.71,-1.89,103,76
+2005,Buffalo,buffalo,Mid-American,G5,1,10,-21.29,-5.2,118,96
+2005,Kent State,kent-state,Mid-American,G5,1,10,-17.23,-5.42,113,99
+2005,Toledo,toledo,Mid-American,G5,9,3,3.58,-7.25,46,106
+2005,Northern Illinois,northern-illinois,Mid-American,G5,7,5,2.83,-3.26,49,84
+2005,Western Michigan,western-michigan,Mid-American,G5,7,4,-5.55,-7.37,86,109
+2005,Central Michigan,central-michigan,Mid-American,G5,6,5,-0.42,-1.69,64,74
+2005,Ball State,ball-state,Mid-American,G5,4,7,-7.31,0.87,92,59
+2005,Eastern Michigan,eastern-michigan,Mid-American,G5,4,7,-7.42,-4.33,93,91
+2005,Texas Christian,texas-christian,Mountain West,G5_top,11,1,11.21,-1.46,23,72
+2005,BYU,brigham-young,Mountain West,G5_top,6,6,1.58,0.17,55,65
+2005,Colorado State,colorado-state,Mountain West,G5_top,6,6,-2.76,0.16,73,67
+2005,Utah,utah,Mountain West,G5_top,7,5,2.83,-2.08,50,77
+2005,New Mexico,new-mexico,Mountain West,G5_top,6,5,-2.51,-3.15,72,82
+2005,San Diego State,san-diego-state,Mountain West,G5_top,5,7,-1.57,-0.15,68,69
+2005,Air Force,air-force,Mountain West,G5_top,4,7,-4.38,-1.65,81,73
+2005,Wyoming,wyoming,Mountain West,G5_top,4,7,-4.88,-1.88,83,75
+2005,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,2,9,-14.88,-3.88,105,88
+2005,USC,southern-california,Pac-10,P5,12,1,24.57,6.8,2,9
+2005,Oregon,oregon,Pac-10,P5,10,2,13.13,3.05,12,43
+2005,UCLA,ucla,Pac-10,P5,10,2,11.22,3.81,22,34
+2005,California,california,Pac-10,P5,8,4,8.64,-0.03,29,68
+2005,Arizona State,arizona-state,Pac-10,P5,7,5,9.63,4.63,26,26
+2005,Stanford,stanford,Pac-10,P5,5,6,1.19,6.19,59,13
+2005,Oregon State,oregon-state,Pac-10,P5,5,6,-0.87,3.31,66,40
+2005,Arizona,arizona,Pac-10,P5,3,8,0.11,5.01,63,22
+2005,Washington State,washington-state,Pac-10,P5,4,7,1.6,1.88,54,51
+2005,Washington,washington,Pac-10,P5,2,9,-3.11,5.61,75,16
+2005,Georgia,georgia,SEC,P5,10,3,13.75,3.36,10,39
+2005,Florida,florida,SEC,P5,9,3,12.32,3.82,15,33
+2005,South Carolina,south-carolina,SEC,P5,7,5,5.24,3.74,39,35
+2005,Tennessee,tennessee,SEC,P5,5,6,4.25,4.8,43,24
+2005,Vanderbilt,vanderbilt,SEC,P5,5,6,-0.75,0.71,65,61
+2005,Kentucky,kentucky,SEC,P5,3,8,-9.06,2.03,96,48
+2005,LSU,louisiana-state,SEC,P5,11,2,14.18,2.48,9,46
+2005,Auburn,auburn,SEC,P5,9,3,13.63,1.54,11,54
+2005,Alabama,alabama,SEC,P5,10,2,12.89,1.97,14,49
+2005,Arkansas,arkansas,SEC,P5,4,7,3.44,3.16,48,42
+2005,Mississippi State,mississippi-state,SEC,P5,3,8,-7.03,1.43,91,55
+2005,Ole Miss,mississippi,SEC,P5,3,8,-7.48,0.52,94,62
+2005,Louisiana,louisiana-lafayette,Sun Belt,G5_top,6,5,-9.19,-10.1,97,116
+2005,Arkansas State,arkansas-state,Sun Belt,G5_top,6,6,-12.8,-10.72,104,118
+2005,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,5,6,-15.0,-9.73,107,115
+2005,Florida International,florida-international,Sun Belt,G5_top,5,6,-14.88,-11.69,106,119
+2005,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,4,7,-9.89,-8.44,100,113
+2005,Troy,troy,Sun Belt,G5_top,4,7,-16.7,-10.25,111,117
+2005,Florida Atlantic,florida-atlantic,Sun Belt,G5_top,2,9,-18.39,-6.85,116,105
+2005,North Texas,north-texas,Sun Belt,G5_top,2,9,-18.23,-7.6,115,110
+2005,Nevada,nevada,WAC,G5,9,3,-5.21,-8.12,84,112
+2005,Boise State,boise-state,WAC,G5,9,4,2.11,-6.36,52,103
+2005,Louisiana Tech,louisiana-tech,WAC,G5,7,4,-3.39,-7.3,77,108
+2005,Fresno State,fresno-state,WAC,G5,8,5,5.72,-4.82,37,94
+2005,Hawaii,hawaii,WAC,G5,5,7,-5.61,-2.86,87,81
+2005,San Jose State,san-jose-state,WAC,G5,3,8,-16.61,-8.61,110,114
+2005,Utah State,utah-state,WAC,G5,3,8,-17.68,-5.87,114,100
+2005,Idaho,idaho,WAC,G5,2,9,-19.37,-7.28,117,107
+2005,New Mexico State,new-mexico-state,WAC,G5,0,12,-22.98,-4.15,119,89

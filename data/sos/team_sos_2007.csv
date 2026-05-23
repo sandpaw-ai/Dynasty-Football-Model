@@ -1,0 +1,121 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2007,Boston College,boston-college,ACC,P5,11,3,9.75,1.54,21,52
+2007,Clemson,clemson,ACC,P5,9,4,11.4,1.71,17,48
+2007,Wake Forest,wake-forest,ACC,P5,9,4,7.07,1.22,33,54
+2007,Florida State,florida-state,ACC,P5,7,6,5.02,4.33,47,23
+2007,Maryland,maryland,ACC,P5,6,7,4.31,3.15,52,35
+2007,North Carolina State,north-carolina-state,ACC,P5,5,7,-3.13,2.96,75,36
+2007,Virginia Tech,virginia-tech,ACC,P5,11,3,14.22,2.86,11,38
+2007,Virginia,virginia,ACC,P5,9,4,5.89,1.66,42,50
+2007,Georgia Tech,georgia-tech,ACC,P5,7,6,3.94,1.24,54,53
+2007,North Carolina,north-carolina,ACC,P5,4,8,-1.82,2.02,70,43
+2007,Miami (FL),miami-fl,ACC,P5,5,7,-1.23,1.6,67,51
+2007,Duke,duke,ACC,P5,1,11,-10.34,3.33,100,34
+2007,Kansas,kansas,Big 12,P5,12,1,14.45,-1.24,10,69
+2007,Missouri,missouri,Big 12,P5,12,2,16.77,3.7,7,30
+2007,Colorado,colorado,Big 12,P5,6,7,2.65,4.11,58,27
+2007,Kansas State,kansas-state,Big 12,P5,5,7,3.63,1.97,55,45
+2007,Nebraska,nebraska,Big 12,P5,5,7,1.48,5.89,62,12
+2007,Iowa State,iowa-state,Big 12,P5,3,9,-7.21,2.45,88,42
+2007,Oklahoma,oklahoma,Big 12,P5,11,3,15.87,2.87,8,37
+2007,Texas,texas,Big 12,P5,10,3,10.99,1.91,19,46
+2007,Texas Tech,texas-tech,Big 12,P5,9,4,8.28,-0.8,26,67
+2007,Oklahoma State,oklahoma-state,Big 12,P5,7,6,6.67,4.06,37,28
+2007,Texas A&M,texas-am,Big 12,P5,7,6,5.56,3.87,44,29
+2007,Baylor,baylor,Big 12,P5,3,9,-11.15,2.6,102,41
+2007,West Virginia,west-virginia,Big East,P5,11,2,19.09,3.4,1,32
+2007,Connecticut,connecticut,Big East,P5,9,4,7.07,0.45,34,59
+2007,Cincinnati,cincinnati,Big East,P5,10,3,13.4,0.48,13,58
+2007,South Florida,south-florida,Big East,P5,9,4,12.37,4.37,14,22
+2007,Rutgers,rutgers,Big East,P5,8,5,6.75,0.44,35,60
+2007,Louisville,louisville,Big East,P5,6,6,5.02,3.44,48,31
+2007,Pitt,pittsburgh,Big East,P5,5,7,1.64,2.81,61,39
+2007,Syracuse,syracuse,Big East,P5,2,10,-10.72,4.62,101,20
+2007,Ohio State,ohio-state,Big Ten,P5,11,2,14.84,0.53,9,56
+2007,Illinois,illinois,Big Ten,P5,9,4,8.07,1.76,28,47
+2007,Michigan,michigan,Big Ten,P5,9,4,7.91,2.68,30,40
+2007,Wisconsin,wisconsin,Big Ten,P5,9,4,5.31,0.08,46,63
+2007,Penn State,penn-state,Big Ten,P5,9,4,9.09,0.32,23,62
+2007,Iowa,iowa,Big Ten,P5,6,6,-3.43,-2.1,76,77
+2007,Purdue,purdue,Big Ten,P5,8,5,4.24,-1.69,53,75
+2007,Indiana,indiana,Big Ten,P5,7,6,0.34,-1.43,64,72
+2007,Michigan State,michigan-state,Big Ten,P5,7,6,6.69,1.69,36,49
+2007,Northwestern,northwestern,Big Ten,P5,6,6,-3.7,-1.45,78,73
+2007,Minnesota,minnesota,Big Ten,P5,1,11,-11.69,-0.02,104,65
+2007,UCF,central-florida,Conference USA,G5,10,4,6.13,-3.3,40,86
+2007,East Carolina,east-carolina,Conference USA,G5,8,5,1.0,-1.38,63,71
+2007,Memphis,memphis,Conference USA,G5,7,6,-8.4,-7.4,91,117
+2007,Southern Mississippi,southern-mississippi,Conference USA,G5,7,6,-2.09,-4.47,71,93
+2007,Marshall,marshall,Conference USA,G5,3,9,-9.93,-1.59,99,74
+2007,UAB,alabama-birmingham,Conference USA,G5,2,10,-13.98,-2.4,113,80
+2007,Tulsa,tulsa,Conference USA,G5,10,4,0.1,-4.62,65,95
+2007,Houston,houston,Conference USA,G5,8,5,-1.5,-5.27,69,102
+2007,Tulane,tulane,Conference USA,G5,4,8,-13.57,-5.82,111,110
+2007,Rice,rice,Conference USA,G5,3,9,-14.59,-5.75,114,108
+2007,UTEP,texas-el-paso,Conference USA,G5,4,8,-9.3,-4.88,97,97
+2007,SMU,southern-methodist,Conference USA,G5,1,11,-15.44,-4.53,116,94
+2007,Western Kentucky,western-kentucky,FBS Independents,P5,7,5,-4.86,-8.94,80,120
+2007,Navy,navy,FBS Independents,P5,8,5,-2.9,-5.36,74,104
+2007,Army,army,FBS Independents,P5,3,9,-13.9,-2.65,112,83
+2007,Notre Dame,notre-dame,FBS Independents,P5,3,9,-5.03,4.89,82,19
+2007,Bowling Green,bowling-green-state,Mid-American,G5,8,5,-5.04,-7.04,83,116
+2007,Miami (OH),miami-oh,Mid-American,G5,6,7,-9.28,-5.66,96,107
+2007,Buffalo,buffalo,Mid-American,G5,5,7,-9.73,-6.98,98,114
+2007,Ohio,ohio,Mid-American,G5,6,6,-9.09,-8.92,95,119
+2007,Temple,temple,Mid-American,G5,4,8,-14.76,-7.01,115,115
+2007,Akron,akron,Mid-American,G5,4,8,-12.52,-5.27,109,103
+2007,Kent State,kent-state,Mid-American,G5,3,9,-12.29,-6.88,107,113
+2007,Central Michigan,central-michigan,Mid-American,G5,8,6,-3.99,-5.92,79,111
+2007,Ball State,ball-state,Mid-American,G5,7,6,-2.88,-4.88,73,98
+2007,Western Michigan,western-michigan,Mid-American,G5,5,7,-7.44,-5.03,89,100
+2007,Eastern Michigan,eastern-michigan,Mid-American,G5,4,8,-11.88,-5.55,105,106
+2007,Toledo,toledo,Mid-American,G5,5,7,-11.89,-6.14,106,112
+2007,Northern Illinois,northern-illinois,Mid-American,G5,2,10,-18.11,-8.36,120,118
+2007,BYU,brigham-young,Mountain West,G5_top,11,2,11.11,-0.05,18,66
+2007,Air Force,air-force,Mountain West,G5_top,9,4,5.36,-2.33,45,79
+2007,New Mexico,new-mexico,Mountain West,G5_top,9,4,2.49,-2.67,59,84
+2007,Utah,utah,Mountain West,G5_top,9,4,7.37,0.53,31,57
+2007,Texas Christian,texas-christian,Mountain West,G5_top,8,5,4.45,-1.32,50,70
+2007,San Diego State,san-diego-state,Mountain West,G5_top,4,8,-6.6,1.98,86,44
+2007,Wyoming,wyoming,Mountain West,G5_top,5,7,-3.51,0.07,77,64
+2007,Colorado State,colorado-state,Mountain West,G5_top,3,9,-6.15,0.35,85,61
+2007,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,2,10,-9.02,0.82,94,55
+2007,USC,southern-california,Pac-10,P5,11,2,18.1,4.33,3,24
+2007,Arizona State,arizona-state,Pac-10,P5,10,3,13.67,5.51,12,17
+2007,Oregon State,oregon-state,Pac-10,P5,9,4,9.93,6.54,20,6
+2007,Oregon,oregon,Pac-10,P5,9,4,17.82,6.97,5,3
+2007,UCLA,ucla,Pac-10,P5,6,7,7.97,7.97,29,1
+2007,Arizona,arizona,Pac-10,P5,5,7,6.04,6.46,41,7
+2007,California,california,Pac-10,P5,7,6,8.46,6.23,25,8
+2007,Washington State,washington-state,Pac-10,P5,5,7,1.66,5.58,60,16
+2007,Stanford,stanford,Pac-10,P5,4,8,-1.1,6.57,66,5
+2007,Washington,washington,Pac-10,P5,4,9,4.41,7.64,51,2
+2007,Georgia,georgia,SEC,P5,11,2,17.2,5.66,6,15
+2007,Tennessee,tennessee,SEC,P5,10,4,11.68,6.11,16,9
+2007,Florida,florida,SEC,P5,9,4,18.06,6.83,4,4
+2007,Kentucky,kentucky,SEC,P5,8,5,9.43,5.2,22,18
+2007,South Carolina,south-carolina,SEC,P5,6,6,7.15,5.9,32,11
+2007,Vanderbilt,vanderbilt,SEC,P5,5,7,3.09,4.25,56,25
+2007,LSU,louisiana-state,SEC,P5,12,2,18.41,5.77,2,14
+2007,Auburn,auburn,SEC,P5,9,4,11.87,5.79,15,13
+2007,Arkansas,arkansas,SEC,P5,8,5,8.91,3.37,24,33
+2007,Mississippi State,mississippi-state,SEC,P5,8,5,4.84,4.22,49,26
+2007,Alabama,alabama,SEC,P5,7,6,8.09,4.4,27,21
+2007,Ole Miss,mississippi,SEC,P5,3,9,-1.31,6.11,68,10
+2007,Troy,troy,Sun Belt,G5_top,8,4,5.58,-1.76,43,76
+2007,Florida Atlantic,florida-atlantic,Sun Belt,G5_top,8,5,-2.43,-2.51,72,81
+2007,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,6,6,-6.64,-3.89,87,91
+2007,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,5,7,-4.95,-3.37,81,88
+2007,Arkansas State,arkansas-state,Sun Belt,G5_top,5,7,-7.98,-4.73,90,96
+2007,Louisiana,louisiana-lafayette,Sun Belt,G5_top,3,9,-13.36,-4.11,110,92
+2007,North Texas,north-texas,Sun Belt,G5_top,2,10,-15.84,-3.67,117,89
+2007,Florida International,florida-international,Sun Belt,G5_top,1,11,-15.84,-0.84,118,68
+2007,Hawaii,hawaii,WAC,G5,12,1,6.36,-5.79,38,109
+2007,Boise State,boise-state,WAC,G5,10,3,6.31,-5.46,39,105
+2007,Fresno State,fresno-state,WAC,G5,9,4,2.75,-2.79,57,85
+2007,Nevada,nevada,WAC,G5,6,7,-5.09,-5.24,84,101
+2007,Louisiana Tech,louisiana-tech,WAC,G5,5,7,-8.45,-2.54,92,82
+2007,San Jose State,san-jose-state,WAC,G5,5,7,-8.64,-3.3,93,87
+2007,Utah State,utah-state,WAC,G5,2,10,-11.29,-2.12,103,78
+2007,New Mexico State,new-mexico-state,WAC,G5,4,9,-12.32,-4.93,108,99
+2007,Idaho,idaho,WAC,G5,1,11,-17.06,-3.81,119,90

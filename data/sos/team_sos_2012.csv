@@ -1,0 +1,125 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2012,Florida State,florida-state,ACC,P5,12,2,13.56,-0.66,14,63
+2012,Clemson,clemson,ACC,P5,11,2,14.75,1.14,11,49
+2012,North Carolina State,north-carolina-state,ACC,P5,7,6,1.46,-0.77,64,64
+2012,Wake Forest,wake-forest,ACC,P5,5,7,-6.2,1.05,90,50
+2012,Maryland,maryland,ACC,P5,4,8,-6.59,-0.26,91,59
+2012,Boston College,boston-college,ACC,P5,2,10,-6.74,2.01,93,45
+2012,North Carolina,north-carolina,ACC,P5,8,4,4.52,-2.98,51,80
+2012,Miami (FL),miami-fl,ACC,P5,7,5,4.07,2.32,52,42
+2012,Georgia Tech,georgia-tech,ACC,P5,7,7,5.18,2.89,47,40
+2012,Virginia Tech,virginia-tech,ACC,P5,7,6,3.13,2.21,57,44
+2012,Duke,duke,ACC,P5,6,7,-0.28,1.72,68,47
+2012,Virginia,virginia,ACC,P5,4,8,-3.84,0.99,82,51
+2012,Kansas State,kansas-state,Big 12,P5,11,2,16.92,5.3,7,17
+2012,Oklahoma,oklahoma,Big 12,P5,10,3,14.32,6.17,12,7
+2012,Texas,texas,Big 12,P5,9,4,11.18,5.57,18,13
+2012,Oklahoma State,oklahoma-state,Big 12,P5,8,5,13.5,4.96,15,22
+2012,Baylor,baylor,Big 12,P5,8,5,11.22,5.07,17,21
+2012,Texas Tech,texas-tech,Big 12,P5,8,5,6.33,3.02,37,37
+2012,Texas Christian,texas-christian,Big 12,P5,7,6,7.49,4.87,35,23
+2012,West Virginia,west-virginia,Big 12,P5,7,6,4.03,4.34,54,29
+2012,Iowa State,iowa-state,Big 12,P5,6,7,5.4,5.48,46,15
+2012,Kansas,kansas,Big 12,P5,1,11,-6.7,6.22,92,6
+2012,Louisville,louisville,Big East,P5,11,2,5.88,-1.96,44,73
+2012,Cincinnati,cincinnati,Big East,P5,10,3,8.71,-3.37,31,86
+2012,Rutgers,rutgers,Big East,P5,9,4,3.91,-2.55,55,77
+2012,Syracuse,syracuse,Big East,P5,8,5,6.27,0.81,40,55
+2012,Pitt,pittsburgh,Big East,P5,6,7,2.05,-0.64,62,62
+2012,Connecticut,connecticut,Big East,P5,5,7,-5.35,-2.6,85,78
+2012,Temple,temple,Big East,P5,4,7,-7.52,-1.15,97,67
+2012,South Florida,south-florida,Big East,P5,3,9,-6.13,0.79,89,56
+2012,Wisconsin,wisconsin,Big Ten,P5,8,6,9.77,2.91,24,39
+2012,Ohio State,ohio-state,Big Ten,P5,12,0,13.81,0.89,13,54
+2012,Penn State,penn-state,Big Ten,P5,8,4,9.7,0.53,25,57
+2012,Purdue,purdue,Big Ten,P5,6,7,-1.58,0.96,72,53
+2012,Indiana,indiana,Big Ten,P5,4,8,-5.53,-0.61,86,60
+2012,Illinois,illinois,Big Ten,P5,2,10,-10.35,2.56,107,41
+2012,Nebraska,nebraska,Big Ten,P5,10,4,9.79,4.22,23,30
+2012,Michigan,michigan,Big Ten,P5,8,5,10.01,3.85,21,33
+2012,Northwestern,northwestern,Big Ten,P5,10,3,8.97,0.97,28,52
+2012,Michigan State,michigan-state,Big Ten,P5,7,6,6.21,3.75,42,34
+2012,Minnesota,minnesota,Big Ten,P5,6,7,-3.25,0.13,78,58
+2012,Iowa,iowa,Big Ten,P5,4,8,-2.62,1.63,76,48
+2012,UCF,central-florida,Conference USA,G5,10,4,6.65,-3.78,36,97
+2012,East Carolina,east-carolina,Conference USA,G5,8,5,-4.23,-4.92,83,112
+2012,Marshall,marshall,Conference USA,G5,5,7,-6.04,-4.87,88,111
+2012,Memphis,memphis,Conference USA,G5,4,8,-11.09,-5.34,109,115
+2012,UAB,alabama-birmingham,Conference USA,G5,3,9,-11.66,-3.07,110,82
+2012,Southern Mississippi,southern-mississippi,Conference USA,G5,0,12,-18.04,-1.29,122,69
+2012,Tulsa,tulsa,Conference USA,G5,11,3,6.24,-2.34,41,76
+2012,SMU,southern-methodist,Conference USA,G5,7,6,1.64,-1.59,63,71
+2012,Rice,rice,Conference USA,G5,7,6,-3.52,-4.83,80,110
+2012,Houston,houston,Conference USA,G5,5,7,-5.54,-3.54,87,92
+2012,UTEP,texas-el-paso,Conference USA,G5,3,9,-9.29,-1.46,103,70
+2012,Tulane,tulane,Conference USA,G5,2,10,-14.23,-1.81,115,72
+2012,Notre Dame,notre-dame,FBS Independents,P5,12,1,16.98,6.14,6,8
+2012,BYU,brigham-young,FBS Independents,P5,8,5,8.77,-0.61,29,61
+2012,Navy,navy,FBS Independents,P5,8,5,-1.76,-2.61,74,79
+2012,Army,army,FBS Independents,P5,2,10,-14.23,-4.23,116,101
+2012,Kent State,kent-state,Mid-American,G5,11,3,2.75,-6.39,58,119
+2012,Bowling Green,bowling-green-state,Mid-American,G5,8,5,-0.27,-6.11,67,117
+2012,Ohio,ohio,Mid-American,G5,9,4,-2.75,-8.06,77,123
+2012,Buffalo,buffalo,Mid-American,G5,4,8,-8.78,-3.36,101,85
+2012,Miami (OH),miami-oh,Mid-American,G5,4,8,-11.7,-3.45,111,87
+2012,Massachusetts,massachusetts,Mid-American,G5,1,11,-20.97,-3.55,124,93
+2012,Akron,akron,Mid-American,G5,1,11,-15.31,-4.31,119,104
+2012,Northern Illinois,northern-illinois,Mid-American,G5,12,2,4.64,-7.5,50,122
+2012,Ball State,ball-state,Mid-American,G5,9,4,-1.6,-3.52,73,91
+2012,Toledo,toledo,Mid-American,G5,9,4,-0.18,-4.18,66,98
+2012,Central Michigan,central-michigan,Mid-American,G5,7,6,-7.91,-6.76,98,120
+2012,Western Michigan,western-michigan,Mid-American,G5,4,8,-9.54,-7.04,104,121
+2012,Eastern Michigan,eastern-michigan,Mid-American,G5,2,10,-16.61,-3.45,120,88
+2012,Boise State,boise-state,Mountain West,G5_top,11,2,7.85,-5.08,34,114
+2012,Fresno State,fresno-state,Mountain West,G5_top,9,4,6.33,-3.51,38,90
+2012,San Diego State,san-diego-state,Mountain West,G5_top,9,4,2.69,-4.46,59,106
+2012,Air Force,air-force,Mountain West,G5_top,6,7,-7.35,-6.35,95,118
+2012,Nevada,nevada,Mountain West,G5_top,7,6,-3.6,-4.76,81,109
+2012,Colorado State,colorado-state,Mountain West,G5_top,4,8,-12.54,-4.21,112,100
+2012,Wyoming,wyoming,Mountain West,G5_top,4,8,-10.78,-4.53,108,107
+2012,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,2,11,-14.57,-4.42,117,105
+2012,New Mexico,new-mexico,Mountain West,G5_top,4,9,-9.91,-5.76,106,116
+2012,Hawaii,hawaii,Mountain West,G5_top,3,9,-13.75,-3.66,114,95
+2012,Stanford,stanford,Pac-12,P5,12,2,15.58,6.58,9,4
+2012,Oregon,oregon,Pac-12,P5,12,1,23.43,4.05,2,32
+2012,Oregon State,oregon-state,Pac-12,P5,9,4,12.14,6.06,16,10
+2012,Washington,washington,Pac-12,P5,7,6,4.9,4.75,49,25
+2012,California,california,Pac-12,P5,3,9,-0.65,6.1,69,9
+2012,Washington State,washington-state,Pac-12,P5,3,9,-6.89,3.36,94,35
+2012,UCLA,ucla,Pac-12,P5,9,5,8.75,4.75,30,26
+2012,Arizona State,arizona-state,Pac-12,P5,8,5,9.0,1.77,27,46
+2012,USC,southern-california,Pac-12,P5,7,6,10.53,5.76,20,12
+2012,Arizona,arizona,Pac-12,P5,8,5,9.38,5.15,26,19
+2012,Utah,utah,Pac-12,P5,5,7,2.51,3.09,60,36
+2012,Colorado,colorado,Pac-12,P5,1,11,-12.66,4.51,113,27
+2012,Georgia,georgia,SEC,P5,12,2,17.93,4.21,4,31
+2012,Florida,florida,SEC,P5,11,2,17.35,6.82,5,3
+2012,South Carolina,south-carolina,SEC,P5,11,2,15.97,4.51,8,28
+2012,Vanderbilt,vanderbilt,SEC,P5,9,4,9.88,2.26,22,43
+2012,Missouri,missouri,SEC,P5,5,7,5.54,9.12,45,1
+2012,Tennessee,tennessee,SEC,P5,5,7,4.07,4.82,53,24
+2012,Kentucky,kentucky,SEC,P5,2,10,-5.29,5.79,84,11
+2012,Alabama,alabama,SEC,P5,13,1,24.51,5.51,1,14
+2012,Texas A&M,texas-am,SEC,P5,11,2,20.05,5.13,3,20
+2012,LSU,louisiana-state,SEC,P5,10,3,14.76,5.45,10,16
+2012,Mississippi State,mississippi-state,SEC,P5,8,5,6.15,2.99,43,38
+2012,Ole Miss,mississippi,SEC,P5,7,6,8.43,5.2,32,18
+2012,Arkansas,arkansas,SEC,P5,4,8,2.4,6.4,61,5
+2012,Auburn,auburn,SEC,P5,3,9,-0.92,6.91,70,2
+2012,Arkansas State,arkansas-state,Sun Belt,G5_top,10,3,4.94,-2.22,48,74
+2012,Western Kentucky,western-kentucky,Sun Belt,G5_top,7,6,-1.5,-3.73,71,96
+2012,Louisiana,louisiana-lafayette,Sun Belt,G5_top,9,4,3.45,-3.63,56,94
+2012,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,8,4,-2.45,-4.95,75,113
+2012,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,8,5,-0.03,-3.27,65,84
+2012,Troy,troy,Sun Belt,G5_top,5,7,-3.45,-3.45,79,89
+2012,North Texas,north-texas,Sun Belt,G5_top,4,8,-8.41,-1.24,100,68
+2012,Florida Atlantic,florida-atlantic,Sun Belt,G5_top,3,9,-9.83,-1.08,105,66
+2012,Florida International,florida-international,Sun Belt,G5_top,3,9,-9.1,-2.27,102,75
+2012,South Alabama,south-alabama,Sun Belt,G5_top,2,11,-15.26,-4.26,118,102
+2012,Utah State,utah-state,WAC,G5,11,2,10.71,-4.68,19,108
+2012,San Jose State,san-jose-state,WAC,G5,11,2,7.9,-3.02,33,81
+2012,Louisiana Tech,louisiana-tech,WAC,G5,9,3,6.33,-4.26,39,103
+2012,UTSA,texas-san-antonio,WAC,G5,8,4,-7.49,-8.83,96,124
+2012,Texas State,texas-state,WAC,G5,4,8,-8.03,-4.19,99,99
+2012,Idaho,idaho,WAC,G5,1,11,-17.38,-0.79,121,65
+2012,New Mexico State,new-mexico-state,WAC,G5,1,11,-19.0,-3.25,123,83

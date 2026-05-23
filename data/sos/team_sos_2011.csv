@@ -1,0 +1,121 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2011,Clemson,clemson,ACC,P5,10,4,6.54,1.18,31,42
+2011,Florida State,florida-state,ACC,P5,9,4,11.22,0.38,18,57
+2011,Wake Forest,wake-forest,ACC,P5,6,7,-0.66,1.11,69,46
+2011,North Carolina State,north-carolina-state,ACC,P5,8,5,2.57,-1.97,52,80
+2011,Boston College,boston-college,ACC,P5,4,8,-4.61,0.89,84,50
+2011,Maryland,maryland,ACC,P5,2,10,-8.22,2.62,102,35
+2011,Virginia Tech,virginia-tech,ACC,P5,11,3,8.21,0.21,27,60
+2011,Georgia Tech,georgia-tech,ACC,P5,8,5,3.4,-1.29,48,70
+2011,Virginia,virginia,ACC,P5,8,5,0.14,-0.79,65,69
+2011,North Carolina,north-carolina,ACC,P5,7,6,3.63,1.17,47,43
+2011,Miami (FL),miami-fl,ACC,P5,6,6,5.17,0.67,38,54
+2011,Duke,duke,ACC,P5,3,9,-7.34,0.24,98,59
+2011,Oklahoma State,oklahoma-state,Big 12,P5,12,1,24.14,7.67,3,3
+2011,Kansas State,kansas-state,Big 12,P5,10,3,11.45,6.84,17,7
+2011,Baylor,baylor,Big 12,P5,10,3,13.83,5.91,12,10
+2011,Oklahoma,oklahoma,Big 12,P5,10,3,19.75,7.82,4,2
+2011,Missouri,missouri,Big 12,P5,8,5,11.08,6.16,19,9
+2011,Texas,texas,Big 12,P5,8,5,12.16,7.16,15,6
+2011,Texas A&M,texas-am,Big 12,P5,7,6,13.36,7.29,14,5
+2011,Iowa State,iowa-state,Big 12,P5,6,7,2.12,7.35,54,4
+2011,Texas Tech,texas-tech,Big 12,P5,5,7,1.88,5.55,56,12
+2011,Kansas,kansas,Big 12,P5,2,10,-4.75,8.42,85,1
+2011,Cincinnati,cincinnati,Big East,P5,10,3,7.34,-0.74,28,68
+2011,West Virginia,west-virginia,Big East,P5,10,3,8.65,0.96,26,49
+2011,Louisville,louisville,Big East,P5,7,6,2.38,0.07,53,62
+2011,Rutgers,rutgers,Big East,P5,9,4,6.42,-0.12,33,64
+2011,Pitt,pittsburgh,Big East,P5,6,7,1.09,1.17,61,44
+2011,Connecticut,connecticut,Big East,P5,5,7,-0.42,0.58,68,55
+2011,South Florida,south-florida,Big East,P5,5,7,3.21,0.71,49,52
+2011,Syracuse,syracuse,Big East,P5,5,7,-3.15,1.02,78,48
+2011,Wisconsin,wisconsin,Big Ten,P5,11,3,15.89,0.68,9,53
+2011,Penn State,penn-state,Big Ten,P5,9,4,6.47,3.39,32,24
+2011,Purdue,purdue,Big Ten,P5,7,6,-0.76,0.01,70,63
+2011,Ohio State,ohio-state,Big Ten,P5,6,7,4.66,2.97,42,32
+2011,Illinois,illinois,Big Ten,P5,7,6,2.63,1.17,51,45
+2011,Indiana,indiana,Big Ten,P5,1,11,-10.91,1.09,107,47
+2011,Michigan State,michigan-state,Big Ten,P5,11,3,10.05,1.48,22,41
+2011,Michigan,michigan,Big Ten,P5,11,2,16.27,2.96,8,33
+2011,Nebraska,nebraska,Big Ten,P5,9,4,8.76,3.07,25,31
+2011,Iowa,iowa,Big Ten,P5,7,6,4.38,1.77,44,40
+2011,Northwestern,northwestern,Big Ten,P5,6,7,1.66,0.43,58,56
+2011,Minnesota,minnesota,Big Ten,P5,3,9,-6.04,3.21,92,28
+2011,Southern Mississippi,southern-mississippi,Conference USA,G5,12,2,9.18,-4.6,24,103
+2011,Marshall,marshall,Conference USA,G5,7,6,-4.59,-0.43,83,66
+2011,East Carolina,east-carolina,Conference USA,G5,5,7,-5.04,-1.79,88,74
+2011,UCF,central-florida,Conference USA,G5,5,7,-1.8,-4.8,75,106
+2011,UAB,alabama-birmingham,Conference USA,G5,3,9,-15.03,-4.12,112,100
+2011,Memphis,memphis,Conference USA,G5,2,10,-18.17,-6.17,115,113
+2011,Houston,houston,Conference USA,G5,13,1,11.94,-4.63,16,104
+2011,Tulsa,tulsa,Conference USA,G5,8,5,5.2,0.89,37,51
+2011,SMU,southern-methodist,Conference USA,G5,8,5,0.78,-1.83,62,78
+2011,Rice,rice,Conference USA,G5,4,8,-8.15,0.35,101,58
+2011,UTEP,texas-el-paso,Conference USA,G5,5,7,-7.93,-3.85,100,96
+2011,Tulane,tulane,Conference USA,G5,2,11,-19.11,-6.18,117,114
+2011,BYU,brigham-young,FBS Independents,P5,10,3,4.8,-3.13,41,90
+2011,Notre Dame,notre-dame,FBS Independents,P5,8,5,11.06,4.44,20,15
+2011,Navy,navy,FBS Independents,P5,5,7,-1.39,-1.56,72,73
+2011,Army,army,FBS Independents,P5,3,9,-8.88,-1.8,104,76
+2011,Ohio,ohio,Mid-American,G5,10,4,1.56,-5.73,59,111
+2011,Temple,temple,Mid-American,G5,9,4,5.63,-5.68,35,110
+2011,Kent State,kent-state,Mid-American,G5,5,7,-6.03,-1.53,91,71
+2011,Bowling Green,bowling-green-state,Mid-American,G5,5,7,-4.75,-2.33,86,82
+2011,Miami (OH),miami-oh,Mid-American,G5,4,8,-4.9,-1.9,87,79
+2011,Buffalo,buffalo,Mid-American,G5,3,9,-10.89,-3.31,106,92
+2011,Akron,akron,Mid-American,G5,1,11,-19.11,-3.52,118,93
+2011,Northern Illinois,northern-illinois,Mid-American,G5,11,3,5.55,-3.52,36,94
+2011,Toledo,toledo,Mid-American,G5,9,4,6.84,-1.55,30,72
+2011,Western Michigan,western-michigan,Mid-American,G5,7,6,0.42,-2.97,64,88
+2011,Ball State,ball-state,Mid-American,G5,6,6,-4.38,-0.46,81,67
+2011,Eastern Michigan,eastern-michigan,Mid-American,G5,6,6,-6.55,-4.3,94,102
+2011,Central Michigan,central-michigan,Mid-American,G5,3,9,-11.28,-2.37,108,83
+2011,Texas Christian,texas-christian,Mountain West,G5_top,11,2,9.67,-3.17,23,91
+2011,Boise State,boise-state,Mountain West,G5_top,12,1,16.75,-1.79,7,75
+2011,Wyoming,wyoming,Mountain West,G5_top,8,5,-3.82,-3.98,79,98
+2011,San Diego State,san-diego-state,Mountain West,G5_top,8,5,-0.02,-4.1,66,99
+2011,Air Force,air-force,Mountain West,G5_top,7,6,-0.38,-4.23,67,101
+2011,Colorado State,colorado-state,Mountain West,G5_top,3,9,-12.69,-4.78,110,105
+2011,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,2,10,-17.72,-1.97,114,81
+2011,New Mexico,new-mexico,Mountain West,G5_top,1,11,-19.31,-1.81,119,77
+2011,Oregon,oregon,Pac-12,P5,12,2,18.8,3.23,5,27
+2011,Stanford,stanford,Pac-12,P5,11,2,17.78,3.09,6,30
+2011,Washington,washington,Pac-12,P5,7,6,1.8,2.8,57,34
+2011,California,california,Pac-12,P5,7,6,4.57,2.18,43,39
+2011,Oregon State,oregon-state,Pac-12,P5,3,9,-4.33,3.84,80,20
+2011,Washington State,washington-state,Pac-12,P5,4,8,-5.61,0.14,89,61
+2011,USC,southern-california,Pac-12,P5,10,2,14.16,3.49,10,23
+2011,UCLA,ucla,Pac-12,P5,6,8,-1.05,4.59,71,14
+2011,Utah,utah,Pac-12,P5,8,5,3.16,-0.3,50,65
+2011,Arizona State,arizona-state,Pac-12,P5,6,7,5.1,2.49,40,38
+2011,Arizona,arizona,Pac-12,P5,4,8,-1.46,4.21,73,17
+2011,Colorado,colorado,Pac-12,P5,3,10,-8.67,3.26,103,26
+2011,Georgia,georgia,SEC,P5,10,4,10.67,4.02,21,19
+2011,South Carolina,south-carolina,SEC,P5,11,2,13.56,3.1,13,29
+2011,Florida,florida,SEC,P5,7,6,6.0,3.61,34,22
+2011,Vanderbilt,vanderbilt,SEC,P5,6,7,7.09,3.39,29,25
+2011,Kentucky,kentucky,SEC,P5,5,7,-1.63,2.62,74,36
+2011,Tennessee,tennessee,SEC,P5,5,7,4.26,4.84,45,13
+2011,LSU,louisiana-state,SEC,P5,13,1,24.27,6.27,2,8
+2011,Alabama,alabama,SEC,P5,12,1,24.44,4.21,1,18
+2011,Arkansas,arkansas,SEC,P5,11,2,13.86,3.7,11,21
+2011,Auburn,auburn,SEC,P5,8,5,3.8,4.26,46,16
+2011,Mississippi State,mississippi-state,SEC,P5,7,6,5.13,2.52,39,37
+2011,Ole Miss,mississippi,SEC,P5,2,10,-6.71,5.79,95,11
+2011,Arkansas State,arkansas-state,Sun Belt,G5_top,10,3,1.18,-8.28,60,119
+2011,Western Kentucky,western-kentucky,Sun Belt,G5_top,7,5,-6.18,-6.43,93,115
+2011,Louisiana,louisiana-lafayette,Sun Belt,G5_top,9,4,-2.64,-6.57,77,116
+2011,Florida International,florida-international,Sun Belt,G5_top,8,5,-4.53,-8.68,82,120
+2011,North Texas,north-texas,Sun Belt,G5_top,5,7,-9.94,-3.86,105,97
+2011,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,4,8,-7.8,-5.96,99,112
+2011,Troy,troy,Sun Belt,G5_top,3,9,-15.54,-5.62,113,109
+2011,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,2,10,-18.86,-6.61,116,117
+2011,Florida Atlantic,florida-atlantic,Sun Belt,G5_top,1,11,-22.63,-4.96,120,107
+2011,Louisiana Tech,louisiana-tech,WAC,G5,8,5,2.04,-2.73,55,86
+2011,Nevada,nevada,WAC,G5,7,6,0.47,-2.76,63,87
+2011,Utah State,utah-state,WAC,G5,7,6,-2.22,-5.14,76,108
+2011,Hawaii,hawaii,WAC,G5,6,7,-6.9,-7.29,96,118
+2011,San Jose State,san-jose-state,WAC,G5,5,7,-5.97,-2.64,90,85
+2011,Fresno State,fresno-state,WAC,G5,4,9,-7.24,-2.47,97,84
+2011,New Mexico State,new-mexico-state,WAC,G5,4,9,-11.95,-3.79,109,95
+2011,Idaho,idaho,WAC,G5,2,10,-13.24,-2.99,111,89

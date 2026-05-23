@@ -1,0 +1,118 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2001,Maryland,maryland,ACC,P5,10,2,10.78,1.36,20,58
+2001,Florida State,florida-state,ACC,P5,8,4,12.79,6.45,11,8
+2001,North Carolina,north-carolina,ACC,P5,8,5,7.52,4.29,33,30
+2001,Georgia Tech,georgia-tech,ACC,P5,8,5,7.1,1.95,34,53
+2001,Clemson,clemson,ACC,P5,7,5,4.34,1.59,47,56
+2001,North Carolina State,north-carolina-state,ACC,P5,7,5,6.38,1.05,36,59
+2001,Wake Forest,wake-forest,ACC,P5,6,5,0.24,0.87,62,61
+2001,Virginia,virginia,ACC,P5,5,7,-1.91,2.76,74,45
+2001,Duke,duke,ACC,P5,0,11,-16.57,3.16,107,40
+2001,Colorado,colorado,Big 12,P5,10,3,13.44,6.44,10,9
+2001,Nebraska,nebraska,Big 12,P5,11,2,16.48,4.33,6,29
+2001,Iowa State,iowa-state,Big 12,P5,7,5,4.12,1.45,49,57
+2001,Kansas State,kansas-state,Big 12,P5,6,6,9.63,5.63,25,17
+2001,Missouri,missouri,Big 12,P5,4,7,-1.86,3.69,73,34
+2001,Kansas,kansas,Big 12,P5,3,8,-5.89,5.75,86,15
+2001,Texas,texas,Big 12,P5,11,2,18.67,2.21,4,50
+2001,Oklahoma,oklahoma,Big 12,P5,11,2,15.39,2.16,7,51
+2001,Texas A&M,texas-am,Big 12,P5,8,4,5.96,2.63,41,46
+2001,Texas Tech,texas-tech,Big 12,P5,7,5,8.56,2.81,27,44
+2001,Oklahoma State,oklahoma-state,Big 12,P5,4,7,-0.13,3.41,63,36
+2001,Baylor,baylor,Big 12,P5,3,8,-6.84,2.25,88,49
+2001,Miami (FL),miami-fl,Big East,P5,12,0,26.17,5.09,1,22
+2001,Syracuse,syracuse,Big East,P5,10,3,13.54,6.23,9,12
+2001,Boston College,boston-college,Big East,P5,8,4,10.27,3.19,21,39
+2001,Virginia Tech,virginia-tech,Big East,P5,8,4,12.16,2.16,16,52
+2001,Pitt,pittsburgh,Big East,P5,7,5,6.31,2.97,38,41
+2001,Temple,temple,Big East,P5,4,7,-4.63,2.46,84,48
+2001,West Virginia,west-virginia,Big East,P5,3,8,-0.82,4.45,66,28
+2001,Rutgers,rutgers,Big East,P5,2,9,-13.02,0.16,101,63
+2001,Illinois,illinois,Big Ten,P5,10,2,12.71,3.79,12,32
+2001,Michigan,michigan,Big Ten,P5,8,4,12.65,5.73,13,16
+2001,Ohio State,ohio-state,Big Ten,P5,7,5,8.56,3.73,28,33
+2001,Iowa,iowa,Big Ten,P5,7,5,9.96,3.21,22,38
+2001,Purdue,purdue,Big Ten,P5,6,6,2.95,4.95,52,24
+2001,Indiana,indiana,Big Ten,P5,5,6,4.15,5.51,48,18
+2001,Penn State,penn-state,Big Ten,P5,5,6,5.21,7.39,43,3
+2001,Michigan State,michigan-state,Big Ten,P5,7,5,6.26,2.93,39,42
+2001,Wisconsin,wisconsin,Big Ten,P5,5,7,2.91,5.33,53,20
+2001,Minnesota,minnesota,Big Ten,P5,4,7,-0.7,1.76,65,55
+2001,Northwestern,northwestern,Big Ten,P5,4,7,-1.01,3.26,68,37
+2001,Louisville,louisville,Conference USA,G5,11,2,8.49,-3.21,29,82
+2001,Cincinnati,cincinnati,Conference USA,G5,7,5,-2.24,-6.07,76,101
+2001,UAB,alabama-birmingham,Conference USA,G5,6,5,-2.15,-4.61,75,92
+2001,East Carolina,east-carolina,Conference USA,G5,6,6,2.59,-1.42,54,70
+2001,Southern Mississippi,southern-mississippi,Conference USA,G5,6,5,0.84,-2.71,61,80
+2001,Texas Christian,texas-christian,Conference USA,G5,6,6,-3.79,-4.04,80,89
+2001,Memphis,memphis,Conference USA,G5,5,6,-3.09,-2.09,78,76
+2001,Army,army,Conference USA,G5,3,8,-15.4,-5.94,105,100
+2001,Tulane,tulane,Conference USA,G5,3,9,-9.64,-1.98,96,74
+2001,Houston,houston,Conference USA,G5,0,11,-17.81,0.91,109,60
+2001,South Florida,south-florida,FBS Independents,P5,8,3,1.56,-9.72,58,115
+2001,Troy,troy,FBS Independents,P5,7,4,-4.32,-5.14,82,97
+2001,UCF,central-florida,FBS Independents,P5,6,5,1.11,-4.62,60,93
+2001,Notre Dame,notre-dame,FBS Independents,P5,5,6,6.0,6.55,40,6
+2001,Utah State,utah-state,FBS Independents,P5,4,7,-8.39,-1.21,91,68
+2001,Connecticut,connecticut,FBS Independents,P5,2,9,-19.66,-7.75,113,110
+2001,Navy,navy,FBS Independents,P5,0,10,-15.68,-2.68,106,79
+2001,Marshall,marshall,Mid-American,G5,11,2,6.32,-5.45,37,99
+2001,Miami (OH),miami-oh,Mid-American,G5,7,5,-1.16,-1.91,70,73
+2001,Bowling Green,bowling-green-state,Mid-American,G5,8,3,4.58,-4.42,45,91
+2001,Kent State,kent-state,Mid-American,G5,6,5,-5.42,-4.88,85,95
+2001,Akron,akron,Mid-American,G5,4,7,-9.08,-3.62,93,87
+2001,Buffalo,buffalo,Mid-American,G5,3,8,-17.53,-9.35,108,112
+2001,Ohio,ohio,Mid-American,G5,1,10,-13.22,-2.22,102,77
+2001,Toledo,toledo,Mid-American,G5,10,2,3.21,-6.62,50,107
+2001,Northern Illinois,northern-illinois,Mid-American,G5,6,5,-3.67,-4.67,79,94
+2001,Ball State,ball-state,Mid-American,G5,5,6,-9.24,-7.61,95,108
+2001,Western Michigan,western-michigan,Mid-American,G5,5,6,-4.19,-4.29,81,90
+2001,Central Michigan,central-michigan,Mid-American,G5,3,8,-15.0,-6.55,104,106
+2001,Eastern Michigan,eastern-michigan,Mid-American,G5,2,9,-21.81,-9.45,116,114
+2001,BYU,brigham-young,Mountain West,G5_top,12,2,7.96,-3.11,31,81
+2001,Colorado State,colorado-state,Mountain West,G5_top,7,5,1.91,-0.25,55,66
+2001,Utah,utah,Mountain West,G5_top,8,4,7.86,0.11,32,64
+2001,New Mexico,new-mexico,Mountain West,G5_top,6,5,-0.6,-3.6,64,86
+2001,Air Force,air-force,Mountain West,G5_top,6,6,-6.3,-3.22,87,83
+2001,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,4,7,-1.23,-1.5,71,71
+2001,San Diego State,san-diego-state,Mountain West,G5_top,3,8,-9.77,-1.4,97,69
+2001,Wyoming,wyoming,Mountain West,G5_top,2,9,-13.75,-2.57,103,78
+2001,Oregon,oregon,Pac-10,P5,11,1,16.92,4.67,5,26
+2001,Washington State,washington-state,Pac-10,P5,10,2,12.09,0.59,18,62
+2001,Stanford,stanford,Pac-10,P5,9,3,12.13,5.13,17,21
+2001,Washington,washington,Pac-10,P5,8,4,7.07,6.4,35,11
+2001,USC,southern-california,Pac-10,P5,6,6,8.92,4.67,26,27
+2001,UCLA,ucla,Pac-10,P5,7,4,12.32,5.95,15,14
+2001,Oregon State,oregon-state,Pac-10,P5,5,6,3.16,2.62,51,47
+2001,Arizona,arizona,Pac-10,P5,5,6,-1.33,1.94,72,54
+2001,Arizona State,arizona-state,Pac-10,P5,4,7,1.25,2.89,59,43
+2001,California,california,Pac-10,P5,1,10,-8.37,7.17,90,4
+2001,Tennessee,tennessee,SEC,P5,11,2,19.22,8.83,3,1
+2001,Florida,florida,SEC,P5,10,2,23.38,5.38,2,19
+2001,South Carolina,south-carolina,SEC,P5,9,3,12.36,5.03,14,23
+2001,Georgia,georgia,SEC,P5,8,4,11.51,3.6,19,35
+2001,Kentucky,kentucky,SEC,P5,2,9,-1.15,7.67,69,2
+2001,Vanderbilt,vanderbilt,SEC,P5,2,9,-7.1,4.27,89,31
+2001,LSU,louisiana-state,SEC,P5,10,3,14.33,6.41,8,10
+2001,Auburn,auburn,SEC,P5,7,5,4.95,6.53,44,7
+2001,Ole Miss,mississippi,SEC,P5,7,4,5.64,-0.18,42,65
+2001,Alabama,alabama,SEC,P5,7,5,9.66,4.91,24,25
+2001,Arkansas,arkansas,SEC,P5,7,5,8.4,6.23,30,13
+2001,Mississippi State,mississippi-state,SEC,P5,3,8,1.65,7.1,56,5
+2001,Middle Tennessee State,middle-tennessee-state,Sun Belt,G5_top,8,3,-2.32,-10.32,77,117
+2001,North Texas,north-texas,Sun Belt,G5_top,5,7,-9.11,-6.36,94,104
+2001,New Mexico State,new-mexico-state,Sun Belt,G5_top,5,7,-10.18,-6.18,99,102
+2001,Louisiana,louisiana-lafayette,Sun Belt,G5_top,3,8,-19.08,-9.36,112,113
+2001,Arkansas State,arkansas-state,Sun Belt,G5_top,2,9,-22.08,-10.17,117,116
+2001,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,2,9,-21.13,-7.77,115,111
+2001,Idaho,idaho,Sun Belt,G5_top,1,10,-20.84,-7.66,114,109
+2001,Louisiana Tech,louisiana-tech,WAC,G5,7,5,-0.95,-3.36,67,84
+2001,Fresno State,fresno-state,WAC,G5,11,3,9.9,-2.02,23,75
+2001,Boise State,boise-state,WAC,G5,8,4,1.61,-4.97,57,96
+2001,Hawaii,hawaii,WAC,G5,9,3,4.47,-6.53,46,105
+2001,Rice,rice,WAC,G5,8,4,-4.35,-6.18,83,103
+2001,SMU,southern-methodist,WAC,G5,4,7,-8.92,-3.47,92,85
+2001,Nevada,nevada,WAC,G5,3,8,-9.92,-1.65,98,72
+2001,San Jose State,san-jose-state,WAC,G5,3,9,-10.66,-0.41,100,67
+2001,UTEP,texas-el-paso,WAC,G5,2,9,-17.85,-5.31,110,98
+2001,Tulsa,tulsa,WAC,G5,1,10,-18.94,-3.75,111,88

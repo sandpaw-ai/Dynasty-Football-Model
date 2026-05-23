@@ -1,0 +1,129 @@
+year,school,school_canonical_slug,conference,conference_tier,wins,losses,srs,sos,srs_rank,sos_rank
+2016,Clemson,clemson,ACC,P5,14,1,20.08,6.55,2,4
+2016,Louisville,louisville,ACC,P5,9,4,11.87,2.1,17,50
+2016,Florida State,florida-state,ACC,P5,10,3,15.01,6.16,10,5
+2016,North Carolina State,north-carolina-state,ACC,P5,7,6,7.49,3.49,36,32
+2016,Wake Forest,wake-forest,ACC,P5,7,6,0.73,1.8,68,54
+2016,Boston College,boston-college,ACC,P5,7,6,0.58,0.5,70,64
+2016,Syracuse,syracuse,ACC,P5,4,8,-4.51,4.57,89,21
+2016,Virginia Tech,virginia-tech,ACC,P5,10,4,11.0,2.43,19,46
+2016,Miami (FL),miami-fl,ACC,P5,9,4,13.36,2.82,12,39
+2016,North Carolina,north-carolina,ACC,P5,8,5,8.25,1.79,30,55
+2016,Pitt,pittsburgh,ACC,P5,8,5,8.12,3.51,31,31
+2016,Georgia Tech,georgia-tech,ACC,P5,9,4,7.13,2.9,37,38
+2016,Duke,duke,ACC,P5,4,8,-1.36,3.39,77,33
+2016,Virginia,virginia,ACC,P5,2,10,-8.25,1.84,103,53
+2016,Temple,temple,American Athletic,G5_top,10,4,8.97,-3.32,24,91
+2016,South Florida,south-florida,American Athletic,G5_top,11,2,7.83,-2.7,34,86
+2016,UCF,central-florida,American Athletic,G5_top,6,7,-0.01,-1.86,72,77
+2016,Cincinnati,cincinnati,American Athletic,G5_top,4,8,-9.17,-1.58,107,76
+2016,Connecticut,connecticut,American Athletic,G5_top,3,9,-13.3,-2.55,121,83
+2016,East Carolina,east-carolina,American Athletic,G5_top,3,9,-9.69,-0.11,109,67
+2016,Navy,navy,American Athletic,G5_top,9,5,3.59,-0.84,51,69
+2016,Tulsa,tulsa,American Athletic,G5_top,10,3,6.91,-3.71,38,95
+2016,Houston,houston,American Athletic,G5_top,9,4,5.44,-1.95,43,78
+2016,Memphis,memphis,American Athletic,G5_top,8,5,2.96,-1.11,55,72
+2016,SMU,southern-methodist,American Athletic,G5_top,5,7,-4.84,-0.34,91,68
+2016,Tulane,tulane,American Athletic,G5_top,4,8,-6.54,-2.21,99,79
+2016,Oklahoma,oklahoma,Big 12,P5,11,2,14.98,3.6,11,30
+2016,Oklahoma State,oklahoma-state,Big 12,P5,10,3,11.16,1.7,18,56
+2016,West Virginia,west-virginia,Big 12,P5,10,3,9.57,2.03,22,51
+2016,Kansas State,kansas-state,Big 12,P5,9,4,8.09,1.33,32,62
+2016,Texas Christian,texas-christian,Big 12,P5,6,7,2.63,1.47,56,61
+2016,Baylor,baylor,Big 12,P5,7,6,3.01,0.39,54,65
+2016,Texas,texas,Big 12,P5,5,7,1.75,2.42,61,47
+2016,Texas Tech,texas-tech,Big 12,P5,5,7,1.34,1.5,66,60
+2016,Iowa State,iowa-state,Big 12,P5,3,9,-4.43,1.65,88,57
+2016,Kansas,kansas,Big 12,P5,2,10,-10.65,2.52,115,45
+2016,Penn State,penn-state,Big Ten,P5,11,3,15.72,5.44,8,11
+2016,Ohio State,ohio-state,Big Ten,P5,11,2,18.82,6.59,4,3
+2016,Michigan,michigan,Big Ten,P5,10,3,17.56,4.79,5,19
+2016,Indiana,indiana,Big Ten,P5,6,7,1.38,2.69,64,42
+2016,Maryland,maryland,Big Ten,P5,6,7,0.07,1.6,71,59
+2016,Michigan State,michigan-state,Big Ten,P5,3,9,-1.79,4.29,78,24
+2016,Rutgers,rutgers,Big Ten,P5,2,10,-6.97,4.95,101,18
+2016,Wisconsin,wisconsin,Big Ten,P5,11,3,15.3,5.3,9,12
+2016,Nebraska,nebraska,Big Ten,P5,9,4,7.55,2.94,35,37
+2016,Iowa,iowa,Big Ten,P5,8,5,6.81,2.11,39,49
+2016,Minnesota,minnesota,Big Ten,P5,9,4,8.65,1.65,28,58
+2016,Northwestern,northwestern,Big Ten,P5,7,6,5.46,3.07,42,35
+2016,Illinois,illinois,Big Ten,P5,3,9,-7.75,3.75,102,29
+2016,Purdue,purdue,Big Ten,P5,3,9,-8.96,1.29,104,63
+2016,Western Kentucky,western-kentucky,Conference USA,G5,11,3,8.68,-4.03,27,100
+2016,Old Dominion,old-dominion,Conference USA,G5,10,3,1.11,-6.51,67,125
+2016,Middle Tennessee State,middle-tennessee-state,Conference USA,G5,8,5,-5.53,-6.99,92,127
+2016,Florida International,florida-international,Conference USA,G5,4,8,-12.82,-4.74,119,109
+2016,Florida Atlantic,florida-atlantic,Conference USA,G5,3,9,-14.6,-5.68,126,120
+2016,Marshall,marshall,Conference USA,G5,3,9,-13.59,-4.59,123,106
+2016,Charlotte,charlotte,Conference USA,G5,4,8,-12.51,-5.76,118,121
+2016,Louisiana Tech,louisiana-tech,Conference USA,G5,9,5,3.39,-4.82,52,110
+2016,UTSA,texas-san-antonio,Conference USA,G5,6,7,-3.92,-5.07,84,113
+2016,Southern Mississippi,southern-mississippi,Conference USA,G5,7,6,-3.73,-5.04,83,112
+2016,North Texas,north-texas,Conference USA,G5,5,8,-10.33,-4.56,113,105
+2016,UTEP,texas-el-paso,Conference USA,G5,4,8,-13.33,-7.25,122,128
+2016,Rice,rice,Conference USA,G5,3,9,-13.67,-4.34,124,103
+2016,Massachusetts,massachusetts,FBS Independents,P5,2,10,-11.94,-1.44,116,75
+2016,BYU,brigham-young,FBS Independents,P5,9,4,6.5,-1.19,40,74
+2016,Army,army,FBS Independents,P5,8,5,-2.41,-6.41,80,124
+2016,Notre Dame,notre-dame,FBS Independents,P5,4,8,4.27,3.94,47,26
+2016,Ohio,ohio,Mid-American,G5,8,6,-1.99,-5.56,79,117
+2016,Miami (OH),miami-oh,Mid-American,G5,6,7,-6.79,-5.87,100,123
+2016,Akron,akron,Mid-American,G5,5,7,-6.52,-3.93,98,99
+2016,Bowling Green,bowling-green-state,Mid-American,G5,4,8,-10.58,-4.08,114,102
+2016,Kent State,kent-state,Mid-American,G5,3,9,-9.12,-3.2,106,89
+2016,Buffalo,buffalo,Mid-American,G5,2,10,-18.24,-5.57,127,118
+2016,Western Michigan,western-michigan,Mid-American,G5,13,1,12.03,-4.61,15,107
+2016,Toledo,toledo,Mid-American,G5,9,4,4.94,-3.75,44,96
+2016,Northern Illinois,northern-illinois,Mid-American,G5,5,7,-4.39,-3.64,86,94
+2016,Eastern Michigan,eastern-michigan,Mid-American,G5,7,6,-4.3,-4.07,85,101
+2016,Central Michigan,central-michigan,Mid-American,G5,6,7,-5.6,-2.91,93,88
+2016,Ball State,ball-state,Mid-American,G5,4,8,-9.11,-5.86,105,122
+2016,Boise State,boise-state,Mountain West,G5_top,10,3,8.01,-0.91,33,70
+2016,New Mexico,new-mexico,Mountain West,G5_top,9,4,-1.21,-5.44,76,116
+2016,Wyoming,wyoming,Mountain West,G5_top,8,6,1.37,-0.99,65,71
+2016,Air Force,air-force,Mountain West,G5_top,10,3,4.09,-4.53,49,104
+2016,Colorado State,colorado-state,Mountain West,G5_top,7,6,2.52,-1.17,58,73
+2016,Utah State,utah-state,Mountain West,G5_top,3,9,-5.99,0.1,95,66
+2016,San Diego State,san-diego-state,Mountain West,G5_top,11,3,5.97,-5.17,41,114
+2016,Hawaii,hawaii,Mountain West,G5_top,7,7,-6.44,-3.44,97,93
+2016,Nevada,nevada,Mountain West,G5_top,5,7,-9.7,-6.87,110,126
+2016,Nevada-Las Vegas,nevada-las-vegas,Mountain West,G5_top,4,8,-10.05,-3.8,112,97
+2016,San Jose State,san-jose-state,Mountain West,G5_top,4,8,-10.03,-2.61,111,85
+2016,Fresno State,fresno-state,Mountain West,G5_top,1,11,-14.26,-2.42,125,82
+2016,Washington,washington,Pac-12,P5,12,2,19.98,3.98,3,25
+2016,Washington State,washington-state,Pac-12,P5,8,5,9.03,3.18,23,34
+2016,Stanford,stanford,Pac-12,P5,10,3,12.54,5.23,13,13
+2016,California,california,Pac-12,P5,5,7,2.42,5.92,59,6
+2016,Oregon State,oregon-state,Pac-12,P5,4,8,1.53,5.11,63,17
+2016,Oregon,oregon,Pac-12,P5,4,8,0.7,5.12,69,16
+2016,Colorado,colorado,Pac-12,P5,10,4,12.18,5.54,14,9
+2016,USC,southern-california,Pac-12,P5,10,3,17.27,7.04,6,2
+2016,Utah,utah,Pac-12,P5,9,4,8.65,2.19,29,48
+2016,Arizona State,arizona-state,Pac-12,P5,5,7,-2.6,3.9,82,27
+2016,UCLA,ucla,Pac-12,P5,4,8,2.63,5.13,57,15
+2016,Arizona,arizona,Pac-12,P5,3,9,-4.63,5.2,90,14
+2016,Florida,florida,SEC,P5,9,4,10.98,4.75,20,20
+2016,Tennessee,tennessee,SEC,P5,9,4,10.59,4.44,21,22
+2016,Georgia,georgia,SEC,P5,8,5,3.64,2.57,50,44
+2016,Kentucky,kentucky,SEC,P5,7,6,2.3,2.76,60,40
+2016,South Carolina,south-carolina,SEC,P5,6,7,-0.91,2.01,74,52
+2016,Vanderbilt,vanderbilt,SEC,P5,6,7,3.21,3.06,53,36
+2016,Missouri,missouri,SEC,P5,4,8,-2.5,2.58,81,43
+2016,Alabama,alabama,SEC,P5,14,1,25.62,7.29,1,1
+2016,LSU,louisiana-state,SEC,P5,8,4,15.93,5.85,7,7
+2016,Auburn,auburn,SEC,P5,8,5,11.97,5.51,16,10
+2016,Texas A&M,texas-am,SEC,P5,8,5,8.77,3.77,26,28
+2016,Arkansas,arkansas,SEC,P5,7,6,4.35,4.35,46,23
+2016,Mississippi State,mississippi-state,SEC,P5,6,7,1.68,2.76,62,41
+2016,Ole Miss,mississippi,SEC,P5,5,7,4.74,5.83,45,8
+2016,Appalachian State,appalachian-state,Sun Belt,G5_top,10,3,8.83,-2.87,25,87
+2016,Georgia Southern,georgia-southern,Sun Belt,G5_top,5,7,-4.4,-2.4,87,81
+2016,Arkansas State,arkansas-state,Sun Belt,G5_top,8,5,-0.56,-5.64,73,119
+2016,Troy,troy,Sun Belt,G5_top,10,3,4.1,-4.67,48,108
+2016,Idaho,idaho,Sun Belt,G5_top,9,4,-1.19,-3.81,75,98
+2016,Louisiana,louisiana-lafayette,Sun Belt,G5_top,6,7,-6.18,-4.95,96,111
+2016,Louisiana-Monroe,louisiana-monroe,Sun Belt,G5_top,4,8,-11.97,-2.55,117,84
+2016,South Alabama,south-alabama,Sun Belt,G5_top,6,7,-5.8,-5.26,94,115
+2016,Georgia State,georgia-state,Sun Belt,G5_top,3,9,-9.37,-3.2,108,90
+2016,New Mexico State,new-mexico-state,Sun Belt,G5_top,3,9,-12.88,-2.29,120,80
+2016,Texas State,texas-state,Sun Belt,G5_top,2,10,-18.86,-3.36,128,92

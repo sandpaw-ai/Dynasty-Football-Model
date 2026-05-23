@@ -15,6 +15,83 @@ Format for each entry:
 
 ---
 
+## v2.3.5 — age-aware similarity + bust inclusion in rookie comp pool
+
+**Date:** 2026-05-23
+
+Phil 2026-05-23 bug report: *Johnny Wilson (WR, 2024 rookie, age 24,
+~0.6 fp/G) was being comped to Steve Smith Sr. (rookie age 22) and
+Santana Moss (rookie age 22). Both broke out later — neither is a
+plausible Wilson outcome. The reported comps were systematically biased
+toward late-bloomer survivors. Intuition: the model wasn't considering
+age properly, and the comp pool only contained survivors.*
+
+Ada's diagnosis confirmed two compounding bugs and applied the
+hotfix on the same branch.
+
+**Bug A — age was effectively absent from the distance calc.**
+
+* **Cumulative engine (`fantasy_arc_similarity.py`)**: the 10-dim
+  vector had NO age dimension in `_weighted_distance`. `current_age`
+  existed as a `FantasyArcVector` field but was never iterated.
+  Age-window snapshot widening (±1) was the only age handling and it
+  only widens, never penalizes. v2.3.5 extends the vector to 11-dim
+  with `v[10] = current_age * AGE_SCALE` (AGE_SCALE=0.5,
+  FEATURE_WEIGHTS[10]=5.0). A 3-year age gap now contributes
+  ~11.25 to squared distance — one peak_3yr-unit of separation —
+  enough to push Smith Sr. and Moss out of Wilson's top-10 without
+  flattening same-age comps.
+
+* **Rookie engine (`rookie_nfl_fp_arc.py`)**: `FEATURE_WEIGHTS[9]`
+  (age_at_rookie_year) was 0.2 with `v[0]` (fp/G) at 8.0. A 2-year
+  age gap contributed 0.8 to squared distance while a 0.3-fp/G gap
+  contributed 0.72 — age was the same weight as a tiny fp/G match.
+  Bumped to 2.5; a 2-year age gap now contributes 10. Age dominates a
+  small fp/G match instead of being washed out by it.
+
+**Bug B — rookie comp pool excluded year-1-only busts.**
+
+`build_rookie_corpus()` defaulted `require_post_rookie_season=True`, so
+players who washed out after year 1 (the actual bust signal) were
+excluded from the comp pool. The v2.3.3 wash-out penalty was supposed
+to fire on bust-heavy comp pools, but it had no busts to fire on —
+intent and implementation contradicted each other. For a low-production
+rookie like Wilson, the only same-position rookies with similar fp/G
+that also played a year 2 are *late bloomers who got a second chance*.
+
+Fix:
+
+* `require_post_rookie_season` default flipped to `False`.
+* New `bust_aware=True` flag makes the bust-inclusion contract
+  explicit; busts contribute zero year-2+ fp to the projection
+  (natural behaviour of `project_year_2_plus`).
+* `RookieProjectionResult` gains `bust_rate_in_comps` field — fraction
+  of top-K comps that washed out after year 1. Surfaced in the report
+  row as a confidence indicator next to the v2.3.3 wash-out penalty.
+
+**What didn't change**: the v2.3.3 wash-out penalty itself, v2.2
+survival confidence shrinkage, era-pace adjustment, and the format
+overlay. The point is that giving the wash-out penalty a bust-aware
+comp pool lets it fire correctly on the bust-heavy targets it was
+designed for.
+
+**Validation**: snapshot test in `tests/snapshots/v2.3.5_comp_shifts.json`
+asserts Steve Smith Sr. and Santana Moss are NOT in Johnny Wilson's
+top-10 comps post-fix. See `docs/V2.3.5-VALIDATION.md` for the
+before/after deltas across the test targets (Wilson, Adonai Mitchell,
+Bo Nix, Brock Purdy, CJ Stroud, Jefferson, Allen).
+
+**Files changed**: `src/dynasty/engine/fantasy_arc_similarity.py`,
+`src/dynasty/engine/rookie_nfl_fp_arc.py`,
+`src/dynasty/engine/similarity_v1.py`,
+`tests/test_fantasy_arc_similarity.py`,
+`tests/test_rookie_nfl_fp_arc.py`,
+`tests/snapshots/v2.3.5_comp_shifts.json`,
+`docs/V2.3.5-AGE-COMP-FIX.md`, `docs/V2.3.5-VALIDATION.md`,
+`docs/V2-METHODOLOGY.md`, `docs/CHANGELOG-model.md`, `pyproject.toml`.
+
+---
+
 ## v2.3.4 — Superflex-only consensus tab, working player links, daily refresh
 
 **Date:** 2026-05-22

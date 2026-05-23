@@ -123,6 +123,19 @@ class CareerLengthEraTable:
 # slightly damped lifts (acknowledging older eras had harsher injury risk
 # for mobile QBs — the era-pace structure handles raw production, this lift
 # only corrects career LENGTH).
+#
+# v2.4 audit (2026-05-23): with pre-1999 backfill, the era 1 QB bucket grew
+# from ~52 careers → ~160 careers (pocket: 40→137, mobile: 12→22). Era 1
+# dual-threat is STILL thin (Randall Cunningham is the lone qualifying
+# dual-threat in the 1980s-90s by our >=30 rypg threshold) so the
+# dual-threat era 1 cell continues to fall back to the documented value.
+# The empirical mobile / pocket era 1 median ratio (~7/5 = 1.4 → lift ~0.71,
+# clamped to MIN_LIFT=1.00) confirms the existing direction — pre-1999
+# mobile QBs DID NOT play longer than pocket QBs on average. The lift
+# table values are unchanged in v2.4 because the empirical computation
+# falls below the floor; the additional data REINFORCES the conservative
+# fallback rather than overriding it. See ``docs/V2.4-PENALTY-RETUNE.md``
+# for the audit detail.
 # Era 4 dual-threat and mobile lifts sit at the conservative ceiling we are
 # willing to assert (MAX_LIFT=1.50). The empirical pocket/dual ratio in eras
 # 1-3 (Vick, Cam, RGIII vs Brady/Brees/Manning) is 1.4-1.5 already, and the

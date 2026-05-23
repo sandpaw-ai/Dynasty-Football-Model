@@ -61,6 +61,7 @@ data/diagnostics/
 # normalised CSV at data/nflverse/player_stats_season_pre1999.csv.gz;
 # the cache is regenerable by re-running scripts/build_pre1999_corpus.py.
 data/pfr_cache/
+data/sr_cache/
 
 # v3.0 sports-reference HTML cache. Cache only; the parsed/normalized
 # data lives at data/sos/*.csv(.gz) and is regenerable by re-running

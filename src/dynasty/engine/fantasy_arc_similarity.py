@@ -19,23 +19,27 @@ for player rankings. The methodology change vs v1.x:
           similar — regardless of how they earn those points (passing
           vs rushing).
 
-The vector is 10-dim, all components in fantasy-point units (era-pace
+The vector is 11-dim, all components in fantasy-point units (era-pace
 pre-adjusted at corpus build → all values are "modern fantasy-points
 equivalent"):
 
-    v[0] = fp_per_game at the current age (recent-season weight 1.0)
-    v[1] = fp_per_game at age-1 (weight 0.7)
-    v[2] = fp_per_game at age-2 (weight 0.5)
-    v[3] = career-avg fp_per_game through current age
-    v[4] = peak-3yr-avg fp_per_game through current age
-    v[5] = peak-single-season fp_per_game (any age through current)
-    v[6] = career-total fp through current age (scaled by /100)
-    v[7] = trajectory slope (linear regression of fp_per_game vs
-           career-season-index, in fp/g per season)
-    v[8] = durability (fraction of possible games played = career_games
-           / (n_seasons * 17))
-    v[9] = career-stage fp percentile within position (0-1; computed
-           against long-arc corpus at the same career-season-index)
+    v[0]  = fp_per_game at the current age (recent-season weight 1.0)
+    v[1]  = fp_per_game at age-1 (weight 0.7)
+    v[2]  = fp_per_game at age-2 (weight 0.5)
+    v[3]  = career-avg fp_per_game through current age
+    v[4]  = peak-3yr-avg fp_per_game through current age
+    v[5]  = peak-single-season fp_per_game (any age through current)
+    v[6]  = career-total fp through current age (scaled by /100)
+    v[7]  = trajectory slope (linear regression of fp_per_game vs
+            career-season-index, in fp/g per season)
+    v[8]  = durability (fraction of possible games played = career_games
+            / (n_seasons * 17))
+    v[9]  = career-stage fp percentile within position (0-1; computed
+            against long-arc corpus at the same career-season-index)
+    v[10] = current_age * AGE_SCALE (added in v2.3.5 — age is a PRIMARY
+            feature, not a tie-breaker; previously the engine ignored
+            age in distance entirely, causing 24-yo rookies to comp
+            with 22-yo late-bloomers at the same fp tier)
 
 Similarity is computed via INVERSE-DISTANCE (1 / (1 + d/scale)) over a
 feature-importance-weighted Euclidean distance, NOT cosine. We need
@@ -98,7 +102,17 @@ MIN_GAMES_PER_SEASON = 4
 # components.
 CAREER_TOTAL_SCALE = 100.0
 
-VECTOR_DIM = 10
+# v2.3.5: scale factor applied to ``current_age`` for v[10]. With
+# FEATURE_WEIGHTS[10]=5.0, a 3-year age gap contributes
+# 5.0 * (AGE_SCALE * 3)^2 = 5.0 * (1.5)^2 = 11.25 to squared distance —
+# about one peak_3yr-unit of "distance" per 3 age-years. This is enough
+# to push Steve Smith Sr.'s rookie (age 22) out of Johnny Wilson's
+# (age 24) top-10 comp list when their fp/G profiles are similar, while
+# leaving same-age comps unchanged. Calibrated empirically against the
+# Phil-pinned comp lists; see docs/V2.3.5-VALIDATION.md.
+AGE_SCALE = 0.5
+
+VECTOR_DIM = 11
 
 BASE_FORMAT = "sf_ppr"
 
@@ -116,6 +130,14 @@ BASE_FORMAT = "sf_ppr"
 #   * v[8] (durability) — small differentiator; weighted low.
 #   * v[9] (career-stage percentile) — already encoded in career-total +
 #     peak via the magnitude components; weighted moderate.
+# v2.3.5: v[10] current_age (scaled by AGE_SCALE) is weighted STRONG
+# (5.0). Pre-v2.3.5, age was absent from the cumulative-engine distance
+# entirely — the field existed on FantasyArcVector but was never
+# iterated in _weighted_distance. Phil identified the bug after Johnny
+# Wilson (WR, age 24 rookie, ~0.6 fp/G) was comped to Steve Smith Sr.
+# and Santana Moss (both age 22 rookies who later broke out). Prior
+# research consistently ranks age as one of the strongest predictors of
+# NFL skill-position outcomes, so it deserves first-class weight here.
 FEATURE_WEIGHTS: Tuple[float, ...] = (
     2.0,   # v[0] fp_now (current season per-game)
     1.5,   # v[1] fp_age-1
@@ -127,6 +149,8 @@ FEATURE_WEIGHTS: Tuple[float, ...] = (
     0.2,   # v[7] slope            — noisy on small samples
     0.3,   # v[8] durability (scaled 0-10)
     0.5,   # v[9] career-stage percentile (scaled 0-30)
+    5.0,   # v[10] current_age (scaled by AGE_SCALE) — STRONG: age is a
+           #       primary feature (v2.3.5 fix for the age-blind bug).
 )
 
 # Distance-to-similarity conversion: sim = 1 / (1 + d / SIMILARITY_SCALE).
@@ -143,7 +167,13 @@ SIMILARITY_SCALE = 20.0
 
 @dataclass
 class FantasyArcVector:
-    """The 10-dim arc vector + its position and metadata for filtering."""
+    """The 11-dim arc vector + its position and metadata for filtering.
+
+    v2.3.5: vector grew from 10-dim to 11-dim with the addition of v[10] =
+    current_age * AGE_SCALE. ``current_age`` is also kept as a separate
+    field for snapshot-window filtering; the v[10] entry is what costs
+    distance when two players differ on age.
+    """
 
     values: List[float]
     position: str
@@ -349,6 +379,7 @@ def build_arc_vector(
         slope,
         durability * 10.0,    # bring to ~0-10 range, similar to per-game fp
         pct * 30.0,           # bring to ~0-30 range (peak fp scale)
+        through_age * AGE_SCALE,  # v[10] v2.3.5: age dimension
     ]
     return FantasyArcVector(
         values=values,

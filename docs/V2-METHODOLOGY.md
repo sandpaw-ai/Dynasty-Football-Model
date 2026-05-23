@@ -258,14 +258,24 @@ rookie-year stats:
 | 6 | rushing_TDs / G | 0.3 | Fantasy-significant (6 pts each) |
 | 7 | receiving_TDs / G | 0.3 | |
 | 8 | completion_rate (QB only) | 0.1 | QB tier signal |
-| 9 | age_at_rookie_year | 0.2 | |
+| 9 | age_at_rookie_year | **20.0** | **v2.3.5**: bumped from 0.2. Age is a primary skill-position predictor; pre-v2.3.5 it was a tie-breaker against trivial fp/G noise. Calibrated empirically against Phil's Johnny Wilson bug-report: weight 20.0 makes a 1-year age gap cost enough distance to overcome the BREAKOUT_BIAS multiplier (≤1.3×) that previously kept late-bloomer survivors at the top of bust-tier rookies' comp lists. |
 | 10 | position_encoded | 0.0 | Informational; position-filter applies upstream |
 
+**v2.3.5 corpus change**: `build_rookie_corpus` default flipped to
+`require_post_rookie_season=False` and a new `bust_aware=True` flag
+is on by default. Year-1-only busts are now included in the comp pool;
+their realised year-2+ fp is zero (natural projection contribution),
+and the v2.3.3 wash-out penalty fires correctly on bust-heavy pools.
+The pre-v2.3.5 survivor-only corpus hid the bust population from the
+penalty layer.
+
 The corpus contains every historical NFL player's actual rookie
-season (filtered to games ≥ 4, rookie_season ≥ 1999, has at least one
-post-rookie season). For each entry, the engine pre-computes
-`post_rookie_total_fp` — used for the **breakout-bias re-ranking** that
-tilts top-K comp selection toward proven year-2+ producers.
+season (filtered to games ≥ 4, rookie_season ≥ 1999). For each entry,
+the engine pre-computes `post_rookie_total_fp` — used for the
+**breakout-bias re-ranking** that tilts top-K comp selection toward
+proven year-2+ producers. The rookie projection result also carries
+`bust_rate_in_comps` (fraction of top-K comps with no year-2+
+season) as a confidence indicator surfaced in the report row.
 
 Projection: `max(comp_weighted, peak_anchored) × confidence`
 * `comp_weighted` — similarity-weighted sum of comps' realised year-2+

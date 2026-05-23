@@ -224,7 +224,30 @@ FEATURE_WEIGHTS: Tuple[float, ...] = (
     0.3,   # v[6]  rookie_rushing_TDs_pg     (scale: 0-0.8)
     0.3,   # v[7]  rookie_receiving_TDs_pg   (scale: 0-0.8)
     0.1,   # v[8]  rookie_completion_rate (QB only)
-    0.2,   # v[9]  age_at_rookie_year
+    20.0,  # v[9]  age_at_rookie_year — STRONG: prior research
+           #       consistently shows age is one of the strongest
+           #       skill-position predictors. Bumped from 0.2 → 20.0 in
+           #       v2.3.5 after Phil's Johnny Wilson age-blind bug.
+           #
+           #       Calibration story: initial passes at 2.5, 6.0, 12.0
+           #       reduced but did not eliminate the Steve Smith /
+           #       Santana Moss problem on Wilson's comp list. The
+           #       required magnitude is large because (1) Wilson and
+           #       Smith are only 1 year apart in rookie age (23 vs 22)
+           #       so the squared gap is just 1, and (2) the
+           #       BREAKOUT_BIAS re-rank multiplies high-post-rookie-fp
+           #       comps' similarity by up to 1.30x, which previously
+           #       outran any age penalty smaller than 12.0. At weight
+           #       20.0 a 1-yr gap contributes 20 to squared distance,
+           #       a 2-yr gap 80, a 3-yr gap 180 — enough to dominate
+           #       the breakout multiplier on any age-gap ≥1 year.
+           #
+           #       Pre-v2.3.5 the weight was 0.2: a 2-year age gap
+           #       contributed 0.8 to squared distance, equivalent to
+           #       a 0.3 fp/G match — age was completely washed out by
+           #       trivial fp/G noise.
+           #
+           #       Empirical validation in docs/V2.3.5-VALIDATION.md.
     0.0,   # v[10] position_encoded (informational; position-filter applies)
 )
 
@@ -427,8 +450,9 @@ def build_rookie_corpus(
     league_format: str = BASE_FORMAT,
     min_games: int = MIN_ROOKIE_GAMES_CORPUS,
     exclude_rookie_seasons: Optional[set] = None,
-    require_post_rookie_season: bool = True,
+    require_post_rookie_season: bool = False,
     min_total_seasons: int = 0,
+    bust_aware: bool = True,
 ) -> List[RookieProfile]:
     """Walk the full arc set, snapshot each player's rookie-year vector.
 
@@ -437,7 +461,7 @@ def build_rookie_corpus(
             AND active players (current vets have completed rookie
             seasons + realised year-2+ careers — valid comps). The
             current 1-season-only rookies should be excluded by
-            ``exclude_rookie_seasons`` or ``require_post_rookie_season``.
+            ``exclude_rookie_seasons``.
       raw_stats_by_pid_season: lookup of raw stat-line by (pid, season).
       rookie_season_by_pid: optional pid → actual_rookie_season map.
             When provided, the corpus uses the ACTUAL rookie season from
@@ -451,8 +475,19 @@ def build_rookie_corpus(
             {2025} to keep current 2025 rookies out of their own comp
             pool).
       require_post_rookie_season: when True, only include players with
-            at least one realised year-2+ season (so projection has
-            something to draw from).
+            at least one realised year-2+ season. **Default changed to
+            False in v2.3.5** — short-career busts are signal, not
+            noise. Filtering them out hid the bust pool from the
+            v2.3.3 wash-out penalty (in ``v2_2_penalties.compute_survival``),
+            which was designed to fire on bust-heavy comp pools. Phil
+            diagnosed this on Johnny Wilson: with the survivorship
+            filter on, his comp pool contained only late-bloomer
+            survivors (Steve Smith Sr., Santana Moss), and the wash-out
+            penalty had nothing to fire on. With the default flipped to
+            False, the bust pool is visible to the comp search; bust
+            comps contribute zero to the projection (they have no
+            year-2+ realised fp), and the v2.3.3 penalty fires
+            correctly when a target's comp pool is bust-heavy.
       min_total_seasons: optional minimum completed NFL seasons per
             comp. Defaults to 0 (no filter). Kept as an optional knob
             for experimentation; the production engine does NOT enable
@@ -460,6 +495,22 @@ def build_rookie_corpus(
             v2.3.3 wash-out penalty in ``v2_2_penalties.compute_survival``
             is the mechanism that punishes targets with bust-heavy
             comp pools).
+      bust_aware: v2.3.5. When True (default), the corpus explicitly
+            includes year-1-only busts (players with no realised year 2+).
+            The projection layer naturally contributes zero from these
+            comps because ``project_year_2_plus`` returns 0 fp for any
+            arc with no post-rookie seasons. This pulls down the
+            projected fantasy value for targets whose comp pool is
+            bust-heavy, exactly as the v2.3.3 wash-out penalty
+            originally intended. When False, the behaviour reverts to
+            the v2.1–v2.3.4 survivor-only corpus (kept for back-compat
+            and experimentation).
+
+    Note: ``bust_aware=True`` and ``require_post_rookie_season=True`` are
+    contradictory — if the caller sets ``require_post_rookie_season=True``
+    explicitly, busts are filtered out regardless of ``bust_aware``. The
+    production engine uses the v2.3.5 defaults (bust_aware=True,
+    require_post_rookie_season=False) so both knobs agree.
     """
     out: List[RookieProfile] = []
     rs_map = rookie_season_by_pid or {}
@@ -477,11 +528,24 @@ def build_rookie_corpus(
             continue
         if exclude_rookie_seasons and rookie.season in exclude_rookie_seasons:
             continue
-        # Require at least one post-rookie season for projection.
-        if require_post_rookie_season:
-            has_post = any(s.season > rookie.season for s in arc.career_arc)
-            if not has_post:
-                continue
+        # v2.3.5: explicit bust handling.
+        # has_post == True  → player had at least one realised year-2+
+        #                     season (survivor / partial breakout / late
+        #                     breakout / full bust-recovery).
+        # has_post == False → player washed out after year 1 (the actual
+        #                     bust signal Phil wants surfaced).
+        # Two gates:
+        #   * require_post_rookie_season: hard-filter busts out. Default
+        #     was True pre-v2.3.5, now False.
+        #   * bust_aware: when True (v2.3.5 default), include busts in
+        #     the corpus so the v2.3.3 wash-out penalty has a population
+        #     to fire on. When False, behave like the legacy survivor-
+        #     only pool for back-compat.
+        has_post = any(s.season > rookie.season for s in arc.career_arc)
+        if require_post_rookie_season and not has_post:
+            continue
+        if not bust_aware and not has_post:
+            continue
         # v2.3.3 minimum-tenure filter: every comp must have at least
         # ``min_total_seasons`` completed NFL seasons on the books.
         if min_total_seasons > 0:
@@ -689,6 +753,13 @@ class RookieProjectionResult:
     comp_weighted_fp: float               # diagnostic: similarity-weighted sum
     peak_anchored_fp: float               # diagnostic: rookie-rate × expected horizon
     n_comps: int
+    # v2.3.5: fraction of top-K comps that washed out after year 1 (no
+    # realised year-2+ season). High bust_rate_in_comps means the
+    # rookie's comp pool is dominated by player profiles that historically
+    # didn't make it; combined with the v2.3.3 wash-out penalty this is
+    # the engine's confidence signal that the projection should be
+    # treated as fragile.
+    bust_rate_in_comps: float = 0.0
     comps: List[RookieCompMatch] = field(default_factory=list)
 
 
@@ -718,7 +789,10 @@ def project_rookie(
             projected_year_2_plus_fp=0.0,
             projected_year_2_plus_seasons=0.0,
             confidence_factor=0.0,
+            comp_weighted_fp=0.0,
+            peak_anchored_fp=0.0,
             n_comps=0,
+            bust_rate_in_comps=0.0,
             comps=[],
         )
 
@@ -752,6 +826,7 @@ def project_rookie(
             comp_weighted_fp=0.0,
             peak_anchored_fp=0.0,
             n_comps=0,
+            bust_rate_in_comps=0.0,
             comps=[],
         )
 
@@ -803,6 +878,15 @@ def project_rookie(
     # in the UI as "projected career length".
     projected_seasons = expected_seasons * confidence
 
+    # v2.3.5: bust_rate_in_comps = fraction of top-K comps with no
+    # realised year-2+ season. A comp "busted" iff its post_rookie_total_fp
+    # is exactly zero (the corpus-build stage filters partial-season
+    # noise via MIN_ROOKIE_GAMES_CORPUS so a zero here is meaningful).
+    n_bust_comps = sum(
+        1 for m in comps if m.profile.post_rookie_total_fp <= 0.0
+    )
+    bust_rate_in_comps = n_bust_comps / max(1, len(comps))
+
     return RookieProjectionResult(
         player_id=target_arc.player_id,
         name=target_arc.name,
@@ -817,5 +901,6 @@ def project_rookie(
         comp_weighted_fp=weighted_pts,
         peak_anchored_fp=peak_anchored_fp,
         n_comps=len(comps),
+        bust_rate_in_comps=bust_rate_in_comps,
         comps=comps,
     )

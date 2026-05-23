@@ -915,6 +915,12 @@ def run_engine(
                 "rookie_games": rproj.rookie_games,
                 "rookie_fp_per_game": round(rproj.rookie_fp_per_game, 2),
                 "rookie_confidence_factor": round(rproj.confidence_factor, 3),
+                # v2.3.5: fraction of top-K rookie comps that washed out
+                # after year 1 (no realised year-2+ season). High value
+                # means the rookie's profile most resembles year-1-only
+                # busts — confidence indicator complementing the v2.3.3
+                # wash-out penalty.
+                "bust_rate_in_comps": round(rproj.bust_rate_in_comps, 3),
                 # Arc-summary fields for the UI (rookies have only 1 season,
                 # so peak == single-season == career_avg).
                 "peak_3yr_fp_per_game": round(target_arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0), 2),

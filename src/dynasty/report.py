@@ -129,6 +129,9 @@ td.years, td.team, td.tier, td.consensus { color: var(--muted); font-variant-num
 .div-down-big { background: #dc2626; color: white; }
 .div-flat { background: #f3f4f6; color: #6b7280; }
 .div-none { background: #f3f4f6; color: var(--muted); font-style: italic; }
+.era-chip { display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px;
+  font-weight: 600; font-variant-numeric: tabular-nums;
+  background: #fef3c7; color: #92400e; margin-left: 4px; }
 .callout { background: #eff6ff; border: 1px solid #93c5fd;
   border-left: 4px solid var(--accent); border-radius: 6px; padding: 14px 18px;
   color: #1e3a8a; margin: 16px 0; font-size: 14px; }
@@ -803,8 +806,16 @@ target roster rules. v2.2 keeps two preset formats: Superflex PPR and
 
 <h3>Known limitations</h3>
 <ul>
-  <li>Corpus starts in 1999. Pre-1999 retired greats (Jim Brown, Steve Young
-      peak, Barry Sanders, Jerry Rice) are not fully represented.</li>
+  <li><strong>Corpus floor: 1980.</strong> The v2.4 backfill added 1980-1998
+      seasons from Pro-Football-Reference, so workhorse-era RBs (Walter
+      Payton, Marcus Allen, Eric Dickerson, Earl Campbell), peak-era passers
+      (Marino, Montana, Kelly, Young, Moon), and elite-era WRs (Rice,
+      Largent, Reed, Carter) are now comp-eligible. Pre-1980 players
+      (Jim Brown, OJ Simpson, Sayers) remain out of scope — 14-game seasons
+      and undefined era-pace multipliers make the comparison unreliable.</li>
+  <li>Pre-1999 comps carry a 0.9× confidence haircut because era-pace
+      adjustment is principled but not perfect. They display with an
+      <span class="era-chip">⏳ 1985</span> badge on player pages.</li>
   <li>Birth dates missing for some retired players — we fall back to
       <em>rookie_season + 22</em> as an age estimate (~2% of corpus).</li>
   <li>Sample-of-1 comp pools (e.g. Aaron Rodgers at 41 with only Tom Brady
@@ -1014,9 +1025,21 @@ def _build_player_page(row: Dict, comps: List[Dict], team: str,
             'with fewer than 8 NFL seasons">washed out</span>'
             if c.get("washed_out") else ""
         )
+        # v2.4 PR 4: ⏳ era badge for comps whose snapshot season is
+        # pre-1999. The underlying comp pool now includes Walter Payton,
+        # Emmitt Smith, Marcus Allen, etc.; pre-1999 comps already carry a
+        # 0.9× confidence haircut from PR 3 to acknowledge era-pace
+        # uncertainty. The badge surfaces that lineage to the user.
+        snap_year = c.get("snapshot_season")
+        era_badge = (
+            f' <span class="era-chip" title="Pre-1999 comp — stats are '
+            f'era-pace-adjusted to modern scoring. Confidence weight: 0.9×.">'
+            f'⏳ {snap_year}</span>'
+            if c.get("is_pre1999_snapshot") and snap_year else ""
+        )
         comp_rows += (
             f"<tr>"
-            f"<td class='name'>{_esc(c['name'])}{washed_badge}</td>"
+            f"<td class='name'>{_esc(c['name'])}{era_badge}{washed_badge}</td>"
             f"<td>{_pos_badge(c['position'])}</td>"
             f"<td class='years'>{c['last_season']}</td>"
             f"<td class='score' style='text-align:right'>{sim:.3f}</td>"
@@ -1124,7 +1147,11 @@ comp's "Peak 3yr fp/g" is their best 3-season fp/g average under
 in (0, 1] — 1.0 means an identical career-stage profile vector. "Career"
 notes the comp's NFL longevity; the <span class="div-chip div-down">washed
 out</span> badge flags comps whose career ended by age 30 with fewer than
-8 NFL seasons (the engine’s bust definition).</p>
+8 NFL seasons (the engine’s bust definition). The <span class="era-chip">⏳ 1985</span>
+badge marks comps whose snapshot season predates 1999 — the corpus now
+spans 1980-2025, so Payton, Emmitt, Marcus Allen, Rice, Marino-era greats
+are eligible matches. Pre-1999 comps carry a 0.9× confidence haircut
+because era-pace adjustment is principled but not perfect.</p>
 
 <table>
 <thead><tr>

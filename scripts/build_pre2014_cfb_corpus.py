@@ -332,7 +332,7 @@ def leaderboard_row_to_cfb_schema(
         "team": bucket.get("team") or "",
         "conference": conf,
         "conference_tier": tier,
-        "class_year": None,  # not on leaderboards \u2014 player-page only
+        "class_year": bucket.get("class") or None,  # populated only when a player-page overlay added it
         "position": pos,
         "games": _coalesce_int(bucket.get("games")),
         "pass_att": _coalesce_int(bucket.get("pass_att")),
@@ -371,6 +371,9 @@ def select_priority_slugs(
 
     Strategy (in order, up to ``max_pages`` total):
 
+    0. Any slug whose player page is already cached on disk \u2014 free
+       overlay, no network cost. Lets incremental runs apply cheaply
+       even when ``max_pages`` is set conservatively.
     1. Any slug whose normalized player_name matches a bridge entry
        (i.e., the player made the NFL post-2000).
     2. Any slug that put up *Heisman-level* numbers in any single season
@@ -383,6 +386,24 @@ def select_priority_slugs(
     """
     seen: set[str] = set()
     out: list[str] = []
+
+    # Tier 0: existing cache (zero-cost overlays).
+    universe_slugs: set[str] = set()
+    for merged in merged_by_year.values():
+        for (slug, _team) in merged.keys():
+            universe_slugs.add(slug)
+    cache_dir = sr.CACHE_DIR / "players"
+    if cache_dir.exists():
+        for entry in sorted(cache_dir.iterdir()):
+            if entry.suffix != ".html":
+                continue
+            slug = entry.stem
+            if slug in seen or slug not in universe_slugs:
+                continue
+            out.append(slug)
+            seen.add(slug)
+            if len(out) >= max_pages:
+                return out
 
     # Tier 1: bridge name match
     for year, merged in merged_by_year.items():

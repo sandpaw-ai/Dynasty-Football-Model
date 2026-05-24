@@ -213,8 +213,12 @@ def test_consensus_chip_function_flips_colours(site):
 def test_player_page_renders_calculation_breakdown(site, slug_fragment):
     out_dir, _ = site
     players_dir = out_dir / "players"
+    # v3.0 PR 6: filter out per-prospect pages (suffix ``-prospect.html``)
+    # so the veteran page test doesn't pick them up. Prospect pages have
+    # their own coverage in tests/test_v3_0_pr6_site.py.
     candidates = [
-        p for p in os.listdir(players_dir) if slug_fragment in p
+        p for p in os.listdir(players_dir)
+        if slug_fragment in p and not p.endswith("-prospect.html")
     ]
     assert candidates, f"no player page matching {slug_fragment}"
     page = _read(players_dir / candidates[0])

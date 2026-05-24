@@ -157,6 +157,35 @@ footer { color: var(--muted); font-size: 12px; padding: 32px 40px; text-align: c
 .style-mobile { background: rgba(167, 139, 250, 0.30); }
 .style-dual_threat { background: rgba(250, 204, 21, 0.35); color: #fde68a; }
 .comp-tier-deep { color: var(--muted); }
+
+/* v3.0 PR 6 — prospect page styling */
+.prospect-status-row { display:flex; gap:10px; flex-wrap:wrap; margin: 4px 0 18px; }
+.status-pill { display:inline-block; padding: 7px 14px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; line-height: 1.4; }
+.status-pill-ok { background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; }
+.status-pill-warn { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+.status-pill a { color: inherit; text-decoration: underline; }
+.prospect-te-flag { display:inline-block; padding: 2px 9px; border-radius: 10px;
+  font-size: 12px; font-weight: 700; background: #fef3c7; color: #92400e; margin-left: 6px; }
+.prospect-te-mini { font-size: 12px; margin-left: 2px; }
+.prospect-te-row td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+.callout-warn { background: #fffbeb; border-color: #fcd34d; border-left-color: #f59e0b; color: #92400e; }
+.chip-row { display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.chip { font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 999px;
+  background: white; border: 1px solid var(--border); color: var(--text);
+  cursor: pointer; font-weight: 600; }
+.chip:hover { background: var(--hover); }
+.chip.active { background: var(--accent); color: white; border-color: var(--accent); }
+.hit-chip { display:inline-block; padding: 3px 9px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
+.hit-elite { background: #ecfdf5; color: #047857; }
+.hit-starter { background: #fef3c7; color: #92400e; }
+.hit-bust { background: #fef2f2; color: #b91c1c; }
+.hit-unknown { background: #f3f4f6; color: #6b7280; }
+.comp-row.comp-hit-elite td:first-child { box-shadow: inset 3px 0 0 #10b981; }
+.comp-row.comp-hit-starter td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+.comp-row.comp-hit-bust td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
+.comp-row.comp-hit-unknown td:first-child { box-shadow: inset 3px 0 0 #9ca3af; }
 """
 
 
@@ -804,6 +833,66 @@ re-scoring needed) and recomputes positional VORP baselines under the
 target roster rules. v2.2 keeps two preset formats: Superflex PPR and
 2QB PPR.</p>
 
+<h3 id="prospects">9 · v3.0 Prospect Engine — PRs 3 + 4 + 5 + 6</h3>
+<p>v3.0 adds a college→NFL similarity layer on top of the v2 NFL
+production engine. Skill-position college prospects are compared against
+a 2000+ college corpus using era-pace-adjusted, conference-tier-weighted
+fp/g curves. Each prospect's top-25 college comps are then bridged to
+NFL outcomes (where the comp eventually played) to project the
+prospect's career fantasy points and peak3 fp/g.</p>
+<ol>
+  <li><strong>PR 3 — similarity engine.</strong> 10-dim career-stage
+      feature vector keyed to age + career-stage length. Distance is
+      feature-importance weighted; the comp pool is the v3.0 prospect
+      corpus (≈5k college skill-position players, 2000-present).</li>
+  <li><strong>PR 4 — projection layer.</strong> For each comp with an
+      NFL career, the engine pulls career_fp and peak3_fp_pg, then
+      similarity-weights them into a per-prospect projection. Comps
+      without NFL data (washed out of CFB → never bridged) feed the
+      survival multiplier instead.</li>
+  <li><strong>PR 5 — back-test.</strong> Position-aware gates against
+      the 2017–2021 holdout classes (now mostly NFL-resolved). Results
+      below.</li>
+  <li><strong>PR 6 — prospects UI ship.</strong> This page +
+      per-prospect pages + the status banner. TE-experimental flag is
+      surfaced on every TE row, every TE prospect page, and here.</li>
+</ol>
+
+<h3>v3.0 back-test results (position-aware gate)</h3>
+<table style="max-width:780px;margin-top:8px">
+<thead><tr><th>Metric</th><th style="text-align:right">Result</th><th style="text-align:right">Target</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td class="name">Hit@10 (elite in top-50)</td><td class="score" style="text-align:right">36%</td><td class="years" style="text-align:right">≥ 22%</td><td><span class="hit-chip hit-elite">pass</span></td></tr>
+<tr><td class="name">KTC head-to-head</td><td class="score" style="text-align:right">50%</td><td class="years" style="text-align:right">≥ 50%</td><td><span class="hit-chip hit-elite">pass</span></td></tr>
+<tr><td class="name">Spearman ρ (overall)</td><td class="score" style="text-align:right">+0.203</td><td class="years" style="text-align:right">≥ 0.28</td><td><span class="hit-chip hit-bust">fail</span></td></tr>
+<tr><td class="name">Spearman ρ (ex-TE)</td><td class="score" style="text-align:right">+0.274</td><td class="years" style="text-align:right">≥ 0.28</td><td><span class="hit-chip hit-starter">borderline</span></td></tr>
+<tr><td class="name">Bust@10</td><td class="score" style="text-align:right">38%</td><td class="years" style="text-align:right">≥ 55%</td><td><span class="hit-chip hit-bust">fail (partly artifact)</span></td></tr>
+</tbody>
+</table>
+
+<h3>Per-position Spearman ρ — the structural blind spot</h3>
+<table style="max-width:520px;margin-top:8px">
+<thead><tr><th>Position</th><th style="text-align:right">Spearman ρ</th><th>Read</th></tr></thead>
+<tbody>
+<tr><td class="name">QB</td><td class="score" style="text-align:right">+0.249</td><td><span class="hit-chip hit-starter">validated</span></td></tr>
+<tr><td class="name">RB</td><td class="score" style="text-align:right">+0.282</td><td><span class="hit-chip hit-elite">validated</span></td></tr>
+<tr><td class="name">WR</td><td class="score" style="text-align:right">+0.276</td><td><span class="hit-chip hit-elite">validated</span></td></tr>
+<tr><td class="name">TE</td><td class="score" style="text-align:right">+0.086</td><td><span class="hit-chip hit-bust">experimental</span></td></tr>
+</tbody>
+</table>
+
+<div class="callout callout-warn" style="margin-top:14px">
+<strong>TE limitation — explicit disclosure.</strong> TE Spearman ρ of
+<strong>0.086</strong> is materially below QB/RB/WR. Two structural
+causes: (1) the college→NFL bridge corpus for TEs is thin (fewer
+production-eligible TE seasons in the comp pool), and (2) TE fantasy
+outcomes are heavily landing-spot-dependent in a way the engine doesn't
+yet model. The page ships under a <em>QB/RB/WR validated, TE
+experimental</em> label. <strong>v3.1 roadmap:</strong> TE-specific
+feature weights (route tree, target share at age 21–22, blocking-vs-receiving
+split) + landing-spot prior. Treat TE comps as directional, not
+projections.</div>
+
 <h3>Known limitations</h3>
 <ul>
   <li><strong>Corpus floor: 1980.</strong> The v2.4 backfill added 1980-1998
@@ -901,33 +990,546 @@ production history. See <a href="methodology.html">Methodology</a>.</p>
 # Prospects page (decoupled)
 # ---------------------------------------------------------------------------
 
-def _build_prospects(latest_ts: datetime, league_label: str) -> str:
-    body = """<div class="container narrow">
+# ---------------------------------------------------------------------------
+# v3.0 Prospects page (PR 6)
+# ---------------------------------------------------------------------------
+
+# Default location of the v3.0 projection-layer artifact, produced by
+# scripts/build_prospects_v3.py (PR 4). If missing, the site falls back
+# to a clearly-marked placeholder so CI builds never break.
+_PROSPECTS_ALL_JSON = Path("data") / "engine_v3" / "prospects_all.json"
+
+# Per-position Spearman ρ from the PR 5 back-test (position-aware gate).
+# The structural blind spot is TE: 0.086 vs 0.27+ for QB/RB/WR. The UX
+# disclosure on this page and the methodology section reflect this.
+_PR5_BACKTEST = {
+    "hit_at_10": 0.36,
+    "bust_at_10": 0.38,
+    "ktc_h2h": 0.50,
+    "spearman_overall": 0.203,
+    "spearman_ex_te": 0.274,
+    "by_position": {
+        "QB": 0.249,
+        "RB": 0.282,
+        "WR": 0.276,
+        "TE": 0.086,
+    },
+}
+
+
+def _prospect_slug(prospect: Dict) -> str:
+    """Stable slug for a prospect page. Uses last-6 of cfb_player_id
+    (or full id if shorter) so the URL is collision-resistant against
+    veteran player pages even before the ``-prospect`` suffix."""
+    name = prospect.get("name") or "prospect"
+    pid = str(prospect.get("cfb_player_id") or prospect.get("slug") or "")
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    tail = re.sub(r"[^a-z0-9]+", "", pid.lower())[-6:] or "x"
+    return f"{s}-{tail}"
+
+
+def _load_prospects_artifact(prospects_path: Optional[Path] = None) -> Optional[Dict]:
+    """Load the projection-layer artifact. Falls back across:
+      1. Explicit ``prospects_path`` argument (test fixture or override)
+      2. ``data/engine_v3/prospects_all.json``
+      3. Looping ``data/engine_v3/prospects_<year>.json`` files
+    Returns None when nothing is available (caller renders a placeholder).
+    """
+    candidates: List[Path] = []
+    if prospects_path is not None:
+        candidates.append(Path(prospects_path))
+    candidates.append(_PROSPECTS_ALL_JSON)
+
+    for path in candidates:
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+    # Try per-class fallback
+    base = Path("data") / "engine_v3"
+    if base.exists():
+        merged_prospects: List[Dict] = []
+        classes: List[int] = []
+        for f in sorted(base.glob("prospects_*.json")):
+            if f.name == "prospects_all.json":
+                continue
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if d.get("draft_class"):
+                classes.append(d["draft_class"])
+            merged_prospects.extend(d.get("prospects", []))
+        if merged_prospects:
+            return {
+                "version": "per-class-merge",
+                "draft_classes": sorted(set(classes)),
+                "n_prospects": len(merged_prospects),
+                "prospects": merged_prospects,
+            }
+    return None
+
+
+def _ktc_capture_label(artifact: Optional[Dict]) -> str:
+    """Pull the KTC capture timestamp if the artifact carries one;
+    otherwise return a neutral label."""
+    if not artifact:
+        return "—"
+    meta = artifact.get("meta") or {}
+    ts = (
+        meta.get("ktc_captured_at")
+        or meta.get("ktc_snapshot")
+        or artifact.get("ktc_captured_at")
+    )
+    return _esc(ts) if ts else "latest available"
+
+
+def _fmt_or_dash(value, suffix: str = "", fmt: str = "{:.1f}") -> str:
+    if value is None:
+        return "—"
+    try:
+        return fmt.format(float(value)) + suffix
+    except Exception:
+        return _esc(str(value))
+
+
+def _delta_chip(delta: Optional[float]) -> str:
+    """Color-coded KTC delta chip. Positive = model bullish vs KTC.
+    Negative = model bearish. None = unranked."""
+    if delta is None:
+        return '<span class="div-chip div-none">—</span>'
+    try:
+        d = float(delta)
+    except Exception:
+        return '<span class="div-chip div-none">—</span>'
+    if d >= 50:
+        cls = "div-up-big"; arrow = "↑↑"
+    elif d > 0:
+        cls = "div-up"; arrow = "↑"
+    elif d <= -50:
+        cls = "div-down-big"; arrow = "↓↓"
+    elif d < 0:
+        cls = "div-down"; arrow = "↓"
+    else:
+        cls = "div-flat"; arrow = "—"
+    return f'<span class="div-chip {cls}">{arrow} {int(round(d)):+d}</span>'
+
+
+def _te_experimental_pill() -> str:
+    return (
+        '<span class="prospect-te-flag" '
+        'title="TE engine is experimental. Back-test Spearman ρ = 0.086 '
+        'for TE vs 0.27+ for QB/RB/WR. Limited bridge coverage + heavy '
+        'landing-spot dependence. Treat TE comps as preview-grade.">'
+        '⚠️ experimental</span>'
+    )
+
+
+def _build_prospects(latest_ts: datetime, league_label: str,
+                    prospects_path: Optional[Path] = None) -> str:
+    artifact = _load_prospects_artifact(prospects_path)
+
+    if not artifact or not artifact.get("prospects"):
+        # Graceful placeholder. CI must not crash when the engine cache is
+        # stale or absent (e.g. fresh clone, network-step failure earlier).
+        body = """<div class="container narrow">
 
 <h2>Draft <span class="accent">Prospects</span></h2>
-<p class="lede">Prospects are evaluated separately from the main rankings.
-NFL veterans have production data the engine can compare against; prospects
-don't, so they live here on their own page.</p>
+<p class="lede">v3.0 prospect engine cache not yet populated — refreshes
+pending. The daily build will populate this page on the next successful
+run of <code>scripts/build_prospects_v3.py</code>.</p>
 
-<div class="callout"><strong>v1.0 note.</strong> The college→NFL similarity
-chain shipped in v0.16 is intentionally <em>not</em> wired into the v1.0
-launcher — it depended on the old composite pipeline. A clean prospects
-engine that mirrors the basketball model's rookie page is on the v1.1
-roadmap. For now this page is a placeholder so the IA matches the
-basketball model.</p>
+<div class="callout"><strong>v3.0 status.</strong> The engine ships under
+a “QB/RB/WR validated, TE experimental” label. Once the projection-layer
+artifact regenerates, this page will display the ranked prospect board
+with per-prospect comp pages.</div>
 
-<p class="lede" style="margin-top:18px">If you're looking for veteran NFL
-rankings, head back to <a href="rankings.html">Similarity Scores</a>. If
-you want to rank players under your specific league's scoring, the
-<a href="league.html">Dynasty Rankings</a> page has presets for Superflex
-PPR and 2QB PPR plus a delta column showing how your format reshuffles
-things.</p>
+</div>"""
+        return _page(
+            "Kings of Dynasty — Prospects",
+            _site_header("prospects", latest_ts, league_label),
+            body,
+        )
+
+    prospects = list(artifact.get("prospects", []))
+    classes = sorted({int(p.get("draft_class")) for p in prospects
+                      if p.get("draft_class") is not None})
+
+    # Sort by model overall rank, defaulting unranked to the bottom.
+    prospects.sort(key=lambda p: p.get("model_overall_rank") or 10**9)
+
+    # Default render limit — keep the page snappy. Skill positions only
+    # are already enforced upstream (engine only emits QB/RB/WR/TE), so
+    # we don't filter here.
+    display_prospects = prospects[:150]
+
+    # ---- Table rows ------------------------------------------------------
+    rows_html = ""
+    for p in display_prospects:
+        pos = p.get("position", "")
+        slug = _prospect_slug(p)
+        ktc = p.get("ktc") or {}
+        ktc_rank_sf = ktc.get("ktc_rank_sf")
+        delta = p.get("ktc_delta_overall")
+        is_te = pos == "TE"
+        te_flag = ' <span title="TE engine is experimental — see status banner" class="prospect-te-mini">⚠️</span>' if is_te else ""
+        proj = p.get("projection") or {}
+        career_fp = proj.get("projected_career_fp")
+        peak3 = proj.get("projected_peak3_fp_pg")
+        rank = p.get("model_overall_rank", "—")
+        rows_html += (
+            f'<tr class="player-row prospect-row{" prospect-te-row" if is_te else ""}" '
+            f'data-name="{_esc((p.get("name") or "").lower())}" '
+            f'data-position="{_esc(pos)}" '
+            f'data-class="{_esc(p.get("draft_class") or "")}" '
+            f'onclick="location=\'players/{slug}-prospect.html\'">'
+            f'<td class="rank">{_esc(rank)}{te_flag}</td>'
+            f'<td class="name"><a href="players/{slug}-prospect.html">{_esc(p.get("name",""))}</a></td>'
+            f'<td>{_pos_badge(pos)}</td>'
+            f'<td class="years">{_esc(p.get("draft_class") or "—")}</td>'
+            f'<td class="team">{_esc(p.get("school") or "—")}</td>'
+            f'<td class="years">{_fmt_or_dash(p.get("age"), fmt="{:.1f}")}</td>'
+            f'<td class="score">{_fmt_or_dash(career_fp, fmt="{:.0f}")}</td>'
+            f'<td class="years" style="text-align:right">{_fmt_or_dash(peak3, fmt="{:.1f}")}</td>'
+            f'<td class="years" style="text-align:right">{_esc(ktc_rank_sf) if ktc_rank_sf is not None else "—"}</td>'
+            f'<td style="text-align:right">{_delta_chip(delta)}</td>'
+            f'</tr>'
+        )
+
+    # ---- Filter chips ----------------------------------------------------
+    class_chip_html = "".join(
+        f'<button type="button" class="chip class-chip" data-class="{c}">{c}</button>'
+        for c in classes
+    )
+
+    # ---- Body ------------------------------------------------------------
+    n_prospects_total = len(prospects)
+    ktc_label = _ktc_capture_label(artifact)
+
+    body = f"""<div class="container">
+
+<h2>Prospect <span class="accent">Rankings — v3.0</span></h2>
+<p class="lede">Skill-position prospects ranked by projected career fantasy
+points under {_esc(league_label)}. Each prospect is comped against the
+v3.0 college→NFL similarity corpus (PR 3) and projected via the v3.0
+projection layer (PR 4). KTC delta shows where the model differs from the
+current consensus dynasty board — positive (green) = model bullish,
+negative (red) = model bearish.</p>
+
+<div class="prospect-status-row">
+  <span class="status-pill status-pill-ok">✅ QB · RB · WR engine validated
+    (back-test Hit@10 {_PR5_BACKTEST["hit_at_10"]:.0%}, ρ {_PR5_BACKTEST["spearman_ex_te"]:.2f} ex-TE)</span>
+  <span class="status-pill status-pill-warn">⚠️ TE engine experimental —
+    limited bridge coverage + landing-spot dependence. Treat TE comps as
+    preview-grade. <a href="methodology.html#prospects">Roadmap</a>:
+    TE-specific feature weights.</span>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="num">{n_prospects_total:,}</div><div class="label">Prospects scored</div></div>
+  <div class="kpi"><div class="num">{len(classes)}</div><div class="label">Draft classes</div></div>
+  <div class="kpi"><div class="num">v3.0</div><div class="label">Engine · college→NFL similarity</div></div>
+  <div class="kpi"><div class="num">{_PR5_BACKTEST["hit_at_10"]:.0%}</div><div class="label">Back-test Hit@10 (target 22%)</div></div>
+</div>
+
+<div class="callout"><strong>How to read this page.</strong> Click any row to
+see that prospect's comp grid — the top-25 historical players whose
+college production curve looks closest to the prospect's. Hit labels colour
+each comp by NFL outcome (elite / starter / bust / unknown). The model's
+rank reflects similarity-weighted projected career fp; KTC delta surfaces
+where the model and the consensus board disagree.</div>
+
+<div class="controls">
+  <input id="q" placeholder="Search by prospect name…" type="search">
+  <div class="chip-row" id="pos-chips">
+    <button type="button" class="chip pos-chip active" data-pos="">All</button>
+    <button type="button" class="chip pos-chip" data-pos="QB">QB</button>
+    <button type="button" class="chip pos-chip" data-pos="RB">RB</button>
+    <button type="button" class="chip pos-chip" data-pos="WR">WR</button>
+    <button type="button" class="chip pos-chip" data-pos="TE">TE ⚠️</button>
+  </div>
+  <div class="chip-row" id="class-chips">
+    <button type="button" class="chip class-chip active" data-class="">All classes</button>
+    {class_chip_html}
+  </div>
+  <span class="stats" id="stats"></span>
+</div>
+
+<p class="lede" style="font-size:13px;margin-top:6px">KTC snapshot: {ktc_label} ·
+Showing {len(display_prospects)} of {n_prospects_total:,} ranked prospects.
+Click a column header to sort.</p>
+
+<table id="prospect-table" data-sortable="true">
+<thead><tr>
+  <th data-sort="rank" data-sort-type="num">#</th>
+  <th data-sort="name">Prospect</th>
+  <th data-sort="pos">Pos</th>
+  <th data-sort="class" data-sort-type="num">Class</th>
+  <th data-sort="school">School</th>
+  <th data-sort="age" data-sort-type="num">Age</th>
+  <th data-sort="career_fp" data-sort-type="num" style="text-align:right">Proj career fp</th>
+  <th data-sort="peak3" data-sort-type="num" style="text-align:right">Proj peak3 fp/g</th>
+  <th data-sort="ktc" data-sort-type="num" style="text-align:right">KTC SF</th>
+  <th data-sort="delta" data-sort-type="num" style="text-align:right">Δ vs KTC</th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+
+<p class="lede" style="margin-top:18px">See the
+<a href="methodology.html#prospects">v3.0 prospect engine methodology</a>
+for the back-test table, position-aware gate results, and the documented
+TE limitation + v3.1 roadmap.</p>
+
+<script>
+const q = document.getElementById('q');
+const stats = document.getElementById('stats');
+const rows = document.querySelectorAll('.prospect-row');
+let activePos = '';
+let activeClass = '';
+function update() {{
+  const qv = (q.value || '').toLowerCase();
+  let shown = 0;
+  rows.forEach(r => {{
+    const okName = !qv || r.dataset.name.includes(qv);
+    const okPos = !activePos || r.dataset.position === activePos;
+    const okClass = !activeClass || r.dataset.class === activeClass;
+    const ok = okName && okPos && okClass;
+    r.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  }});
+  stats.textContent = shown + ' / ' + rows.length + ' prospects';
+}}
+q.addEventListener('input', update);
+document.querySelectorAll('.pos-chip').forEach(c => {{
+  c.addEventListener('click', () => {{
+    document.querySelectorAll('.pos-chip').forEach(x => x.classList.remove('active'));
+    c.classList.add('active');
+    activePos = c.dataset.pos || '';
+    update();
+  }});
+}});
+document.querySelectorAll('.class-chip').forEach(c => {{
+  c.addEventListener('click', () => {{
+    document.querySelectorAll('.class-chip').forEach(x => x.classList.remove('active'));
+    c.classList.add('active');
+    activeClass = c.dataset.class || '';
+    update();
+  }});
+}});
+// Click-to-sort on column headers.
+const table = document.getElementById('prospect-table');
+const tbody = table.querySelector('tbody');
+const headers = table.querySelectorAll('th[data-sort]');
+let lastSort = null;
+let sortAsc = true;
+function getCellValue(tr, idx, kind) {{
+  const cell = tr.children[idx];
+  if (!cell) return '';
+  const txt = (cell.innerText || '').trim();
+  if (kind === 'num') {{
+    const n = parseFloat(txt.replace(/[^0-9.\\-]/g, ''));
+    return isNaN(n) ? -Infinity : n;
+  }}
+  return txt.toLowerCase();
+}}
+headers.forEach((h, idx) => {{
+  h.style.cursor = 'pointer';
+  h.addEventListener('click', () => {{
+    const kind = h.dataset.sortType === 'num' ? 'num' : 'str';
+    if (lastSort === idx) sortAsc = !sortAsc; else {{ lastSort = idx; sortAsc = kind === 'str'; }}
+    const sorted = Array.from(tbody.querySelectorAll('tr')).sort((a, b) => {{
+      const av = getCellValue(a, idx, kind);
+      const bv = getCellValue(b, idx, kind);
+      if (av < bv) return sortAsc ? -1 : 1;
+      if (av > bv) return sortAsc ? 1 : -1;
+      return 0;
+    }});
+    sorted.forEach(r => tbody.appendChild(r));
+  }});
+}});
+update();
+</script>
 
 </div>"""
     return _page(
         "Kings of Dynasty — Prospects",
         _site_header("prospects", latest_ts, league_label),
         body,
+    )
+
+
+def _comp_hit_class(hit_label: str) -> str:
+    return {
+        "elite": "comp-hit-elite",
+        "starter": "comp-hit-starter",
+        "bust": "comp-hit-bust",
+    }.get(hit_label or "", "comp-hit-unknown")
+
+
+def _build_prospect_page(prospect: Dict, label: str, latest_ts: datetime,
+                         veteran_slugs: Optional[set] = None) -> str:
+    """Per-prospect page: header + projection panel + top-25 comps with
+    hit-label colouring + KTC delta + (TE only) experimental callout.
+    Mirrors the veteran ``_build_player_page`` layout."""
+    veteran_slugs = veteran_slugs or set()
+    name = prospect.get("name", "—")
+    pos = prospect.get("position", "—")
+    school = prospect.get("school", "—")
+    draft_class = prospect.get("draft_class", "—")
+    age = prospect.get("age")
+    proj = prospect.get("projection") or {}
+    ktc = prospect.get("ktc") or {}
+    production = prospect.get("production") or {}
+    rank = prospect.get("model_overall_rank", "—")
+    pos_rank = prospect.get("model_pos_rank", "—")
+    is_te = (pos == "TE")
+    te_callout = ""
+    if is_te:
+        te_callout = (
+            '<div class="callout callout-warn" style="margin-top:14px">'
+            '<strong>v3.0 note — TE projections are preview-grade.</strong> '
+            "The engine's TE Spearman ρ is 0.086 vs 0.27+ for QB/RB/WR. "
+            'TE-specific feature weights are on the v3.1 roadmap. Use this '
+            'comp grid as a directional indicator, not a hard projection. See '
+            '<a href="../methodology.html#prospects">methodology</a>.</div>'
+        )
+
+    header_html = f"""<div class="player-header">
+  <h1>{_esc(name)}{(" " + _te_experimental_pill()) if is_te else ""}</h1>
+  <div class="sub">{_pos_badge(pos)} · {_esc(school)} · Class of {_esc(draft_class)} · Model rank #{_esc(rank)} (pos #{_esc(pos_rank)})</div>
+  <div class="metrics">
+    <div class="metric"><div class="num">{_fmt_or_dash(proj.get("projected_career_fp"), fmt="{:.0f}")}</div><div class="label">Projected career fp</div></div>
+    <div class="metric"><div class="num">{_fmt_or_dash(proj.get("projected_peak3_fp_pg"), fmt="{:.1f}")}</div><div class="label">Projected peak3 fp/g</div></div>
+    <div class="metric"><div class="num">{_fmt_or_dash(proj.get("projected_years_in_league"), fmt="{:.1f}")}</div><div class="label">Proj yrs in league</div></div>
+    <div class="metric"><div class="num">{_fmt_or_dash(age, fmt="{:.1f}")}</div><div class="label">Age</div></div>
+    <div class="metric"><div class="num">{_esc(proj.get("n_comps_with_nfl") or "—")}</div><div class="label">Comps w/ NFL data</div></div>
+  </div>
+  {te_callout}
+  <div style="margin-top:14px"><a href="../prospects.html" style="color:var(--header-text);opacity:0.8;font-size:13px">← back to Prospect Rankings</a></div>
+</div>"""
+
+    # ---- KTC delta callout ----------------------------------------------
+    delta = prospect.get("ktc_delta_overall")
+    ktc_rank_sf = ktc.get("ktc_rank_sf")
+    ktc_pos_rank_sf = ktc.get("ktc_pos_rank_sf")
+    ktc_callout = ""
+    if ktc_rank_sf is not None or delta is not None:
+        ktc_callout = (
+            '<div class="callout" style="margin-top:14px">'
+            f'<strong>KTC consensus.</strong> SF rank '
+            f'<strong>{_esc(ktc_rank_sf) if ktc_rank_sf is not None else "unranked"}</strong>'
+            f'{f" (pos #{_esc(ktc_pos_rank_sf)})" if ktc_pos_rank_sf is not None else ""} — '
+            f'model delta {_delta_chip(delta)}. '
+            f'Positive delta = model bullish vs consensus; negative = bearish.</div>'
+        )
+    elif delta is None and ktc_rank_sf is None:
+        ktc_callout = (
+            '<div class="callout" style="margin-top:14px">'
+            '<strong>KTC consensus.</strong> Not currently ranked on KTC. '
+            'No delta available.</div>'
+        )
+
+    # ---- Production panel (college) -------------------------------------
+    prod_html = (
+        f'<div class="controls" style="margin:14px 0 8px;flex-wrap:wrap;gap:14px">'
+        f'<span class="stats">College adj career fp/g: <strong>{_fmt_or_dash(production.get("adj_career_fp_pg"), fmt="{:.2f}")}</strong></span>'
+        f'<span class="stats">Final season fp/g: <strong>{_fmt_or_dash(production.get("final_season_fp_pg"), fmt="{:.2f}")}</strong></span>'
+        f'<span class="stats">Peak season fp/g: <strong>{_fmt_or_dash(production.get("peak_season_fp_pg"), fmt="{:.2f}")}</strong></span>'
+        f'<span class="stats">Conf tier (last): <strong>{_esc(prospect.get("conference_tier_last") or "—")}</strong></span>'
+        f'</div>'
+    )
+
+    # ---- Comp table -----------------------------------------------------
+    comps = prospect.get("comps") or []
+    comp_rows = ""
+    for c in comps[:25]:
+        hit = c.get("hit_label") or "unknown"
+        hit_cls = _comp_hit_class(hit)
+        sim = c.get("similarity") or 0.0
+        nfl = c.get("nfl_career") or {}
+        snap_year = c.get("last_season")
+        era_badge = ""
+        if isinstance(snap_year, (int, float)) and snap_year < 1999:
+            era_badge = (
+                f' <span class="era-chip" title="Pre-1999 comp — corpus is 2000+ '
+                f'for prospects so this rarely fires.">⏳ {int(snap_year)}</span>'
+            )
+        # Cross-link to veteran page when we have a GSIS id AND that
+        # veteran page exists in the build.
+        nfl_link_html = _esc(c.get("nfl_display_name") or c.get("name") or "—")
+        gsis = c.get("nfl_gsis_id")
+        if gsis:
+            # Try to match against veteran slug. The veteran slug format is
+            # ``re.sub-name + last-6 of pid``. We don't have the veteran's
+            # display name here cheaply, so just check whether any veteran
+            # slug ends with the last-6 of the GSIS id.
+            tail = re.sub(r"[^a-z0-9]+", "", gsis.lower())[-6:]
+            matches = [s for s in veteran_slugs if s.endswith(tail)]
+            if matches:
+                nfl_link_html = f'<a href="{_esc(matches[0])}.html">{nfl_link_html}</a>'
+
+        comp_rows += (
+            f'<tr class="comp-row {hit_cls}">'
+            f'<td class="name">{_esc(c.get("name","—"))}{era_badge}</td>'
+            f'<td class="team">{_esc(c.get("school","—"))}</td>'
+            f'<td class="years">{_esc(c.get("class_year") or "—")}</td>'
+            f'<td class="score" style="text-align:right">{float(sim):.3f}</td>'
+            f'<td><span class="hit-chip hit-{_esc(hit)}">{_esc(hit)}</span></td>'
+            f'<td class="name">{nfl_link_html}</td>'
+            f'<td class="years" style="text-align:right">{_fmt_or_dash(nfl.get("career_fp"), fmt="{:.0f}")}</td>'
+            f'<td class="years" style="text-align:right">{_fmt_or_dash(nfl.get("peak3_fp_pg"), fmt="{:.1f}")}</td>'
+            f'<td class="years" style="text-align:right">{_esc(nfl.get("seasons_played") or "—")}</td>'
+            f'</tr>'
+        )
+
+    body = f"""{header_html}
+<div class="container">
+
+{ktc_callout}
+
+<h2>Projection <span class="accent">Inputs</span></h2>
+<p class="lede">College production summary feeding the v3.0 similarity
+vector. The engine weights these features against the prospect corpus
+(2000–present) to build the comp grid below.</p>
+{prod_html}
+
+<h2>Top-25 <span class="accent">Comparables</span></h2>
+<p class="lede">Historical college players whose production curves most
+closely match {_esc(name)}. Hit-label colouring tags each comp's eventual
+NFL outcome: <span class="hit-chip hit-elite">elite</span>,
+<span class="hit-chip hit-starter">starter</span>,
+<span class="hit-chip hit-bust">bust</span>,
+<span class="hit-chip hit-unknown">unknown</span> (still developing or
+never reached the NFL). Click an NFL name to jump to its veteran page when
+available.</p>
+
+<table>
+<thead><tr>
+  <th>College player</th>
+  <th>School</th>
+  <th>Class</th>
+  <th style="text-align:right">Similarity</th>
+  <th>NFL outcome</th>
+  <th>NFL career</th>
+  <th style="text-align:right">Career fp</th>
+  <th style="text-align:right">Peak3 fp/g</th>
+  <th style="text-align:right">Seasons</th>
+</tr></thead>
+<tbody>{comp_rows}</tbody>
+</table>
+
+<p class="lede" style="margin-top:24px">Methodology details:
+<a href="../methodology.html#prospects">v3.0 prospect engine — PR 3 similarity, PR 4 projection, PR 5 back-test</a>.</p>
+
+</div>"""
+
+    return _page(
+        f"Kings of Dynasty — {name} (Prospect)",
+        _site_header("prospects", latest_ts, label),
+        body,
+        css_href="../assets/style.css",
     )
 
 
@@ -1253,6 +1855,26 @@ def generate_site(
         _build_prospects(latest_ts, label),
         encoding="utf-8",
     )
+
+    # v3.0 PR 6: per-prospect pages. Loaded from the same artifact the
+    # prospects.html builder uses. If the artifact is missing/empty,
+    # _load_prospects_artifact returns None and we skip the loop — the
+    # placeholder prospects.html already explains why.
+    _prospects_artifact = _load_prospects_artifact()
+    if _prospects_artifact and _prospects_artifact.get("prospects"):
+        # Pre-compute the set of veteran slugs we generated above so the
+        # comp grid can cross-link safely (without 404s).
+        veteran_slugs = {
+            _slug(r["name"], r["player_id"]) for r in engine.rankings
+        }
+        for _prospect in _prospects_artifact["prospects"]:
+            _pslug = _prospect_slug(_prospect)
+            _page_html = _build_prospect_page(
+                _prospect, label, latest_ts, veteran_slugs=veteran_slugs
+            )
+            (out_root / "players" / f"{_pslug}-prospect.html").write_text(
+                _page_html, encoding="utf-8"
+            )
 
     # Per-player pages. v2.3.4 (Phil 2026-05-22): generate a page for
     # EVERY ranked player, not just the top ``limit``, so every row on

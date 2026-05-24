@@ -78,3 +78,9 @@ Thumbs.db
 # Consensus snapshots: dated history is regenerated daily, keep only the
 # latest pointer + the crosswalk in git so the site builds offline.
 data/consensus/ktc_[0-9]*-[0-9]*-[0-9]*.json
+
+# v3.0 engine artifacts — regenerable by scripts/build_prospect_engine.py
+# and scripts/build_prospects_v3.py during the launcher pipeline.
+data/engine_v3/prospect_corpus.json.gz
+data/engine_v3/prospects_*.json
+

@@ -817,12 +817,30 @@ PEAK_ANCHOR_MIN_COMPS = 3
 FLOOR_RECENCY_WINDOW = 3        # seasons of forward window
 FLOOR_RECENCY_DISCOUNT = 0.90   # avg discount applied to the forward window
 FLOOR_DYNASTY_HORIZON = 6.0     # typical remaining-career for banked weighting
-FLOOR_BANKED_DECAY = 1.5        # exponent on (yrs_rem / horizon)
-# Why 6.0 horizon + 1.5 decay: a mid-prime player with 6+ years
-# remaining gets full banked credit; an aging player with 2-3 years
-# left gets ~20–35%. Calibrated so Justin Jefferson (6.1 yrs_rem) lands
-# in WR1 territory and Aaron Rodgers (2.3 yrs_rem) doesn't get pushed
-# into the top tier on banked production alone.
+# Banked credit also requires the player to still be PRODUCING close
+# to their peak. The ``still_producing`` factor tapers linearly from
+# 0.0 at recent_2yr/peak3 = 0.55 up to 1.0 at recent_2yr/peak3 = 0.80.
+# A retiring QB (Rodgers recent ~14 vs peak 24, ratio 0.60) gets
+# ~20% banked credit; an active mid-prime vet (Dak ratio 0.82) gets
+# 100%. This keeps banked production from inflating players whose
+# dynasty value has already evaporated.
+# Position-specific producing-ratio curves. QBs have the longest
+# typical careers, so a QB whose recent_2yr/peak3 ratio has fallen
+# materially is most likely actually finished as a dynasty asset.
+# RB/WR/TE decline more gradually and retain real fantasy value even
+# at a 0.55–0.65 ratio of their all-time peak.
+FLOOR_PRODUCING_FLOOR_RATIO = {
+    "QB": 0.65,
+    "RB": 0.50,
+    "WR": 0.50,
+    "TE": 0.50,
+}
+FLOOR_PRODUCING_FULL_RATIO = {
+    "QB": 0.85,
+    "RB": 0.75,
+    "WR": 0.75,
+    "TE": 0.75,
+}
 
 
 def _proven_production_floor(
@@ -843,17 +861,27 @@ def _proven_production_floor(
         # 3yr window so we still anchor on real production rather than
         # zero.
         recent_pg = _recent_3yr_target(target, league_format)
-    # Banked weight is (yrs_rem / horizon) ** decay, with decay > 1 so
-    # the credit accelerates DOWN as a player approaches retirement.
-    # Calibration: decay=1.5 gives 6+ yrs full credit, 4 yrs ~54%, 3
-    # yrs ~35%, 2 yrs ~19%, 1 yr ~7%. This keeps heavily-banked-but-
-    # retiring QBs (Rodgers at 2.3 yrs_rem, banked 5097) from inflating
-    # into the top tier on past-production credit they can't cash in
-    # dynasty, while preserving most of the credit for mid-prime vets
-    # (Dak at 4.9 yrs_rem, banked 2598).
-    raw_weight = weighted_seasons / FLOOR_DYNASTY_HORIZON
-    banked_weight = min(raw_weight, 1.0) ** FLOOR_BANKED_DECAY
-    banked_weight = max(banked_weight, 0.0)
+    # Banked weight is linear in (yrs_rem / horizon) capped at 1.0, then
+    # additionally gated by a ``still_producing`` factor based on the
+    # ratio of recent_2yr fp/g to all-time peak_3yr fp/g. A player who
+    # has materially fallen off their peak (Rodgers 14.7/24.4 = 0.60)
+    # gets only a small slice of their banked credit; a player still
+    # at-or-near peak (Dak 17.2/21.0 = 0.82) gets it all. This keeps
+    # heavily-banked-but-retiring QBs from inflating into the top tier
+    # on past-production credit they can't cash in dynasty.
+    raw_weight = min(weighted_seasons / FLOOR_DYNASTY_HORIZON, 1.0)
+    raw_weight = max(raw_weight, 0.0)
+    peak3 = target.peak_3yr_fp_per_game.get(league_format, 0.0)
+    if peak3 > 0:
+        producing_ratio = recent_pg / peak3
+        floor_r = FLOOR_PRODUCING_FLOOR_RATIO.get(target.position, 0.55)
+        full_r = FLOOR_PRODUCING_FULL_RATIO.get(target.position, 0.80)
+        denom = full_r - floor_r
+        producing_factor = (producing_ratio - floor_r) / denom if denom > 0 else 1.0
+        producing_factor = max(0.0, min(producing_factor, 1.0))
+    else:
+        producing_factor = 1.0
+    banked_weight = raw_weight * producing_factor
     banked_component = banked * banked_weight
     forward_window = min(weighted_seasons, FLOOR_RECENCY_WINDOW)
     forward_component = (

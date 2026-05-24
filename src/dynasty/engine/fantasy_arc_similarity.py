@@ -507,6 +507,21 @@ def pre1999_haircut_weight(arc: CareerArc, snapshot_age: int) -> float:
     return PRE1999_COMP_WEIGHT_HAIRCUT if is_pre1999_comp(arc, snapshot_age) else 1.0
 
 
+# v3.2 — survivorship-bias fix. Floor on the career-stage-matched comp
+# gate. A current player with N completed seasons is comp'd against
+# historical players with ≥ max(N, COMP_POOL_MIN_SEASONS) seasons so
+# that:
+#   - For early-career targets (N ≤ 3), we still require 3-season
+#     comps — 1-2 season "played-one-year-then-disappeared" arcs are
+#     too thin to project from.
+#   - For mid-career targets (N=4..7), the gate widens to N and pulls
+#     in the previously-excluded 4-7 season "didn't pan out" pool.
+#   - For veterans (N≥8), the gate roughly matches the pre-v3.2
+#     LONG_ARC_MIN_SEASONS=8 cutoff — their comp pool is approximately
+#     unchanged.
+COMP_POOL_MIN_SEASONS = 3
+
+
 def find_comps(
     target: CareerArc,
     long_arc_corpus: Sequence[CareerArc],
@@ -516,16 +531,33 @@ def find_comps(
     k: int = TOP_K_COMPS,
     age_window: int = AGE_WINDOW,
     stage_window: int = CAREER_STAGE_WINDOW,
+    target_n_seasons: Optional[int] = None,
 ) -> List[CompMatch]:
+    """Find top-K career-stage-matched comps for ``target``.
+
+    ``target_n_seasons`` (v3.2): the target's number of completed NFL
+    seasons. Comp candidates must have ≥ max(target_n_seasons,
+    COMP_POOL_MIN_SEASONS) seasons in their arc — i.e. they have
+    actually crossed the same career-stage threshold the target has
+    reached. When None, falls back to len(target.career_arc).
+    """
     tv = build_arc_vector(target, target_age, league_format, percentile_table)
     if tv is None:
         return []
+
+    if target_n_seasons is None:
+        target_n_seasons = len(target.career_arc)
+    min_comp_seasons = max(target_n_seasons, COMP_POOL_MIN_SEASONS)
 
     candidates: List[CompMatch] = []
     for comp in long_arc_corpus:
         if comp.position != target.position:
             continue
         if comp.player_id == target.player_id:
+            continue
+        # v3.2 career-stage gate: comp must have at least as many
+        # completed seasons as the target (with a 3-season floor).
+        if len(comp.career_arc) < min_comp_seasons:
             continue
         # Require that comp actually played past target_age (we need a
         # post-age career to project from).
@@ -898,6 +930,7 @@ def project_player(
     league_format: str,
     percentile_table: CareerStagePercentileTable,
     k: int = TOP_K_COMPS,
+    target_n_seasons: Optional[int] = None,
 ) -> ProjectionResult:
     """Build a comp-pool-driven projection of the target's remaining career.
 
@@ -934,6 +967,7 @@ def project_player(
         league_format=league_format,
         percentile_table=percentile_table,
         k=k,
+        target_n_seasons=target_n_seasons,
     )
     target_peak = _peak_3yr_target(target, league_format)
     projection_rate = _projection_rate(target, league_format)

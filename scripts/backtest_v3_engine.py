@@ -76,6 +76,95 @@ HIT_GATE_TOP_N = 50
 BUST_GATE_BOTTOM_OF = 200
 BUST_GATE_BOTTOM_N = 50
 
+# Position-aware percentile cutoffs (peak3_fp_pg, computed across the
+# bridged hold-out corpus). Surfaces in the report + docs.
+ELITE_PERCENTILE = 80  # ≥ Pth percentile within position → elite
+BUST_PERCENTILE = 30   # < Pth percentile within position → bust
+
+
+def _percentile(sorted_values: Sequence[float], pct: float) -> float:
+    """Linear-interp percentile (no scipy dep). ``sorted_values`` must be sorted asc."""
+    n = len(sorted_values)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return float(sorted_values[0])
+    if pct <= 0:
+        return float(sorted_values[0])
+    if pct >= 100:
+        return float(sorted_values[-1])
+    rank = (pct / 100.0) * (n - 1)
+    lo = int(math.floor(rank))
+    hi = int(math.ceil(rank))
+    if lo == hi:
+        return float(sorted_values[lo])
+    frac = rank - lo
+    return float(sorted_values[lo]) * (1.0 - frac) + float(sorted_values[hi]) * frac
+
+
+def compute_position_percentiles(
+    rows: Sequence[Mapping],
+    elite_pct: float = ELITE_PERCENTILE,
+    bust_pct: float = BUST_PERCENTILE,
+) -> Dict[str, Dict[str, float]]:
+    """Compute position-specific peak3 percentile cutoffs.
+
+    Returns ``{position: {elite_cutoff, bust_cutoff, n}}``. Built once
+    from the bridged hold-out corpus and used by both position-aware
+    hit-labelling and the docs/report.
+    """
+    by_pos: Dict[str, List[float]] = {}
+    for r in rows:
+        pos = r.get("position")
+        if pos not in bp.SKILL_POSITIONS:
+            continue
+        v = float(r.get("actual_peak3_fp_pg") or 0.0)
+        by_pos.setdefault(pos, []).append(v)
+    out: Dict[str, Dict[str, float]] = {}
+    for pos, vals in by_pos.items():
+        vals_sorted = sorted(vals)
+        out[pos] = {
+            "elite_cutoff": round(_percentile(vals_sorted, elite_pct), 3),
+            "bust_cutoff": round(_percentile(vals_sorted, bust_pct), 3),
+            "n": len(vals_sorted),
+        }
+    return out
+
+
+def position_aware_label(
+    position: str,
+    peak3: float,
+    seasons: int,
+    cutoffs: Mapping[str, Mapping[str, float]],
+    min_seasons_for_bust: int = 0,
+) -> str:
+    """Classify a player using position-specific peak3 percentiles.
+
+    Per the v3.0 PR 5 position-aware methodology:
+
+    * elite   — peak3 ≥ position's ELITE_PERCENTILE (80th) percentile
+    * bust    — peak3 < position's BUST_PERCENTILE (30th) percentile
+    * starter — neither elite nor bust
+    * unknown — only when position cutoffs are unavailable (or when an
+                optional ``min_seasons_for_bust`` floor is set and the
+                player hasn't reached it)
+
+    The percentile cutoffs are derived from the bridged hold-out
+    corpus itself, so they already encode the survivorship
+    distribution — no extra seasons-played floor is required for the
+    primary gate.
+    """
+    pos_cuts = cutoffs.get(position)
+    if not pos_cuts:
+        return "unknown"
+    if peak3 >= pos_cuts["elite_cutoff"]:
+        return "elite"
+    if peak3 < pos_cuts["bust_cutoff"]:
+        if seasons < min_seasons_for_bust:
+            return "unknown"
+        return "bust"
+    return "starter"
+
 
 # ---------------------------------------------------------------------------
 # Spearman correlation (no scipy dep)
@@ -208,22 +297,44 @@ def evaluate(
             "actual_career_fp": actual.get("career_fp", 0.0),
             "actual_peak3_fp_pg": actual.get("peak3_fp_pg", 0.0),
             "actual_seasons_played": actual.get("seasons_played", 0),
-            "actual_hit_label": _hit_actual(actual),
+            "actual_hit_label": _hit_actual(actual),  # legacy absolute label
             "ktc_key": (bp._normalize_name(target.player_name), target.position),
         })
     log.info("Scored (bridge resolved): %d / %d", len(rows), len(holdouts))
 
+    # ---- Position-aware labels (NEW gate) ----
+    pos_cutoffs = compute_position_percentiles(rows)
+    for r in rows:
+        r["actual_hit_label_posaware"] = position_aware_label(
+            r["position"],
+            float(r["actual_peak3_fp_pg"] or 0.0),
+            int(r["actual_seasons_played"] or 0),
+            pos_cutoffs,
+        )
+
     # ---- Hit@10 (top-50 by projection -> actual elite) ----
+    # Compute under BOTH labelling regimes. Legacy = absolute peak3 >= 18;
+    # position-aware = peak3 >= position 80th percentile in this corpus.
     rows_sorted = sorted(rows, key=lambda r: -r["projected_career_fp"])
     top50 = rows_sorted[:HIT_GATE_TOP_N]
-    n_elite_in_top50 = sum(1 for r in top50 if r["actual_hit_label"] == "elite")
-    hit_at_10 = n_elite_in_top50 / max(len(top50), 1)
+    n_elite_in_top50_legacy = sum(
+        1 for r in top50 if r["actual_hit_label"] == "elite")
+    n_elite_in_top50_pa = sum(
+        1 for r in top50 if r["actual_hit_label_posaware"] == "elite")
+    hit_at_10_legacy = n_elite_in_top50_legacy / max(len(top50), 1)
+    hit_at_10 = n_elite_in_top50_pa / max(len(top50), 1)
+    n_elite_in_top50 = n_elite_in_top50_pa
 
     # ---- Bust@10 (bottom-50 of top-200 -> actual bust) ----
     top200 = rows_sorted[:BUST_GATE_BOTTOM_OF]
     bottom50 = top200[-BUST_GATE_BOTTOM_N:]
-    n_bust_in_bottom = sum(1 for r in bottom50 if r["actual_hit_label"] == "bust")
-    bust_at_10 = n_bust_in_bottom / max(len(bottom50), 1)
+    n_bust_in_bottom_legacy = sum(
+        1 for r in bottom50 if r["actual_hit_label"] == "bust")
+    n_bust_in_bottom_pa = sum(
+        1 for r in bottom50 if r["actual_hit_label_posaware"] == "bust")
+    bust_at_10_legacy = n_bust_in_bottom_legacy / max(len(bottom50), 1)
+    bust_at_10 = n_bust_in_bottom_pa / max(len(bottom50), 1)
+    n_bust_in_bottom = n_bust_in_bottom_pa
 
     # ---- Spearman ρ(model_rank, actual_rank) ----
     model_vals = [r["projected_career_fp"] for r in rows]
@@ -281,12 +392,21 @@ def evaluate(
     summary = {
         "n_holdouts": len(holdouts),
         "n_scored": len(rows),
+        # Primary (position-aware) gate metrics:
         "hit_at_10": round(hit_at_10, 4),
         "hit_at_10_n": n_elite_in_top50,
         "hit_at_10_of": len(top50),
         "bust_at_10": round(bust_at_10, 4),
         "bust_at_10_n": n_bust_in_bottom,
         "bust_at_10_of": len(bottom50),
+        # Legacy (absolute-threshold) gate metrics, kept for context:
+        "hit_at_10_legacy": round(hit_at_10_legacy, 4),
+        "hit_at_10_legacy_n": n_elite_in_top50_legacy,
+        "bust_at_10_legacy": round(bust_at_10_legacy, 4),
+        "bust_at_10_legacy_n": n_bust_in_bottom_legacy,
+        "position_cutoffs": pos_cutoffs,
+        "elite_percentile": ELITE_PERCENTILE,
+        "bust_percentile": BUST_PERCENTILE,
         "spearman_rho": round(rho, 4),
         "ktc_h2h": round(ktc_h2h, 4),
         "ktc_h2h_n": ktc_pairs_model_wins,
@@ -300,10 +420,14 @@ def evaluate(
     for cls, cls_rows in sorted(by_class.items()):
         cls_sorted = sorted(cls_rows, key=lambda r: -r["projected_career_fp"])
         top10 = cls_sorted[:10]
-        n_elite = sum(1 for r in top10 if r["actual_hit_label"] == "elite")
+        n_elite = sum(1 for r in top10
+                      if r["actual_hit_label_posaware"] == "elite")
+        n_elite_legacy = sum(1 for r in top10
+                             if r["actual_hit_label"] == "elite")
         summary["per_class"][cls] = {
             "n_scored": len(cls_rows),
             "top10_elite": n_elite,
+            "top10_elite_legacy": n_elite_legacy,
         }
     summary["gates"] = _evaluate_gates(summary)
     return summary
@@ -357,6 +481,13 @@ def _format_report(summary: Mapping) -> str:
         f"Hold-outs total:  {summary['n_holdouts']}",
         f"Scored (bridged): {summary['n_scored']}",
         "",
+        "-- Legacy gate (absolute peak3 ≥ 18 = elite; <6 & ≥3 seasons = bust) --",
+        f"  Hit@10 (legacy):  {summary.get('hit_at_10_legacy', 0):.1%}  "
+        f"({summary.get('hit_at_10_legacy_n', 0)}/{summary['hit_at_10_of']})",
+        f"  Bust@10 (legacy): {summary.get('bust_at_10_legacy', 0):.1%}  "
+        f"({summary.get('bust_at_10_legacy_n', 0)}/{summary['bust_at_10_of']})",
+        "",
+        f"-- Position-aware gate (peak3 ≥ {summary.get('elite_percentile', ELITE_PERCENTILE)}th pctl within position) [PRIMARY] --",
         f"  Hit@10        : {summary['hit_at_10']:.1%}  "
         f"({summary['hit_at_10_n']}/{summary['hit_at_10_of']})  "
         f"target ≥ {GATE_HIT_AT_10:.0%}  [{g['hit_at_10']['status']}]",
@@ -369,10 +500,20 @@ def _format_report(summary: Mapping) -> str:
         f"({summary['ktc_h2h_n']}/{summary['ktc_h2h_of']})  "
         f"target ≥ {GATE_KTC_H2H:.0%}  [{g['ktc_h2h']['status']}]",
         "",
-        "Per-class top-10 elites:",
+        "Position peak3 cutoffs:",
     ]
+    for pos, cuts in sorted((summary.get("position_cutoffs") or {}).items()):
+        lines.append(
+            f"    {pos}: elite ≥ {cuts['elite_cutoff']:.2f} fp/g, "
+            f"bust < {cuts['bust_cutoff']:.2f} fp/g  (n={cuts['n']})"
+        )
+    lines.append("")
+    lines.append("Per-class top-10 elites (position-aware):")
     for cls, p in sorted(summary["per_class"].items()):
-        lines.append(f"    {cls}: top-10 elites = {p['top10_elite']}  (n_scored={p['n_scored']})")
+        lines.append(
+            f"    {cls}: top-10 elites = {p['top10_elite']} "
+            f"(legacy={p.get('top10_elite_legacy', 0)})  (n_scored={p['n_scored']})"
+        )
     lines.append("")
     lines.append(f"OVERALL: {_overall_status(g).upper()}")
     return "\n".join(lines)

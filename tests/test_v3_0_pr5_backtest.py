@@ -294,13 +294,148 @@ def test_format_report_renders():
         "n_holdouts": 100, "n_scored": 50,
         "hit_at_10": 0.30, "hit_at_10_n": 15, "hit_at_10_of": 50,
         "bust_at_10": 0.60, "bust_at_10_n": 30, "bust_at_10_of": 50,
+        "hit_at_10_legacy": 0.10, "hit_at_10_legacy_n": 5,
+        "bust_at_10_legacy": 0.36, "bust_at_10_legacy_n": 18,
+        "position_cutoffs": {"QB": {"elite_cutoff": 16.7, "bust_cutoff": 4.0, "n": 62}},
+        "elite_percentile": 80, "bust_percentile": 30,
         "spearman_rho": 0.40,
         "ktc_h2h": 0.55, "ktc_h2h_n": 11, "ktc_h2h_of": 20,
-        "per_class": {2017: {"n_scored": 10, "top10_elite": 3},
-                      2018: {"n_scored": 10, "top10_elite": 2}},
+        "per_class": {2017: {"n_scored": 10, "top10_elite": 3,
+                              "top10_elite_legacy": 1},
+                      2018: {"n_scored": 10, "top10_elite": 2,
+                              "top10_elite_legacy": 0}},
     }
     summary["gates"] = bt._evaluate_gates(summary)
     out = bt._format_report(summary)
     assert "Hit@10" in out
     assert "Spearman" in out
     assert "OVERALL: PASS" in out
+    # Both gate regimes appear in the rendered report
+    assert "Legacy gate" in out
+    assert "Position-aware gate" in out
+    assert "PRIMARY" in out
+
+
+# ---------------------------------------------------------------------------
+# Position-aware percentile methodology (PR 5 revision)
+# ---------------------------------------------------------------------------
+
+def test_percentile_linear_interpolation():
+    # NumPy-compatible linear interpolation on sorted input.
+    vs = [1.0, 2.0, 3.0, 4.0, 5.0]
+    assert bt._percentile(vs, 0) == 1.0
+    assert bt._percentile(vs, 100) == 5.0
+    assert bt._percentile(vs, 50) == pytest.approx(3.0)
+    # 25th percentile of [1..5] is 2.0 with linear interpolation
+    assert bt._percentile(vs, 25) == pytest.approx(2.0)
+    assert bt._percentile([], 50) == 0.0
+    assert bt._percentile([7.0], 95) == 7.0
+
+
+def test_compute_position_percentiles_per_position():
+    rows = [
+        {"position": "QB", "actual_peak3_fp_pg": 20.0},
+        {"position": "QB", "actual_peak3_fp_pg": 15.0},
+        {"position": "QB", "actual_peak3_fp_pg": 10.0},
+        {"position": "QB", "actual_peak3_fp_pg": 5.0},
+        {"position": "QB", "actual_peak3_fp_pg": 1.0},
+        {"position": "TE", "actual_peak3_fp_pg": 12.0},
+        {"position": "TE", "actual_peak3_fp_pg": 8.0},
+        {"position": "TE", "actual_peak3_fp_pg": 4.0},
+        {"position": "TE", "actual_peak3_fp_pg": 1.0},
+        {"position": "TE", "actual_peak3_fp_pg": 0.0},
+        # non-skill positions filtered out
+        {"position": "OL", "actual_peak3_fp_pg": 99.0},
+    ]
+    cuts = bt.compute_position_percentiles(rows, elite_pct=80, bust_pct=30)
+    assert set(cuts.keys()) == {"QB", "TE"}
+    # QB 80th percentile of [1,5,10,15,20] is rank=0.8*4=3.2 →
+    # 15 + 0.2*(20-15) = 16.0 (NumPy-compatible linear interpolation)
+    assert cuts["QB"]["elite_cutoff"] == pytest.approx(16.0, abs=0.01)
+    # TE elite cutoff is much lower than QB — position-aware behaviour
+    assert cuts["TE"]["elite_cutoff"] < cuts["QB"]["elite_cutoff"]
+    assert cuts["QB"]["n"] == 5
+    assert cuts["TE"]["n"] == 5
+
+
+def test_position_aware_label_classification():
+    cuts = {
+        "QB": {"elite_cutoff": 17.0, "bust_cutoff": 5.0, "n": 5},
+        "TE": {"elite_cutoff": 9.0, "bust_cutoff": 1.5, "n": 5},
+    }
+    # Elite — above 80th percentile
+    assert bt.position_aware_label("QB", 18.0, 5, cuts) == "elite"
+    # Elite at exactly cutoff
+    assert bt.position_aware_label("QB", 17.0, 5, cuts) == "elite"
+    # Bust — below 30th percentile (no seasons floor for primary gate)
+    assert bt.position_aware_label("QB", 2.0, 1, cuts) == "bust"
+    # Starter — between cutoffs
+    assert bt.position_aware_label("QB", 10.0, 4, cuts) == "starter"
+    # TE cutoffs are different (position-aware): 4.0 fp/g is starter for
+    # TE but bust for QB
+    assert bt.position_aware_label("TE", 4.0, 3, cuts) == "starter"
+    assert bt.position_aware_label("QB", 4.0, 3, cuts) == "bust"
+    # Unknown position
+    assert bt.position_aware_label("K", 100.0, 10, cuts) == "unknown"
+
+
+def test_position_aware_optional_seasons_floor():
+    # Optional min_seasons_for_bust floor classifies short careers as
+    # 'unknown' rather than 'bust'. Off by default for the primary gate.
+    cuts = {"QB": {"elite_cutoff": 17.0, "bust_cutoff": 5.0, "n": 5}}
+    # Default (floor=0): a 1-season flameout is a bust
+    assert bt.position_aware_label("QB", 2.0, 1, cuts) == "bust"
+    # With floor=3: same player is now 'unknown'
+    assert bt.position_aware_label("QB", 2.0, 1, cuts,
+                                   min_seasons_for_bust=3) == "unknown"
+    # With floor=3: 4 seasons + low peak3 stays a bust
+    assert bt.position_aware_label("QB", 2.0, 4, cuts,
+                                   min_seasons_for_bust=3) == "bust"
+
+
+def test_summary_exposes_position_cutoffs_and_legacy_metrics():
+    """After evaluate(), the summary carries both the new position-aware
+    metrics AND the legacy absolute-threshold metrics for comparison.
+    """
+    corpus = [
+        _pv("Holdout1", "T1", 2017, "QB", adj=18.0),
+        _pv("Holdout2", "T2", 2018, "RB", adj=17.0),
+        _pv("Hist1", "H1", 2010, "QB", adj=20.0),
+        _pv("Hist2", "H2", 2011, "RB", adj=18.0),
+    ]
+    resolver = NameCollisionResolver({
+        "T1": {"nfl_pfr_player_id": "gsis-T1", "nfl_display_name": "Holdout1",
+               "nfl_position": "QB", "last_college_season": 2016, "college": "Test U",
+               "match_strategy": "test"},
+        "T2": {"nfl_pfr_player_id": "gsis-T2", "nfl_display_name": "Holdout2",
+               "nfl_position": "RB", "last_college_season": 2017, "college": "Test U",
+               "match_strategy": "test"},
+        "H1": {"nfl_pfr_player_id": "gsis-H1", "nfl_display_name": "Hist1",
+               "nfl_position": "QB", "last_college_season": 2009, "college": "Test U",
+               "match_strategy": "test"},
+        "H2": {"nfl_pfr_player_id": "gsis-H2", "nfl_display_name": "Hist2",
+               "nfl_position": "RB", "last_college_season": 2010, "college": "Test U",
+               "match_strategy": "test"},
+    })
+    nfl = {
+        "gsis-T1": {"career_fp": 1200, "peak3_fp_pg": 19.0, "seasons_played": 5,
+                    "max_year": 2024, "min_year": 2017},
+        "gsis-T2": {"career_fp": 500,  "peak3_fp_pg": 8.0,  "seasons_played": 3,
+                    "max_year": 2024, "min_year": 2018},
+        "gsis-H1": {"career_fp": 2000, "peak3_fp_pg": 22.0, "seasons_played": 8,
+                    "max_year": 2017, "min_year": 2010},
+        "gsis-H2": {"career_fp": 800,  "peak3_fp_pg": 12.0, "seasons_played": 5,
+                    "max_year": 2015, "min_year": 2011},
+    }
+    s = bt.evaluate(corpus, resolver, nfl, ktc={},
+                    holdout_classes=(2017, 2018, 2019))
+    # Position-aware metrics live at the primary keys
+    assert "hit_at_10" in s
+    assert "bust_at_10" in s
+    # Legacy metrics are also surfaced for comparison
+    assert "hit_at_10_legacy" in s
+    assert "bust_at_10_legacy" in s
+    # Cutoffs by position are exposed for the docs / UI
+    assert "position_cutoffs" in s
+    assert s["elite_percentile"] == 80
+    assert s["bust_percentile"] == 30

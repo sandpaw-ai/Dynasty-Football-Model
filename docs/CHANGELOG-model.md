@@ -15,6 +15,72 @@ Format for each entry:
 
 ---
 
+## v3.0 PR 3 — prospect (college → NFL) similarity engine (library only)
+
+**Date:** 2026-05-24
+
+What changed
+: Reintroduces a college → NFL similarity engine (the v0.16
+  `rookie_similarity_chain` deleted in v1.0), rebuilt as a fresh module
+  (`src/dynasty/engine/prospect_similarity.py`) on top of:
+
+  * 26 seasons of college player-seasons (PR 1 corpus, 2000-2025).
+  * Per-team / per-season Strength of Schedule (PR 2 SOS corpus,
+    3,242 team-seasons). SOS-adjusted per-game fp:
+        `adj_fp = fp * clip(1 + 0.15 * z_sos, 0.65, 1.10)`.
+  * Conference-tier multipliers (P5 1.00, G5_top 0.85, G5 0.75,
+    FCS 0.65), applied per season then averaged across the career.
+  * Position-locked weighted Euclidean KNN with age window ±2 and
+    career-stage window ±1; age weight = 20.0 to inherit the v2.3.5
+    age-aware similarity lesson.
+  * Career-id canonicalization across the 2013→2014 SR-slug → cfbfastR
+    schema seam (Stefon Diggs `sr_stefon-diggs-1` 2012-13 → `534249`
+    2014 → one continuous career), with a `NameCollisionResolver` that
+    layers `(name, school, season ±1)` matching on top of direct
+    `cfb_player_id` bridge lookups.
+
+Why
+: PR 4 (projection wiring) and PR 6 (UI) need this engine. v0.16
+  shipped a working version but it was deleted in the v1.0 "one engine"
+  refactor; PR 3 is the modernized resurrection. Production-only by
+  design (no RAS / combine / athletic profile features, per Phil).
+
+Expected output shift
+: **NONE in this PR.** PR 3 is the engine LIBRARY only — it does NOT
+  wire into `similarity_v1.py`, does NOT modify projection, and does
+  NOT flip any feature flag. PR 4 plugs it in; PR 5 back-tests it;
+  PR 6 ships the UI card.
+
+Validation
+: 31 unit + integration tests in `tests/test_v3_0_pr3_prospect_engine.py`,
+  all network-free. Notable smoke tests:
+
+  * Kellen Moore (Boise State, 2008-2011, G5_top, SOS z≤0): adjusted
+    per-game fp is ≤90% of raw, and top-10 comps include Andy Dalton
+    (TCU) and a G5/G5_top family of peers rather than P5 elites.
+  * Bridge coverage of post-2014 NFL fantasy-relevant skill rookies
+    (PPR ≥50) ≥ 60% (production rate is ~76%).
+  * Age weighting: synthetic 22-year-old SR and 19-year-old SO with
+    identical fp → distance gap ≥ 5× a same-age peer, well outside the
+    `AGE_WINDOW`.
+
+Corpus stats (production build)
+: * 14,431 careers after stitching (was 14,847 raw before the SR → cfb
+    canonicalization).
+  * Position breakdown: 2,377 QB / 4,759 RB / 6,673 WR / 622 TE.
+  * Bridge match: 12.1% of all corpus careers, 76% of post-2014
+    fantasy-relevant skill rookies (the bridge file was built from
+    cfbfastR which starts in 2014; pre-2014 entries simply do not exist
+    in the bridge file).
+
+Files added
+: * `src/dynasty/engine/prospect_similarity.py` — the engine.
+  * `scripts/build_prospect_engine.py` — convenience CLI that writes
+    `data/engine_v3/prospect_corpus.json.gz` for downstream PRs.
+  * `tests/test_v3_0_pr3_prospect_engine.py` — 31 tests.
+
+---
+
 ## v2.3.5 — age-aware similarity + bust inclusion in rookie comp pool
 
 **Date:** 2026-05-23

@@ -243,37 +243,41 @@ def test_hurts_comp_list_has_elite_fp_qbs(engine):
 # 5. v1.x non-QB invariants preserved (fantasy-arc is a QB fix mainly)
 # ---------------------------------------------------------------------------
 
-def test_nacua_comps_are_retired_wrs(engine):
-    """v1.0 invariant carried forward: Nacua's top 5 comps are retired WRs."""
+def test_nacua_comps_are_wrs(engine):
+    """v1.0 invariant carried forward (v3.2-adjusted): Nacua's top 5
+    comps are WRs. v3.2 broadens the comp pool to include short-career
+    actives (the survivorship-bias fix), so we look up names against
+    the broader ``careers`` map rather than ``long_arc_corpus``.
+    Position correctness is unchanged.
+    """
     names = comp_names_for(engine, "Puka Nacua")[:5]
     assert len(names) > 0
-    # All top-5 comps must be retired (last_season <= 2022) WRs.
-    careers = {c.name: c for c in engine.long_arc_corpus}
+    careers = {c.name: c for c in engine.careers.values()}
     for n in names:
         c = careers.get(n)
-        assert c is not None, f"{n} not in long-arc corpus"
+        assert c is not None, f"{n} not in careers"
         assert c.position == "WR", f"{n} is {c.position}, not WR"
 
 
 def test_bijan_robinson_comps_are_rbs(engine):
-    """v1.0 invariant: Bijan's top 5 comps are retired RBs."""
+    """v1.0 invariant (v3.2-adjusted): Bijan's top 5 comps are RBs."""
     names = comp_names_for(engine, "Bijan Robinson")[:5]
     assert len(names) > 0
-    careers = {c.name: c for c in engine.long_arc_corpus}
+    careers = {c.name: c for c in engine.careers.values()}
     for n in names:
         c = careers.get(n)
-        assert c is not None, f"{n} not in long-arc corpus"
+        assert c is not None, f"{n} not in careers"
         assert c.position == "RB", f"{n} is {c.position}, not RB"
 
 
 def test_brock_bowers_comps_are_tes(engine):
-    """v1.0 invariant: Bowers' top 5 comps are retired/veteran TEs."""
+    """v1.0 invariant (v3.2-adjusted): Bowers' top 5 comps are TEs."""
     names = comp_names_for(engine, "Brock Bowers")[:5]
     assert len(names) > 0
-    careers = {c.name: c for c in engine.long_arc_corpus}
+    careers = {c.name: c for c in engine.careers.values()}
     for n in names:
         c = careers.get(n)
-        assert c is not None, f"{n} not in long-arc corpus"
+        assert c is not None, f"{n} not in careers"
         assert c.position == "TE", f"{n} is {c.position}, not TE"
 
 

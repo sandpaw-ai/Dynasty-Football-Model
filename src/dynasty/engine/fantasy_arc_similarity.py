@@ -674,6 +674,12 @@ class ProjectionResult:
     target_peak_3yr_fp_per_game: float
     n_comps: int
     comps: List[CompMatch]
+    # v3.1 — proven-production floor diagnostics. ``proven_floor_fp`` is
+    # the banked career fp + a short forward window of the player's own
+    # recent rate. ``floor_won`` is True when the floor exceeded both
+    # comp_weighted and peak_anchored and was used as projected_remaining_fp.
+    proven_floor_fp: float = 0.0
+    floor_won: bool = False
 
 
 def _peak_3yr_target(target: CareerArc, league_format: str) -> float:
@@ -709,6 +715,32 @@ def _recent_3yr_target(target: CareerArc, league_format: str) -> float:
         return 0.0
     ptot = sum(s.fp_per_game.get(league_format, 0.0) * s.games for s in recent)
     return ptot / gtot
+
+
+def _recent_2yr_target(target: CareerArc, league_format: str) -> float:
+    """Most-recent 2-year fp/g for the target — used by the v3.1 proven
+    floor as the conservative current-form rate."""
+    arc = target.career_arc
+    if not arc:
+        return 0.0
+    recent = arc[-2:]
+    gtot = sum(s.games for s in recent)
+    if gtot <= 0:
+        return 0.0
+    ptot = sum(s.fp_per_game.get(league_format, 0.0) * s.games for s in recent)
+    return ptot / gtot
+
+
+def _recent_1yr_target(target: CareerArc, league_format: str) -> float:
+    """Most-recent season fp/g for the target (the most current form).
+    Used by the v3.1 RB late-career-still-producing boost."""
+    arc = target.career_arc
+    if not arc:
+        return 0.0
+    last = arc[-1]
+    if last.games <= 0:
+        return 0.0
+    return last.fp_per_game.get(league_format, 0.0)
 
 
 def _projection_rate(target: CareerArc, league_format: str) -> float:
@@ -748,6 +780,87 @@ def _projection_rate(target: CareerArc, league_format: str) -> float:
 # whose only same-age comp is Brady-at-41) get the comp-weighted
 # projection instead.
 PEAK_ANCHOR_MIN_COMPS = 3
+
+
+# v3.1 — proven-production floor parameters.
+#
+# The floor expresses "dynasty equity" — the floor under what a
+# player should be ranked at, given their banked production AND the
+# years they have left to keep producing. It has two components:
+#
+#   banked_component  = career_total_fp × (yrs_rem / DYNASTY_HORIZON)
+#                       — banked production discounted by how much
+#                         dynasty runway is left. A retiring player
+#                         with 1 year remaining can't cash in their
+#                         banked production; a mid-prime vet with 5
+#                         years left should get most of it as dynasty
+#                         credit. Capped at 1.0 so a young rookie's
+#                         banked never inflates beyond face value.
+#
+#   forward_component = recent_2yr_fp_per_game × 17 × min(yrs_rem, 3)
+#                       × 0.90 discount
+#                       — a SHORT forward window using the player's own
+#                         recent form. Bounded to 3 years so we don't
+#                         speculate on long runways here — the
+#                         peak-anchored / comp-weighted projections
+#                         already do that work above.
+#
+# proven_floor = banked_component + forward_component
+#
+# A thin-sample young player (Stroud: 719 banked, recent ~14 fp/g) gets
+# a small floor (~700 + ~640 = ~1340) and the existing peak-anchored
+# projection wins. A heavily-banked veteran in mid-prime (Dak: 2598
+# banked at yrs_rem=4.9, recent ~17 fp/g) gets a strong floor and rises.
+# A retiring veteran (Stafford: 3985 banked at yrs_rem=2.1) gets the
+# banked component heavily discounted (×0.26) so the floor doesn't
+# accidentally promote them above active mid-prime stars.
+FLOOR_RECENCY_WINDOW = 3        # seasons of forward window
+FLOOR_RECENCY_DISCOUNT = 0.90   # avg discount applied to the forward window
+FLOOR_DYNASTY_HORIZON = 6.0     # typical remaining-career for banked weighting
+FLOOR_BANKED_DECAY = 1.5        # exponent on (yrs_rem / horizon)
+# Why 6.0 horizon + 1.5 decay: a mid-prime player with 6+ years
+# remaining gets full banked credit; an aging player with 2-3 years
+# left gets ~20–35%. Calibrated so Justin Jefferson (6.1 yrs_rem) lands
+# in WR1 territory and Aaron Rodgers (2.3 yrs_rem) doesn't get pushed
+# into the top tier on banked production alone.
+
+
+def _proven_production_floor(
+    target: CareerArc,
+    league_format: str,
+    weighted_seasons: float,
+) -> float:
+    """v3.1 proven-production floor.
+
+    Dynasty equity = banked credit (career_total × yrs_rem-weighted) +
+    a short forward window of the player's own recent rate. See the
+    FLOOR_* constants for the calibration rationale.
+    """
+    banked = float(target.career_total_fp.get(league_format, 0.0))
+    recent_pg = _recent_2yr_target(target, league_format)
+    if recent_pg <= 0.0:
+        # No qualifying games in the last 2 seasons; fall back to the
+        # 3yr window so we still anchor on real production rather than
+        # zero.
+        recent_pg = _recent_3yr_target(target, league_format)
+    # Banked weight is (yrs_rem / horizon) ** decay, with decay > 1 so
+    # the credit accelerates DOWN as a player approaches retirement.
+    # Calibration: decay=1.5 gives 6+ yrs full credit, 4 yrs ~54%, 3
+    # yrs ~35%, 2 yrs ~19%, 1 yr ~7%. This keeps heavily-banked-but-
+    # retiring QBs (Rodgers at 2.3 yrs_rem, banked 5097) from inflating
+    # into the top tier on past-production credit they can't cash in
+    # dynasty, while preserving most of the credit for mid-prime vets
+    # (Dak at 4.9 yrs_rem, banked 2598).
+    raw_weight = weighted_seasons / FLOOR_DYNASTY_HORIZON
+    banked_weight = min(raw_weight, 1.0) ** FLOOR_BANKED_DECAY
+    banked_weight = max(banked_weight, 0.0)
+    banked_component = banked * banked_weight
+    forward_window = min(weighted_seasons, FLOOR_RECENCY_WINDOW)
+    forward_component = (
+        recent_pg * PROJECTION_GAMES_PER_SEASON
+        * forward_window * FLOOR_RECENCY_DISCOUNT
+    )
+    return banked_component + forward_component
 
 
 def project_player(
@@ -854,6 +967,22 @@ def project_player(
     else:
         projected_fp = weighted_pts
 
+    # ------------------------------------------------------------------
+    # v3.1 — proven-production floor (see FLOOR_* constants above).
+    #
+    # Dynasty equity = banked_credit + short forward window. The floor
+    # is computed inside the projection for diagnostics but is APPLIED
+    # downstream of the v2.2 penalty stack (in similarity_v1.run_engine)
+    # so survival / late-breakout penalties can shape the forward
+    # projection without undermining the banked-production floor.
+    # ------------------------------------------------------------------
+    proven_floor = _proven_production_floor(
+        target=target,
+        league_format=league_format,
+        weighted_seasons=weighted_seasons,
+    )
+    floor_won = proven_floor > projected_fp
+
     return ProjectionResult(
         projected_remaining_fp=projected_fp,
         projected_remaining_seasons=weighted_seasons,
@@ -862,4 +991,6 @@ def project_player(
         target_peak_3yr_fp_per_game=target_peak,
         n_comps=len(comps),
         comps=comps,
+        proven_floor_fp=proven_floor,
+        floor_won=floor_won,
     )

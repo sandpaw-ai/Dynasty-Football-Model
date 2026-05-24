@@ -67,7 +67,7 @@ Validation
 Corpus stats (production build)
 : * 14,431 careers after stitching (was 14,847 raw before the SR → cfb
     canonicalization).
-  * Position breakdown: 2,377 QB / 4,759 RB / 6,673 WR / 622 TE.
+  * Position breakdown: 2,342 QB / 4,636 RB / 6,831 WR / 622 TE.
   * Bridge match: 12.1% of all corpus careers, 76% of post-2014
     fantasy-relevant skill rookies (the bridge file was built from
     cfbfastR which starts in 2014; pre-2014 entries simply do not exist

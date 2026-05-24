@@ -76,45 +76,66 @@ def _comp_names(engine, name, k=5):
 
 def test_dart_top_50_sf(engine):
     """Jaxson Dart (NYG, 241.6 PPR, 9 rushing TDs as a 14-game rookie)
-    should sit comfortably in the sf_ppr top 50 — his rookie fp/G
-    profile is dual-threat-elite-rookie tier."""
+    should sit in the sf_ppr top tier of 2025 rookies. v3.1 update:
+    threshold relaxed to top-75 because the v3.1 proven-production
+    floor lifted banked veterans into the top-50/60 territory that
+    rookies previously occupied. Dart has zero banked production so
+    the floor doesn't help him; he ranks on his rookie projection
+    alone (~#66) which is still solidly inside the top tier of
+    rookies."""
     rank = _rank(engine, "Jaxson Dart")
     assert rank is not None
-    assert rank <= 50, f"Dart engine rank #{rank} — should be top 50"
+    assert rank <= 75, f"Dart engine rank #{rank} — should be top 75 (v3.1)"
 
 
 def test_jeanty_top_25_sf(engine):
     """Ashton Jeanty (LV, 245.1 PPR, 17 G workhorse rookie). His comp
-    pool of 2018-2024 RB rookies projects him as a low-end RB1."""
+    pool of 2018-2024 RB rookies projects him as a low-end RB1.
+    v3.1 update: threshold relaxed to top-50 because banked veterans
+    were promoted by the proven-production floor and no longer leave
+    a top-25 slot for an unbanked rookie. Jeanty (~#43) is still RB1-
+    rookie tier."""
     rank = _rank(engine, "Ashton Jeanty")
     assert rank is not None
-    assert rank <= 25, f"Jeanty engine rank #{rank} — should be top 25"
+    assert rank <= 50, f"Jeanty engine rank #{rank} — should be top 50 (v3.1)"
 
 
 def test_cam_ward_top_40_qb(engine):
     """Cam Ward (TEN, 186.7 PPR, 17 G as a pocket-passer rookie). Should
-    land in the QB-only top 40."""
+    land in the QB-only top tier. v3.1 update: relaxed to QB top-60
+    because banked-veteran QBs (Stafford, Goff, Baker, Dak, Burrow,
+    Kyler) were lifted into the QB-top-20 by the proven floor."""
     qb_rank = _qb_rank(engine, "Cam Ward")
     assert qb_rank is not None
-    assert qb_rank <= 40, f"Cam Ward QB-only rank #{qb_rank} — should be QB top 40"
+    assert qb_rank <= 60, (
+        f"Cam Ward QB-only rank #{qb_rank} — should be QB top 60 (v3.1)"
+    )
 
 
 def test_tetairoa_top_30(engine):
     """Tetairoa McMillan (CAR, 213.4 PPR, 1014 yds, 17 G — a true
-    1000-yard rookie season)."""
+    1000-yard rookie season). v3.1 update: relaxed to top-50 because
+    banked-veteran WRs (Davante Adams, Tyreek Hill, JJ post-up) and
+    banked-veteran QBs crowd the top of the board now."""
     rank = _rank(engine, "Tetairoa McMillan")
     assert rank is not None
-    assert rank <= 30, f"Tetairoa engine rank #{rank} — should be top 30"
+    assert rank <= 50, (
+        f"Tetairoa engine rank #{rank} — should be top 50 (v3.1)"
+    )
 
 
 def test_travis_hunter_top_80(engine):
     """Travis Hunter (JAX, 63.8 PPR, only 7 G / 298 yds). The model
-    should project him into the top 80 — elite draft capital but
-    LIMITED USAGE, so the confidence shrinkage prevents a top-30
-    overprojection."""
+    should project him into the top tier of rookies — elite draft
+    capital but LIMITED USAGE so the confidence shrinkage prevents
+    a top-30 overprojection. v3.1 update: relaxed to top-130 because
+    banked-veteran WRs/RBs were lifted by the proven floor and Hunter
+    has zero banked production."""
     rank = _rank(engine, "Travis Hunter")
     assert rank is not None
-    assert rank <= 80, f"Hunter engine rank #{rank} — should be top 80"
+    assert rank <= 130, (
+        f"Hunter engine rank #{rank} — should be top 130 (v3.1)"
+    )
 
 
 def test_travis_hunter_cautious(engine):
@@ -258,19 +279,23 @@ def test_2024_class_uses_v2_engine(engine):
         )
 
 
-def test_jayden_daniels_top_12_sf(engine):
+def test_jayden_daniels_top_30_sf(engine):
     """Jayden Daniels should rank near the top of the board: 355-PPR
     rookie + 7-game injury-shortened 2025.
 
-    Updated in v2.3.3-final (wash-out heavy penalty, 2026-05-22) from
-    top-8 to top-12. The new top-5 bust amplifier takes a small bite
-    out of any QB with a short-career comp in the top 5 (Daniels has
-    one). Still elite-tier; the invariant is just "still in the
-    elite QB cluster."
+    History:
+    - v2.3.3-final (2026-05-22): top-8 → top-12 after the wash-out
+      heavy penalty + top-5 bust amplifier.
+    - v3.1 (2026-05-24): top-12 → top-30 because the proven-production
+      floor lifts banked vets (Stafford, Goff, Baker, Dak, Burrow,
+      Kyler, Philip Rivers) into the top 20 of the board. Daniels has
+      only ~466 banked fp — the floor barely helps him. He still
+      ranks via his forward projection (~1913 fp) which is elite, but
+      the banked vets crowd the absolute leaderboard.
     """
     rank = _rank(engine, "Jayden Daniels")
     assert rank is not None
-    assert rank <= 12, f"Daniels engine rank #{rank} — should be top 12"
+    assert rank <= 30, f"Daniels engine rank #{rank} — should be top 30 (v3.1)"
 
 
 # ---------------------------------------------------------------------------
@@ -308,10 +333,15 @@ def test_hurts_top_10_sf(engine):
 
 def test_rodgers_stays_deep(engine):
     """Aaron Rodgers (age 42) stays deep — his comp pool is short and
-    projected_years_remaining is low. Should rank outside the top 50."""
+    projected_years_remaining is low. v3.1: the proven-production
+    floor's QB-specific producing-ratio gate strips banked credit
+    from QBs whose recent_2yr/peak3 < 0.65 (Rodgers ~0.60). Combined
+    with low yrs_rem he should rank well outside the top 100."""
     rank = _rank(engine, "Aaron Rodgers")
     assert rank is not None
-    assert rank > 50, f"Rodgers engine rank #{rank} — should be deep (> 50)"
+    assert rank > 100, (
+        f"Rodgers engine rank #{rank} — should be deep (> 100) (v3.1)"
+    )
 
 
 # ---------------------------------------------------------------------------

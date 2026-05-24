@@ -86,6 +86,10 @@ from .fantasy_arc_similarity import (
     find_comps as arc_find_comps,
     project_remaining as arc_project_remaining,
     project_player as arc_project_player,
+    _proven_production_floor,
+    _recent_1yr_target,
+    _recent_2yr_target,
+    _recent_3yr_target,
 )
 from .v2_2_penalties import (
     SURVIVAL_BUST_AGE,
@@ -1262,6 +1266,8 @@ def run_engine(
         qb_rypg = 0.0
         lift_fp = 1.00     # applied to fp projection (mild)
         lift_years = 1.00  # applied to display years_remaining (full v1.1 lift)
+        # v3.1 — QB decline gate diagnostic
+        qb_decline_gate_applied = False
         if ap.position == "QB":
             qb_style = style_for_career(ap)
             qb_rypg = career_rushing_rate(ap)
@@ -1270,8 +1276,60 @@ def run_engine(
                 lift_fp = 1.10
             elif qb_style == STYLE_MOBILE:
                 lift_fp = 1.05
+
+            # v3.1 QB decline gate — if a mobile / dual-threat QB age 27+
+            # has recent-2yr fp/g visibly below their all-time peak3yr
+            # (< 0.85×), strip the dual-threat / mobile lift back to
+            # pocket. The lift exists to credit "modern dual-threats
+            # live longer than Cam Newton did" — a player who is no
+            # longer producing at peak hasn't earned that bonus.
+            #
+            # Mahomes (peak3 23.5, recent ~21-23) → ratio > 0.85, lift kept.
+            # Allen / Lamar / Hurts → still producing at peak, lift kept.
+            # Fields (peak3 17.3, recent fp/g materially lower across a
+            # backup/spot-start role) → ratio < 0.85, lift stripped.
+            if (
+                qb_style in (STYLE_DUAL_THREAT, STYLE_MOBILE)
+                and display_age is not None and display_age >= 27
+            ):
+                recent_pg = _recent_2yr_target(target_arc, BASE_FORMAT)
+                peak_pg = target_arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0)
+                if peak_pg > 0 and recent_pg < peak_pg * 0.85:
+                    lift_years = career_length_era.get_lift(
+                        STYLE_POCKET, CURRENT_ERA,
+                    )
+                    lift_fp = 1.00
+                    qb_decline_gate_applied = True
+
+        # v3.1 RB late-career-still-producing boost — a 30+ RB who is
+        # CURRENTLY producing top-12 fp/g (>= 16) deserves an extra year
+        # of runway. The comp-pool floor for older RBs collapses to ~2
+        # years (Henry got 2.1) which fails to credit ongoing top-tier
+        # production. This boost only applies to RBs who are
+        # demonstrably still elite (Henry case) — a 30+ RB whose recent
+        # rate is mid-tier won't trigger it.
+        rb_late_career_boost_applied = False
+        if ap.position == "RB" and display_age is not None and display_age >= 30:
+            current_pg = _recent_1yr_target(target_arc, BASE_FORMAT)
+            if current_pg >= 16.0:
+                weighted_seasons += 1.0
+                rb_late_career_boost_applied = True
+
         weighted_points = apply_lift(weighted_points, lift_fp)
         weighted_seasons = apply_lift(weighted_seasons, lift_years)
+
+        # v3.1 — compute the proven floor using the post-lift
+        # weighted_seasons so it reflects the QB-decline-gate /
+        # RB-late-career-boost-adjusted dynasty window. The floor is
+        # APPLIED downstream of the v2.2 penalty stack so survival /
+        # late-breakout penalties shape the forward projection without
+        # undermining the banked-production floor.
+        proven_floor_fp = _proven_production_floor(
+            target=target_arc,
+            league_format=BASE_FORMAT,
+            weighted_seasons=weighted_seasons,
+        )
+        production_score_pre_floor = weighted_points  # post-lift, pre-floor
 
         top_comp = proj.comps[0].arc
         # Record comp list — keep the same shape as v1.x for format_overlay
@@ -1362,6 +1420,21 @@ def run_engine(
                 "peak_anchored" if proj.peak_anchored_fp > proj.comp_weighted_fp
                 else "comp_weighted"
             ),
+            # v3.1 — proven-production floor + decline / late-career
+            # diagnostics. ``production_path`` extends ``projection_path``
+            # with "proven_floor" when the v3.1 floor wins (resolved
+            # downstream of the v2.2 penalty stack). The legacy
+            # ``projection_path`` field is kept unchanged so the v2 UI
+            # continues to work; new consumers should read
+            # ``production_path``.
+            "proven_floor_fp": round(proven_floor_fp, 1),
+            "production_score_pre_floor": round(production_score_pre_floor, 1),
+            "production_path": (
+                "peak_anchored" if proj.peak_anchored_fp > proj.comp_weighted_fp
+                else "comp_weighted"
+            ),
+            "qb_decline_gate_applied": bool(qb_decline_gate_applied),
+            "rb_late_career_boost_applied": bool(rb_late_career_boost_applied),
             # v2.0 player-arc metrics
             "peak_3yr_fp_per_game": round(target_arc.peak_3yr_fp_per_game.get(BASE_FORMAT, 0.0), 2),
             "peak_season_fp_per_game": round(target_arc.peak_season_fp_per_game.get(BASE_FORMAT, 0.0), 2),
@@ -1451,6 +1524,19 @@ def run_engine(
 
         # Overwrite the production_score with the post-penalty value.
         row["production_score"] = round(stack.projection_final, 1)
+
+        # v3.1 — apply the proven-production floor AFTER the v2.2
+        # penalty stack. The floor enforces "minimum dynasty equity":
+        # a player's score should never sit below banked_credit +
+        # short forward window, even if their forward projection got
+        # haircut by survival / confidence / late-breakout penalties.
+        # Penalties are downside risk on the FORWARD projection; banked
+        # production is a fact, not a forecast, and shouldn't be
+        # multiplied down.
+        proven_floor = float(row.get("proven_floor_fp", 0.0))
+        if proven_floor > row["production_score"]:
+            row["production_score"] = round(proven_floor, 1)
+            row["production_path"] = "proven_floor"
         # Carry penalty diagnostics on the row for the UI / tests.
         row["survival_multiplier"] = round(surv.survival_multiplier, 3)
         row["comp_durable_rate"] = round(surv.durable_career_rate, 3)

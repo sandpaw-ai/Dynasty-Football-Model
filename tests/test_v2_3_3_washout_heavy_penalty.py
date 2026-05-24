@@ -142,17 +142,24 @@ def test_sam_howell_outside_top_75(engine):
 # Part 4: active rookie starters with clean top-5 keep their value
 # ---------------------------------------------------------------------------
 
-def test_jaxson_dart_inside_top_50(engine):
+def test_jaxson_dart_inside_top_75(engine):
     """Jaxson Dart's top-5 comps (Kyler Murray, Dak Prescott, Joe
     Burrow, Daniel Jones, Josh Allen) are all settled NFL careers,
     not wash-outs. The amplifier should NOT fire and Dart should
-    land in the top 50.
+    land in the top tier of rookies.
+
+    v3.1 update (2026-05-24): threshold relaxed from top-50 to top-75
+    because the proven-production floor lifted ~15–20 banked vets
+    into the top 50, displacing rookies. Dart has zero banked
+    production so the floor doesn't help him. The original invariant
+    (no wash-out amplifier firing) still holds — his score is
+    unchanged; only his absolute rank shifted.
     """
     rank = _rank(engine, "Jaxson Dart")
     if rank is None:
         pytest.skip("Dart not in rankings")
-    assert rank <= 50, (
-        f"Dart rank #{rank} - top 5 comps are not wash-outs"
+    assert rank <= 75, (
+        f"Dart rank #{rank} - top 5 comps are not wash-outs (v3.1)"
     )
 
 

@@ -195,16 +195,39 @@ def test_dual_threat_qbs_get_lift(engine):
 
 
 def test_mobile_qbs_get_smaller_lift(engine):
-    """Mobile QBs receive a lift between 1.0 and the dual-threat lift."""
+    """Mobile QBs receive a lift between 1.0 and the dual-threat lift.
+
+    v3.1 update (2026-05-24): the v3.1 QB-decline gate strips the lift
+    when a 27+ mobile/dual-threat QB's recent_2yr/peak3 ratio falls
+    below 0.85. Mahomes' recent_2yr/peak3 in the 2025 corpus is ~0.80,
+    so his lift drops to 1.0 (pocket). Pick a mobile QB whose ratio
+    is comfortably above 0.85 to pin the table-lookup invariant.
+    """
     lift_table = engine.career_length_era.lift
     mb_lift = lift_table[STYLE_MOBILE][4]
     dt_lift = lift_table[STYLE_DUAL_THREAT][4]
     assert 1.0 < mb_lift <= dt_lift, (
         f"Mobile lift {mb_lift} should be between 1.0 and dual_threat {dt_lift}"
     )
-    mahomes = next((r for r in engine.rankings if r["name"] == "Patrick Mahomes"), None)
-    assert mahomes is not None
-    assert abs(mahomes["career_length_lift"] - mb_lift) < 1e-6
+    # Pick a mobile QB who is NOT decline-gated. Dak Prescott classifies
+    # as mobile (15.2 rypg) and his recent_2yr/peak3 ratio is ~0.82,
+    # which would also fail. Use Daniel Jones who is currently in his
+    # peak window (ratio 1.0). If Daniel Jones isn't classified mobile
+    # in this corpus, fall back to ANY mobile QB with the lift applied.
+    mobile_undeclined = [
+        r for r in engine.rankings
+        if r.get("qb_style") == "mobile"
+        and not r.get("qb_decline_gate_applied")
+        and r.get("engine") == "fantasy_arc_v2"
+    ]
+    assert mobile_undeclined, (
+        "No undeclined mobile QB found to pin the lift"
+    )
+    sample = mobile_undeclined[0]
+    assert abs(sample["career_length_lift"] - mb_lift) < 1e-6, (
+        f"{sample['name']} lift {sample['career_length_lift']} != "
+        f"mobile lift {mb_lift}"
+    )
 
 
 def test_dual_threat_lift_strictly_above_mobile():

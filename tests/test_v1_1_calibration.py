@@ -394,21 +394,25 @@ def test_bijan_comps_unchanged(engine):
     assert hits >= 2, f"Bijan regression: only {hits} retired RB greats in top 15"
 
 
-def test_no_active_to_active_short_comps(engine):
-    """No current v2.0 cumulative-arc player has a top-20 comp who is
-    short-career-active.
+def test_career_stage_matched_comp_pool(engine):
+    """v3.2 invariant (REPLACES v1.1's no-active-short-career rule):
 
-    Active players can only appear as v2.0 comps if they're LONG-ARC —
-    either ≥ LONG_ARC_MIN_SEASONS (=8) seasons, OR age ≥ 33 with ≥ 6
-    seasons. Short-career active players (recent rookies, sophomores,
-    3rd-year pros) can never be v2.0 comps.
+    Every comp of a v2.0 cumulative-arc-engine target must have at
+    least max(target_n_seasons, COMP_POOL_MIN_SEASONS=3) completed
+    seasons. Active short-career players ARE now allowed as comps
+    — they're the survivorship-bias correction — but only against
+    targets whose own career-stage is at-or-below the comp's stage.
 
-    v2.1 EXEMPTION: the v2.1 rookie engine uses a different comp pool
-    (historical rookie seasons — includes 1-season rookies by design).
-    This test only applies to v2.0 cumulative-arc-engine rows.
+    v3.1 and earlier filtered short-career-active comps OUT, which
+    excluded ~18% of skill-position careers (Tua, Lawrence, Daniel
+    Jones, Heinicke, Driskel, etc.) from every comp distribution
+    and systematically inflated young-player projections. Phil's
+    2026-05 flag.
+
+    v2.1 EXEMPTION (unchanged): rookie engine has its own pool.
     """
+    from dynasty.engine.fantasy_arc_similarity import COMP_POOL_MIN_SEASONS
     careers = engine.careers
-    # Skip v2.1 rookie engine rows — different comp pool semantics.
     rookie_pids = {
         row["player_id"] for row in engine.rankings
         if row.get("engine") == "rookie_nfl_fp_arc"
@@ -417,26 +421,25 @@ def test_no_active_to_active_short_comps(engine):
     for pid, comp_list in engine.comps.items():
         if pid in rookie_pids:
             continue
+        target = careers.get(pid)
+        if target is None:
+            continue
+        target_n = len(target.seasons)
+        # Active veterans' arc is trimmed to completed seasons; mimic.
+        min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
         for c in comp_list[:20]:
             comp = careers.get(c["player_id"])
             if comp is None:
                 continue
-            if comp.last_season is None:
-                continue
-            if comp.last_season <= LONG_ARC_THROUGH_SEASON:
-                continue  # retired → fine
-            # Active comp: must satisfy long-arc rules.
-            last_age = max(
-                (s.age for s in comp.seasons if s.age is not None), default=0,
-            )
-            long_arc = len(comp.seasons) >= LONG_ARC_MIN_SEASONS
-            veteran = last_age >= 33 and len(comp.seasons) >= 6
-            if not (long_arc or veteran):
+            comp_n = c.get("seasons_played")
+            if comp_n is None:
+                comp_n = len(comp.seasons)
+            if comp_n < min_comp_n:
                 violations.append(
-                    (pid, c["name"], comp.last_season, len(comp.seasons), last_age)
+                    (pid, c["name"], comp_n, min_comp_n)
                 )
     assert not violations, (
-        f"{len(violations)} active-short-career comp violations: {violations[:5]}"
+        f"{len(violations)} comp-career-stage violations: {violations[:5]}"
     )
 
 

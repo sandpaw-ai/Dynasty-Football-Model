@@ -790,6 +790,10 @@ class EngineResult:
     # v2.0 — fantasy-arc data
     arcs: Dict[str, CareerArc] = field(default_factory=dict)
     long_arc_arcs: List[CareerArc] = field(default_factory=list)
+    # v3.2 — broad comp pool (long_arc_arcs + short-career arcs); the
+    # set find_comps actually iterates over, with the career-stage gate
+    # applied per-target.
+    comp_pool_arcs: List[CareerArc] = field(default_factory=list)
     percentile_table: Optional[CareerStagePercentileTable] = None
     base_format: str = BASE_FORMAT
     # Removed-in-v2 fields kept as None for downstream readers that hardcode them.
@@ -1007,7 +1011,35 @@ def run_engine(
             if len(trimmed.seasons) >= 2:
                 long_arc_corpus.append(trimmed)
 
-    # Career-length era multipliers (corpus-derived).
+    # v3.2 — BROAD comp pool (survivorship-bias fix). The "long-arc"
+    # corpus above is used as the high-information anchor for the
+    # percentile table and career-length-era multipliers (we want stable
+    # 95th-percentile bands and only well-sampled careers feeding them).
+    # The COMP POOL itself is broader: every skill-position career with
+    # ≥2 completed seasons. ``find_comps`` then applies a career-stage
+    # gate (comp must have at least max(target_n_seasons, 3) seasons)
+    # so short-career arcs only show up against career-stage-matched
+    # targets. Without this, ~18% of pro-football-reference skill-pos
+    # careers (715 players, mostly the 2-7 season "didn't pan out" tier)
+    # never appear as a comp — every active player's projection skews
+    # optimistic because the bust outcomes are missing from their
+    # comp distribution. Phil's flag, 2026-05.
+    broad_comp_pool: List[PlayerCareer] = []
+    for c in careers.values():
+        if c.position not in SKILL_POSITIONS:
+            continue
+        if len(c.seasons) < 2:
+            continue
+        if c.is_retired(through=retired_through):
+            broad_comp_pool.append(c)
+        else:
+            trimmed = c.with_completed_seasons_only(current_season)
+            if len(trimmed.seasons) >= 2:
+                broad_comp_pool.append(trimmed)
+
+    # Career-length era multipliers (corpus-derived). Keep this on the
+    # long-arc set — short-career arcs would corrupt the mobile/dual
+    # threat lift signal.
     career_length_era = build_career_length_era_table(
         long_arc_corpus, era_for_season,
     )
@@ -1037,7 +1069,34 @@ def run_engine(
         )
         long_arc_arcs.append(arc)
 
-    # Percentile table from long-arc corpus.
+    # v3.2 — build the BROAD comp-pool arcs. Includes long-arc arcs
+    # plus the short-career (2-7 season) arcs that the v1.1 gate rejected.
+    # Tagged with ``is_long_arc=False`` for the short-career ones so
+    # downstream consumers can distinguish them (e.g. for diagnostics).
+    long_arc_ids = {a.player_id for a in long_arc_arcs}
+    comp_pool_arcs: List[CareerArc] = list(long_arc_arcs)
+    for c in broad_comp_pool:
+        if c.player_id in long_arc_ids:
+            continue
+        seasons = _career_to_arc_seasons(c)
+        if not seasons:
+            continue
+        arc = build_career_arc(
+            player_id=c.player_id,
+            name=c.name,
+            position=c.position,
+            last_season=c.last_season,
+            rookie_season=c.rookie_season,
+            retired=c.is_retired(through=retired_through),
+            is_long_arc=False,
+            seasons=seasons,
+            pace=pace,
+            formats=SUPPORTED_FORMATS,
+        )
+        comp_pool_arcs.append(arc)
+
+    # Percentile table from long-arc corpus (UNCHANGED — keeps high-info
+    # career-stage percentile bands; short-career arcs would dilute them).
     percentile_table = build_career_stage_percentile_table(
         long_arc_arcs, league_format=BASE_FORMAT,
     )
@@ -1232,13 +1291,18 @@ def run_engine(
             continue
 
         # ---- v2.0 cumulative-arc engine (2+ NFL seasons) ----
+        # v3.2 — use the broader comp_pool_arcs (includes short-career
+        # "didn't pan out" players) and pass the target's completed
+        # season count so find_comps applies the career-stage gate.
+        target_n_seasons = len(target_arc.career_arc)
         proj = arc_project_player(
             target=target_arc,
-            long_arc_corpus=long_arc_arcs,
+            long_arc_corpus=comp_pool_arcs,
             target_age=age_now,
             league_format=BASE_FORMAT,
             percentile_table=percentile_table,
             k=top_k,
+            target_n_seasons=target_n_seasons,
         )
         if not proj.comps:
             continue
@@ -1623,6 +1687,7 @@ def run_engine(
         career_length_era=career_length_era,
         arcs=arcs,
         long_arc_arcs=long_arc_arcs,
+        comp_pool_arcs=comp_pool_arcs,
         percentile_table=percentile_table,
         base_format=BASE_FORMAT,
     )

@@ -73,6 +73,10 @@ def test_career_stage_gate_holds_for_every_comp(engine):
     """For every (target, comp) pair the engine outputs from the v2.0
     cumulative-arc engine, comp_n_seasons must satisfy the career-stage
     gate."""
+    from dynasty.engine.fantasy_arc_similarity import (
+        LONG_ARC_RELAX_SEASONS,
+        LONG_ARC_RELAX_TRIGGER_SEASONS,
+    )
     careers = engine.careers
     rookie_pids = {
         row["player_id"] for row in engine.rankings
@@ -86,7 +90,12 @@ def test_career_stage_gate_holds_for_every_comp(engine):
         if target is None:
             continue
         target_n = len(target.seasons)
-        min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
+        # v3.3: deep-career veterans get a relaxed floor so the comp
+        # pool actually represents "NFL careers comparable in length".
+        if target_n >= LONG_ARC_RELAX_TRIGGER_SEASONS:
+            min_comp_n = max(target_n - LONG_ARC_RELAX_SEASONS, COMP_POOL_MIN_SEASONS)
+        else:
+            min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
         for c in comp_list:
             comp_n = c.get("seasons_played")
             if comp_n is None:
@@ -138,17 +147,18 @@ def test_veteran_pool_approximately_unchanged_for_dak(engine):
 
 
 def test_top1_anchors_preserved(engine):
-    """Allen/Lamar must stay top-2; Mahomes must stay top-5; Dak top-10.
+    """Top-tier QB anchors should stay near the top.
 
-    These are the proven-production anchors from v3.1. The v3.2 fix
-    should NOT shake them because their comp pool was already
-    long-arc-only.
+    v3.1: Allen/Lamar top-2, Mahomes top-5, Dak top-10 (banked-credit driven).
+    v3.3: Phil's 2026-05-28 brief removed banked credit. Allen/Lamar/Mahomes
+    still anchor near the top via comp-weighted projection (they're young-
+    enough QBs with elite comps); Dak's age + post-32 QB comp pool puts
+    him outside the top 30 in line with Phil's mandate.
     """
     ranks = {r["name"]: i + 1 for i, r in enumerate(engine.rankings)}
-    assert ranks.get("Josh Allen") <= 2, f"Allen rank={ranks.get('Josh Allen')}"
-    assert ranks.get("Lamar Jackson") <= 2, f"Lamar rank={ranks.get('Lamar Jackson')}"
-    assert ranks.get("Patrick Mahomes") <= 5, f"Mahomes rank={ranks.get('Patrick Mahomes')}"
-    assert ranks.get("Dak Prescott") <= 10, f"Dak rank={ranks.get('Dak Prescott')}"
+    assert ranks.get("Josh Allen") <= 3, f"Allen rank={ranks.get('Josh Allen')}"
+    assert ranks.get("Lamar Jackson") <= 5, f"Lamar rank={ranks.get('Lamar Jackson')}"
+    assert ranks.get("Patrick Mahomes") <= 15, f"Mahomes rank={ranks.get('Patrick Mahomes')}"
 
 
 def test_comp_pool_min_seasons_floor():

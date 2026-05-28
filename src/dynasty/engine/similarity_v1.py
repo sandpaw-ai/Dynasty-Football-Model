@@ -97,6 +97,7 @@ from .v2_2_penalties import (
     apply_penalty_stack,
     compute_confidence,
     compute_late_breakout,
+    compute_missed_recent_season,
     compute_position_tier_baselines,
     compute_survival,
 )
@@ -1555,6 +1556,22 @@ def run_engine(
         late = compute_late_breakout(
             arc=target_arc, raw_stats_by_pid_season=raw_stats,
         )
+        # v3.3 — missed-recent-season penalty. Skip the v2.1 rookie
+        # engine path: 1-NFL-season rookies just played, the rookie
+        # engine handles their thin sample via its own confidence /
+        # games-played factor. The cumulative-arc engine path needs
+        # the explicit missed-season hit to ensure (e.g.) Joe Mixon
+        # — who did not play in 2025 — takes a haircut for absence.
+        if engine_kind == "rookie":
+            missed = compute_missed_recent_season(
+                arc=target_arc, corpus_last_season=current_season,
+            )
+            missed_mult_used = 1.0
+        else:
+            missed = compute_missed_recent_season(
+                arc=target_arc, corpus_last_season=current_season,
+            )
+            missed_mult_used = missed.missed_season_multiplier
 
         # For 1-NFL-season rookies routed through the v2.1 rookie
         # engine, the engine ALREADY applies its own games-played
@@ -1584,23 +1601,26 @@ def run_engine(
             # 1-NFL-season rookies (rookie engine path) are exempt by
             # design — they're actively in the league, just new.
             is_stale_data=conf.is_stale_data and engine_kind != "rookie",
+            # v3.3 missed-recent-season penalty (Phil 2026-05-28).
+            missed_season_multiplier=missed_mult_used,
         )
 
         # Overwrite the production_score with the post-penalty value.
         row["production_score"] = round(stack.projection_final, 1)
 
-        # v3.1 — apply the proven-production floor AFTER the v2.2
-        # penalty stack. The floor enforces "minimum dynasty equity":
-        # a player's score should never sit below banked_credit +
-        # short forward window, even if their forward projection got
-        # haircut by survival / confidence / late-breakout penalties.
-        # Penalties are downside risk on the FORWARD projection; banked
-        # production is a fact, not a forecast, and shouldn't be
-        # multiplied down.
-        proven_floor = float(row.get("proven_floor_fp", 0.0))
-        if proven_floor > row["production_score"]:
-            row["production_score"] = round(proven_floor, 1)
-            row["production_path"] = "proven_floor"
+        # v3.3 — the v3.1 proven-production floor NO LONGER OVERRIDES
+        # production_score. Phil's 2026-05-28 brief: "The projected
+        # remaining fantasy points should be some sort of weighted
+        # average of the comparable players applied to the player."
+        # The proven_floor was injecting BANKED (already-realised)
+        # production into a number labelled "projected remaining FP",
+        # which caused Derrick Henry to read 2,103 even though none of
+        # his comps exceeded ~445 projected fp post-age-32.
+        #
+        # proven_floor_fp is RETAINED on the row as a diagnostic
+        # ("banked credit floor") so the player page can still surface
+        # it, but it does NOT win the projection any more.
+        row.setdefault("production_path", row.get("projection_path", "comp_weighted"))
         # Carry penalty diagnostics on the row for the UI / tests.
         row["survival_multiplier"] = round(surv.survival_multiplier, 3)
         row["comp_durable_rate"] = round(surv.durable_career_rate, 3)
@@ -1618,6 +1638,12 @@ def run_engine(
         row["projection_raw_pre_penalty"] = round(raw_proj, 1)
         row["projection_after_survival"] = round(stack.projection_after_survival, 1)
         row["projection_after_confidence"] = round(stack.projection_after_confidence, 1)
+        # v3.3 missed-recent-season diagnostics.
+        row["missed_season_multiplier"] = round(missed.missed_season_multiplier, 3)
+        row["missed_season_reason"] = missed.reason
+        row["missed_season_last_played"] = missed.last_played_season
+        row["missed_season_last_played_games"] = missed.last_played_games
+        row["missed_season_seasons_since"] = missed.seasons_since_played
 
         survival_diag[row["player_id"]] = {
             "name": surv.name,

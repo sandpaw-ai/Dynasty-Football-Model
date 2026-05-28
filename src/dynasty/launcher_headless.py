@@ -119,6 +119,34 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
+    # Step 5.5 (v3.3, Phil 2026-05-28): refresh external draft data
+    # (PFR draft classes for 2022..2026 + Tankathon 2027 big board)
+    # so the prospects pipeline below can mark drafted prospects and
+    # surface the 2027 class. Non-fatal — a network blip shouldn't
+    # kill the daily refresh.
+    print("\n[5b/8] Refreshing PFR + Tankathon draft data (v3.3)...")
+    try:
+        scripts_dir = str(Path(__file__).resolve().parents[2] / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import refresh_pfr_draft_classes  # type: ignore
+        rc = refresh_pfr_draft_classes.main([])
+        if rc != 0:
+            print("  WARN: PFR draft-class refresh exited non-zero (continuing)")
+        else:
+            print("  OK · PFR draft data refreshed (2022..2026)")
+    except Exception as e:
+        print(f"  WARN: PFR draft-class refresh failed: {e}")
+    try:
+        import refresh_tankathon_big_board  # type: ignore
+        rc = refresh_tankathon_big_board.main([])
+        if rc != 0:
+            print("  WARN: Tankathon big-board refresh exited non-zero")
+        else:
+            print("  OK · Tankathon 2027 big board refreshed")
+    except Exception as e:
+        print(f"  WARN: Tankathon big-board refresh failed: {e}")
+
     # Step 6: Build v3.0 prospect projection layer (PR 4).
     print("\n[6/8] Building v3.0 prospect projection layer...")
     try:

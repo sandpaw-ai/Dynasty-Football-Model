@@ -411,7 +411,11 @@ def test_career_stage_matched_comp_pool(engine):
 
     v2.1 EXEMPTION (unchanged): rookie engine has its own pool.
     """
-    from dynasty.engine.fantasy_arc_similarity import COMP_POOL_MIN_SEASONS
+    from dynasty.engine.fantasy_arc_similarity import (
+        COMP_POOL_MIN_SEASONS,
+        LONG_ARC_RELAX_SEASONS,
+        LONG_ARC_RELAX_TRIGGER_SEASONS,
+    )
     careers = engine.careers
     rookie_pids = {
         row["player_id"] for row in engine.rankings
@@ -425,8 +429,12 @@ def test_career_stage_matched_comp_pool(engine):
         if target is None:
             continue
         target_n = len(target.seasons)
-        # Active veterans' arc is trimmed to completed seasons; mimic.
-        min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
+        # v3.3 relaxes the floor for deep-career veterans so the pool
+        # widens for older targets.
+        if target_n >= LONG_ARC_RELAX_TRIGGER_SEASONS:
+            min_comp_n = max(target_n - LONG_ARC_RELAX_SEASONS, COMP_POOL_MIN_SEASONS)
+        else:
+            min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
         for c in comp_list[:20]:
             comp = careers.get(c["player_id"])
             if comp is None:

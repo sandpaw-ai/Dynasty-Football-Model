@@ -859,12 +859,32 @@ def project_rookie(
         * expected_seasons * peak_discount
     )
 
-    # Take MAX of comp-weighted and peak-anchored — same logic as v2.0.
-    # Elite rookies with proven high rookie fp/G get the peak-anchored
-    # floor; below-average rookies whose own rookie fp/G is low fall
-    # back to the comp-weighted projection (which still encodes year-2
-    # rate-of-improvement signal from their comps).
-    base_projection = max(weighted_pts, peak_anchored_fp)
+    # v3.3 PROJECTION METHODOLOGY (Phil's brief, 2026-05-28):
+    # "The projected remaining fantasy points should be some sort of
+    #  weighted average of the comparable players applied to the player.
+    #  Apply the new methodology across the entire player base."
+    #
+    # Same change as fantasy_arc_similarity.project_player: comp-weighted
+    # is now PRIMARY for rookies too. The peak-anchored extrapolation
+    # of the rookie's own fp/g to an 8+ year career is exactly the
+    # kind of "this rookie is the next [comp]" extrapolation Phil
+    # wanted reined in. We BLEND 70% comp-weighted + 30% peak-anchored
+    # (capped at 1.25× the top single-comp projected total) so an
+    # exceptional rookie sample still gets recognised but doesn't
+    # dominate. For below-comp rookies (where peak_anchored < weighted),
+    # fall back to pure comp-weighted.
+    comp_projected_pts = [
+        m.profile.post_rookie_total_fp for m in comps
+    ]
+    top_comp_proj = max(comp_projected_pts) if comp_projected_pts else 0.0
+    peak_capped = (
+        min(peak_anchored_fp, 1.25 * top_comp_proj)
+        if top_comp_proj > 0 else peak_anchored_fp
+    )
+    if peak_capped > weighted_pts:
+        base_projection = 0.70 * weighted_pts + 0.30 * peak_capped
+    else:
+        base_projection = weighted_pts
 
     # Confidence shrinkage: a FULL_CONFIDENCE_GAMES+ rookie gets full
     # credit. Below that, linear shrink toward CONFIDENCE_FLOOR. This

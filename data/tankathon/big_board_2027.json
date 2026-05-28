@@ -1,0 +1,1796 @@
+{
+  "by_year": {
+    "2027": [
+      {
+        "college_slug": "ohio-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jeremiah Smith",
+        "position": "WR",
+        "rank": 1,
+        "school": "Ohio State",
+        "weight": null
+      },
+      {
+        "college_slug": "texas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Arch Manning",
+        "position": "QB",
+        "rank": 2,
+        "school": "Texas",
+        "weight": null
+      },
+      {
+        "college_slug": "texas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Colin Simmons",
+        "position": "EDGE",
+        "rank": 3,
+        "school": "Texas",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Dante Moore",
+        "position": "QB",
+        "rank": 4,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "notre-dame",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Leonard Moore",
+        "position": "CB",
+        "rank": 5,
+        "school": "Notre Dame",
+        "weight": null
+      },
+      {
+        "college_slug": "south-carolina",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Dylan Stewart",
+        "position": "EDGE",
+        "rank": 6,
+        "school": "South Carolina",
+        "weight": null
+      },
+      {
+        "college_slug": "texas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Cam Coleman",
+        "position": "WR",
+        "rank": 7,
+        "school": "Texas",
+        "weight": null
+      },
+      {
+        "college_slug": "lsu",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jordan Seaton",
+        "position": "OT",
+        "rank": 8,
+        "school": "LSU",
+        "weight": null
+      },
+      {
+        "college_slug": "ohio-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Julian Sayin",
+        "position": "QB",
+        "rank": 9,
+        "school": "Ohio State",
+        "weight": null
+      },
+      {
+        "college_slug": "texas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Trevor Goosby",
+        "position": "OT",
+        "rank": 10,
+        "school": "Texas",
+        "weight": null
+      },
+      {
+        "college_slug": "oklahoma",
+        "draft_year": 2027,
+        "height": null,
+        "name": "David Stone",
+        "position": "DL",
+        "rank": 11,
+        "school": "Oklahoma",
+        "weight": null
+      },
+      {
+        "college_slug": "georgia",
+        "draft_year": 2027,
+        "height": null,
+        "name": "KJ Bolden",
+        "position": "S",
+        "rank": 12,
+        "school": "Georgia",
+        "weight": null
+      },
+      {
+        "college_slug": "alabama",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ryan Coleman-Williams",
+        "position": "WR",
+        "rank": 13,
+        "school": "Alabama",
+        "weight": null
+      },
+      {
+        "college_slug": "georgia",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ellis Robinson IV",
+        "position": "CB",
+        "rank": 14,
+        "school": "Georgia",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "A'Mauri Washington",
+        "position": "DL",
+        "rank": 15,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "alabama",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Zabien Brown",
+        "position": "CB",
+        "rank": 16,
+        "school": "Alabama",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jamari Johnson",
+        "position": "TE",
+        "rank": 17,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "notre-dame",
+        "draft_year": 2027,
+        "height": null,
+        "name": "CJ Carr",
+        "position": "QB",
+        "rank": 18,
+        "school": "Notre Dame",
+        "weight": null
+      },
+      {
+        "college_slug": "missouri",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ahmad Hardy",
+        "position": "RB",
+        "rank": 19,
+        "school": "Missouri",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Darian Mensah",
+        "position": "QB",
+        "rank": 21,
+        "school": "Miami",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Matayo Uiagalelei",
+        "position": "EDGE",
+        "rank": 22,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "lsu",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Trey'Dez Green",
+        "position": "TE",
+        "rank": 23,
+        "school": "LSU",
+        "weight": null
+      },
+      {
+        "college_slug": "arkansas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Quincy Rhodes Jr.",
+        "position": "EDGE",
+        "rank": 24,
+        "school": "Arkansas",
+        "weight": null
+      },
+      {
+        "college_slug": "indiana",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Charlie Becker",
+        "position": "WR",
+        "rank": 25,
+        "school": "Indiana",
+        "weight": null
+      },
+      {
+        "college_slug": "notre-dame",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Kyngstonn Viliamu-Asa",
+        "position": "LB",
+        "rank": 26,
+        "school": "Notre Dame",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Koi Perich",
+        "position": "S",
+        "rank": 27,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "south-carolina",
+        "draft_year": 2027,
+        "height": null,
+        "name": "LaNorris Sellers",
+        "position": "QB",
+        "rank": 28,
+        "school": "South Carolina",
+        "weight": null
+      },
+      {
+        "college_slug": "mississippi-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Kelley Jones",
+        "position": "CB",
+        "rank": 29,
+        "school": "Mississippi State",
+        "weight": null
+      },
+      {
+        "college_slug": "iowa",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Kade Pieper",
+        "position": "IOL",
+        "rank": 30,
+        "school": "Iowa",
+        "weight": null
+      },
+      {
+        "college_slug": "ole-miss",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Kewan Lacy",
+        "position": "RB",
+        "rank": 31,
+        "school": "Ole Miss",
+        "weight": null
+      },
+      {
+        "college_slug": "indiana",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Nick Marsh",
+        "position": "WR",
+        "rank": 32,
+        "school": "Indiana",
+        "weight": null
+      },
+      {
+        "college_slug": "indiana",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Carter Smith",
+        "position": "OT",
+        "rank": 33,
+        "school": "Indiana",
+        "weight": null
+      },
+      {
+        "college_slug": "ohio-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Austin Siereveld",
+        "position": "OT",
+        "rank": 34,
+        "school": "Ohio State",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ahmad Moten Sr.",
+        "position": "DL",
+        "rank": 35,
+        "school": "Miami",
+        "weight": null
+      },
+      {
+        "college_slug": "ole-miss",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Will Echoles",
+        "position": "DL",
+        "rank": 36,
+        "school": "Ole Miss",
+        "weight": null
+      },
+      {
+        "college_slug": "texas-tech",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Brendan Sorsby",
+        "position": "QB",
+        "rank": 37,
+        "school": "Texas Tech",
+        "weight": null
+      },
+      {
+        "college_slug": "clemson",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Sammy Brown",
+        "position": "LB",
+        "rank": 38,
+        "school": "Clemson",
+        "weight": null
+      },
+      {
+        "college_slug": "texas-a-m",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Mario Craver",
+        "position": "WR",
+        "rank": 39,
+        "school": "Texas A&M",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Damon Wilson II",
+        "position": "EDGE",
+        "rank": 40,
+        "school": "Miami",
+        "weight": null
+      },
+      {
+        "college_slug": "syracuse",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Chris Peal",
+        "position": "CB",
+        "rank": 41,
+        "school": "Syracuse",
+        "weight": null
+      },
+      {
+        "college_slug": "michigan",
+        "draft_year": 2027,
+        "height": null,
+        "name": "John Henry Daley",
+        "position": "EDGE",
+        "rank": 42,
+        "school": "Michigan",
+        "weight": null
+      },
+      {
+        "college_slug": "clemson",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Will Heldt",
+        "position": "EDGE",
+        "rank": 43,
+        "school": "Clemson",
+        "weight": null
+      },
+      {
+        "college_slug": "iowa",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Trevor Lauck",
+        "position": "OT",
+        "rank": 44,
+        "school": "Iowa",
+        "weight": null
+      },
+      {
+        "college_slug": "ole-miss",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Trinidad Chambliss",
+        "position": "QB",
+        "rank": 45,
+        "school": "Ole Miss",
+        "weight": null
+      },
+      {
+        "college_slug": "alabama",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Yhonzae Pierre",
+        "position": "EDGE",
+        "rank": 46,
+        "school": "Alabama",
+        "weight": null
+      },
+      {
+        "college_slug": "texas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Rasheem Biles",
+        "position": "LB",
+        "rank": 47,
+        "school": "Texas",
+        "weight": null
+      },
+      {
+        "college_slug": "oklahoma-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Drew Mestemaker",
+        "position": "QB",
+        "rank": 48,
+        "school": "Oklahoma State",
+        "weight": null
+      },
+      {
+        "college_slug": "texas-tech",
+        "draft_year": 2027,
+        "height": null,
+        "name": "A.J. Holmes Jr.",
+        "position": "DL",
+        "rank": 49,
+        "school": "Texas Tech",
+        "weight": null
+      },
+      {
+        "college_slug": "texas",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ryan Wingo",
+        "position": "WR",
+        "rank": 50,
+        "school": "Texas",
+        "weight": null
+      },
+      {
+        "college_slug": "minnesota",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Anthony Smith",
+        "position": "EDGE",
+        "rank": 51,
+        "school": "Minnesota",
+        "weight": null
+      },
+      {
+        "college_slug": "notre-dame",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Tae Johnson",
+        "position": "S",
+        "rank": 52,
+        "school": "Notre Dame",
+        "weight": null
+      },
+      {
+        "college_slug": "georgia",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Nate Frazier",
+        "position": "RB",
+        "rank": 53,
+        "school": "Georgia",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2027,
+        "height": null,
+        "name": "OJ Frederique Jr.",
+        "position": "CB",
+        "rank": 54,
+        "school": "Miami",
+        "weight": null
+      },
+      {
+        "college_slug": "lsu",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jordan Ross",
+        "position": "EDGE",
+        "rank": 56,
+        "school": "LSU",
+        "weight": null
+      },
+      {
+        "college_slug": "lsu",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Princewill Umanmielen",
+        "position": "EDGE",
+        "rank": 57,
+        "school": "LSU",
+        "weight": null
+      },
+      {
+        "college_slug": "arizona-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Omarion Miller",
+        "position": "WR",
+        "rank": 58,
+        "school": "Arizona State",
+        "weight": null
+      },
+      {
+        "college_slug": "oklahoma",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jayden Jackson",
+        "position": "DL",
+        "rank": 59,
+        "school": "Oklahoma",
+        "weight": null
+      },
+      {
+        "college_slug": "baylor",
+        "draft_year": 2027,
+        "height": null,
+        "name": "DJ Lagway",
+        "position": "QB",
+        "rank": 60,
+        "school": "Baylor",
+        "weight": null
+      },
+      {
+        "college_slug": "clemson",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ashton Hampton",
+        "position": "CB",
+        "rank": 61,
+        "school": "Clemson",
+        "weight": null
+      },
+      {
+        "college_slug": "notre-dame",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Boubacar Traore",
+        "position": "EDGE",
+        "rank": 62,
+        "school": "Notre Dame",
+        "weight": null
+      },
+      {
+        "college_slug": "rutgers",
+        "draft_year": 2027,
+        "height": null,
+        "name": "KJ Duff",
+        "position": "WR",
+        "rank": 63,
+        "school": "Rutgers",
+        "weight": null
+      },
+      {
+        "college_slug": "oklahoma",
+        "draft_year": 2027,
+        "height": null,
+        "name": "John Mateer",
+        "position": "QB",
+        "rank": 64,
+        "school": "Oklahoma",
+        "weight": null
+      },
+      {
+        "college_slug": "clemson",
+        "draft_year": 2027,
+        "height": null,
+        "name": "T.J. Moore",
+        "position": "WR",
+        "rank": 65,
+        "school": "Clemson",
+        "weight": null
+      },
+      {
+        "college_slug": "lsu",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Ty Benefield",
+        "position": "S",
+        "rank": 66,
+        "school": "LSU",
+        "weight": null
+      },
+      {
+        "college_slug": "clemson",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Bryant Wesco Jr.",
+        "position": "WR",
+        "rank": 67,
+        "school": "Clemson",
+        "weight": null
+      },
+      {
+        "college_slug": "michigan",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Blake Frazier",
+        "position": "OT",
+        "rank": 68,
+        "school": "Michigan",
+        "weight": null
+      },
+      {
+        "college_slug": "texas-tech",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Brice Pollock",
+        "position": "CB",
+        "rank": 69,
+        "school": "Texas Tech",
+        "weight": null
+      },
+      {
+        "college_slug": "usc",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jayden Maiava",
+        "position": "QB",
+        "rank": 70,
+        "school": "USC",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Iapani Laloulu",
+        "position": "IOL",
+        "rank": 71,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "penn-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Marcus Neal Jr.",
+        "position": "S",
+        "rank": 72,
+        "school": "Penn State",
+        "weight": null
+      },
+      {
+        "college_slug": "indiana",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Jamari Sharpe",
+        "position": "CB",
+        "rank": 73,
+        "school": "Indiana",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Teitum Tuioti",
+        "position": "EDGE",
+        "rank": 74,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "alabama",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Bray Hubbard",
+        "position": "S",
+        "rank": 75,
+        "school": "Alabama",
+        "weight": null
+      },
+      {
+        "college_slug": "georgia",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Chris Cole",
+        "position": "LB",
+        "rank": 76,
+        "school": "Georgia",
+        "weight": null
+      },
+      {
+        "college_slug": "south-carolina",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Nyck Harbor",
+        "position": "WR",
+        "rank": 77,
+        "school": "South Carolina",
+        "weight": null
+      },
+      {
+        "college_slug": "texas-tech",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Terrance Carter Jr.",
+        "position": "TE",
+        "rank": 78,
+        "school": "Texas Tech",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Mark Fletcher Jr.",
+        "position": "RB",
+        "rank": 79,
+        "school": "Miami",
+        "weight": null
+      },
+      {
+        "college_slug": "lsu",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Sam Leavitt",
+        "position": "QB",
+        "rank": 80,
+        "school": "LSU",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Justin Scott",
+        "position": "DL",
+        "rank": 81,
+        "school": "Miami",
+        "weight": null
+      },
+      {
+        "college_slug": "notre-dame",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Anthonie Knapp",
+        "position": "IOL",
+        "rank": 82,
+        "school": "Notre Dame",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Bear Alexander",
+        "position": "DL",
+        "rank": 83,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "ohio-state",
+        "draft_year": 2027,
+        "height": null,
+        "name": "Kenyatta Jackson Jr.",
+        "position": "EDGE",
+        "rank": 84,
+        "school": "Ohio State",
+        "weight": null
+      }
+    ],
+    "2028": [
+      {
+        "college_slug": "oregon",
+        "draft_year": 2028,
+        "height": null,
+        "name": "Brandon Finney Jr.",
+        "position": "CB",
+        "rank": -1,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "georgia",
+        "draft_year": 2028,
+        "height": null,
+        "name": "Elijah Griffin",
+        "position": "DL",
+        "rank": -1,
+        "school": "Georgia",
+        "weight": null
+      },
+      {
+        "college_slug": "ohio-state",
+        "draft_year": 2028,
+        "height": null,
+        "name": "Bo Jackson",
+        "position": "RB",
+        "rank": -1,
+        "school": "Ohio State",
+        "weight": null
+      },
+      {
+        "college_slug": "oregon",
+        "draft_year": 2028,
+        "height": null,
+        "name": "Dakorien Moore",
+        "position": "WR",
+        "rank": -1,
+        "school": "Oregon",
+        "weight": null
+      },
+      {
+        "college_slug": "california",
+        "draft_year": 2028,
+        "height": null,
+        "name": "Jaron-Kea. Sagapolutele",
+        "position": "QB",
+        "rank": -1,
+        "school": "California",
+        "weight": null
+      },
+      {
+        "college_slug": "tennessee",
+        "draft_year": 2028,
+        "height": null,
+        "name": "David Sanders Jr.",
+        "position": "OT",
+        "rank": -1,
+        "school": "Tennessee",
+        "weight": null
+      },
+      {
+        "college_slug": "miami",
+        "draft_year": 2028,
+        "height": null,
+        "name": "Malachi Toney",
+        "position": "WR",
+        "rank": -1,
+        "school": "Miami",
+        "weight": null
+      }
+    ]
+  },
+  "current_year": 2027,
+  "prospects": [
+    {
+      "college_slug": "ohio-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jeremiah Smith",
+      "position": "WR",
+      "rank": 1,
+      "school": "Ohio State",
+      "weight": null
+    },
+    {
+      "college_slug": "texas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Arch Manning",
+      "position": "QB",
+      "rank": 2,
+      "school": "Texas",
+      "weight": null
+    },
+    {
+      "college_slug": "texas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Colin Simmons",
+      "position": "EDGE",
+      "rank": 3,
+      "school": "Texas",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Dante Moore",
+      "position": "QB",
+      "rank": 4,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "notre-dame",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Leonard Moore",
+      "position": "CB",
+      "rank": 5,
+      "school": "Notre Dame",
+      "weight": null
+    },
+    {
+      "college_slug": "south-carolina",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Dylan Stewart",
+      "position": "EDGE",
+      "rank": 6,
+      "school": "South Carolina",
+      "weight": null
+    },
+    {
+      "college_slug": "texas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Cam Coleman",
+      "position": "WR",
+      "rank": 7,
+      "school": "Texas",
+      "weight": null
+    },
+    {
+      "college_slug": "lsu",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jordan Seaton",
+      "position": "OT",
+      "rank": 8,
+      "school": "LSU",
+      "weight": null
+    },
+    {
+      "college_slug": "ohio-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Julian Sayin",
+      "position": "QB",
+      "rank": 9,
+      "school": "Ohio State",
+      "weight": null
+    },
+    {
+      "college_slug": "texas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Trevor Goosby",
+      "position": "OT",
+      "rank": 10,
+      "school": "Texas",
+      "weight": null
+    },
+    {
+      "college_slug": "oklahoma",
+      "draft_year": 2027,
+      "height": null,
+      "name": "David Stone",
+      "position": "DL",
+      "rank": 11,
+      "school": "Oklahoma",
+      "weight": null
+    },
+    {
+      "college_slug": "georgia",
+      "draft_year": 2027,
+      "height": null,
+      "name": "KJ Bolden",
+      "position": "S",
+      "rank": 12,
+      "school": "Georgia",
+      "weight": null
+    },
+    {
+      "college_slug": "alabama",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ryan Coleman-Williams",
+      "position": "WR",
+      "rank": 13,
+      "school": "Alabama",
+      "weight": null
+    },
+    {
+      "college_slug": "georgia",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ellis Robinson IV",
+      "position": "CB",
+      "rank": 14,
+      "school": "Georgia",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "A'Mauri Washington",
+      "position": "DL",
+      "rank": 15,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "alabama",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Zabien Brown",
+      "position": "CB",
+      "rank": 16,
+      "school": "Alabama",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jamari Johnson",
+      "position": "TE",
+      "rank": 17,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "notre-dame",
+      "draft_year": 2027,
+      "height": null,
+      "name": "CJ Carr",
+      "position": "QB",
+      "rank": 18,
+      "school": "Notre Dame",
+      "weight": null
+    },
+    {
+      "college_slug": "missouri",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ahmad Hardy",
+      "position": "RB",
+      "rank": 19,
+      "school": "Missouri",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Darian Mensah",
+      "position": "QB",
+      "rank": 21,
+      "school": "Miami",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Matayo Uiagalelei",
+      "position": "EDGE",
+      "rank": 22,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "lsu",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Trey'Dez Green",
+      "position": "TE",
+      "rank": 23,
+      "school": "LSU",
+      "weight": null
+    },
+    {
+      "college_slug": "arkansas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Quincy Rhodes Jr.",
+      "position": "EDGE",
+      "rank": 24,
+      "school": "Arkansas",
+      "weight": null
+    },
+    {
+      "college_slug": "indiana",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Charlie Becker",
+      "position": "WR",
+      "rank": 25,
+      "school": "Indiana",
+      "weight": null
+    },
+    {
+      "college_slug": "notre-dame",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Kyngstonn Viliamu-Asa",
+      "position": "LB",
+      "rank": 26,
+      "school": "Notre Dame",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Koi Perich",
+      "position": "S",
+      "rank": 27,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "south-carolina",
+      "draft_year": 2027,
+      "height": null,
+      "name": "LaNorris Sellers",
+      "position": "QB",
+      "rank": 28,
+      "school": "South Carolina",
+      "weight": null
+    },
+    {
+      "college_slug": "mississippi-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Kelley Jones",
+      "position": "CB",
+      "rank": 29,
+      "school": "Mississippi State",
+      "weight": null
+    },
+    {
+      "college_slug": "iowa",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Kade Pieper",
+      "position": "IOL",
+      "rank": 30,
+      "school": "Iowa",
+      "weight": null
+    },
+    {
+      "college_slug": "ole-miss",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Kewan Lacy",
+      "position": "RB",
+      "rank": 31,
+      "school": "Ole Miss",
+      "weight": null
+    },
+    {
+      "college_slug": "indiana",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Nick Marsh",
+      "position": "WR",
+      "rank": 32,
+      "school": "Indiana",
+      "weight": null
+    },
+    {
+      "college_slug": "indiana",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Carter Smith",
+      "position": "OT",
+      "rank": 33,
+      "school": "Indiana",
+      "weight": null
+    },
+    {
+      "college_slug": "ohio-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Austin Siereveld",
+      "position": "OT",
+      "rank": 34,
+      "school": "Ohio State",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ahmad Moten Sr.",
+      "position": "DL",
+      "rank": 35,
+      "school": "Miami",
+      "weight": null
+    },
+    {
+      "college_slug": "ole-miss",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Will Echoles",
+      "position": "DL",
+      "rank": 36,
+      "school": "Ole Miss",
+      "weight": null
+    },
+    {
+      "college_slug": "texas-tech",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Brendan Sorsby",
+      "position": "QB",
+      "rank": 37,
+      "school": "Texas Tech",
+      "weight": null
+    },
+    {
+      "college_slug": "clemson",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Sammy Brown",
+      "position": "LB",
+      "rank": 38,
+      "school": "Clemson",
+      "weight": null
+    },
+    {
+      "college_slug": "texas-a-m",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Mario Craver",
+      "position": "WR",
+      "rank": 39,
+      "school": "Texas A&M",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Damon Wilson II",
+      "position": "EDGE",
+      "rank": 40,
+      "school": "Miami",
+      "weight": null
+    },
+    {
+      "college_slug": "syracuse",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Chris Peal",
+      "position": "CB",
+      "rank": 41,
+      "school": "Syracuse",
+      "weight": null
+    },
+    {
+      "college_slug": "michigan",
+      "draft_year": 2027,
+      "height": null,
+      "name": "John Henry Daley",
+      "position": "EDGE",
+      "rank": 42,
+      "school": "Michigan",
+      "weight": null
+    },
+    {
+      "college_slug": "clemson",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Will Heldt",
+      "position": "EDGE",
+      "rank": 43,
+      "school": "Clemson",
+      "weight": null
+    },
+    {
+      "college_slug": "iowa",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Trevor Lauck",
+      "position": "OT",
+      "rank": 44,
+      "school": "Iowa",
+      "weight": null
+    },
+    {
+      "college_slug": "ole-miss",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Trinidad Chambliss",
+      "position": "QB",
+      "rank": 45,
+      "school": "Ole Miss",
+      "weight": null
+    },
+    {
+      "college_slug": "alabama",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Yhonzae Pierre",
+      "position": "EDGE",
+      "rank": 46,
+      "school": "Alabama",
+      "weight": null
+    },
+    {
+      "college_slug": "texas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Rasheem Biles",
+      "position": "LB",
+      "rank": 47,
+      "school": "Texas",
+      "weight": null
+    },
+    {
+      "college_slug": "oklahoma-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Drew Mestemaker",
+      "position": "QB",
+      "rank": 48,
+      "school": "Oklahoma State",
+      "weight": null
+    },
+    {
+      "college_slug": "texas-tech",
+      "draft_year": 2027,
+      "height": null,
+      "name": "A.J. Holmes Jr.",
+      "position": "DL",
+      "rank": 49,
+      "school": "Texas Tech",
+      "weight": null
+    },
+    {
+      "college_slug": "texas",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ryan Wingo",
+      "position": "WR",
+      "rank": 50,
+      "school": "Texas",
+      "weight": null
+    },
+    {
+      "college_slug": "minnesota",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Anthony Smith",
+      "position": "EDGE",
+      "rank": 51,
+      "school": "Minnesota",
+      "weight": null
+    },
+    {
+      "college_slug": "notre-dame",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Tae Johnson",
+      "position": "S",
+      "rank": 52,
+      "school": "Notre Dame",
+      "weight": null
+    },
+    {
+      "college_slug": "georgia",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Nate Frazier",
+      "position": "RB",
+      "rank": 53,
+      "school": "Georgia",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2027,
+      "height": null,
+      "name": "OJ Frederique Jr.",
+      "position": "CB",
+      "rank": 54,
+      "school": "Miami",
+      "weight": null
+    },
+    {
+      "college_slug": "lsu",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jordan Ross",
+      "position": "EDGE",
+      "rank": 56,
+      "school": "LSU",
+      "weight": null
+    },
+    {
+      "college_slug": "lsu",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Princewill Umanmielen",
+      "position": "EDGE",
+      "rank": 57,
+      "school": "LSU",
+      "weight": null
+    },
+    {
+      "college_slug": "arizona-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Omarion Miller",
+      "position": "WR",
+      "rank": 58,
+      "school": "Arizona State",
+      "weight": null
+    },
+    {
+      "college_slug": "oklahoma",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jayden Jackson",
+      "position": "DL",
+      "rank": 59,
+      "school": "Oklahoma",
+      "weight": null
+    },
+    {
+      "college_slug": "baylor",
+      "draft_year": 2027,
+      "height": null,
+      "name": "DJ Lagway",
+      "position": "QB",
+      "rank": 60,
+      "school": "Baylor",
+      "weight": null
+    },
+    {
+      "college_slug": "clemson",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ashton Hampton",
+      "position": "CB",
+      "rank": 61,
+      "school": "Clemson",
+      "weight": null
+    },
+    {
+      "college_slug": "notre-dame",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Boubacar Traore",
+      "position": "EDGE",
+      "rank": 62,
+      "school": "Notre Dame",
+      "weight": null
+    },
+    {
+      "college_slug": "rutgers",
+      "draft_year": 2027,
+      "height": null,
+      "name": "KJ Duff",
+      "position": "WR",
+      "rank": 63,
+      "school": "Rutgers",
+      "weight": null
+    },
+    {
+      "college_slug": "oklahoma",
+      "draft_year": 2027,
+      "height": null,
+      "name": "John Mateer",
+      "position": "QB",
+      "rank": 64,
+      "school": "Oklahoma",
+      "weight": null
+    },
+    {
+      "college_slug": "clemson",
+      "draft_year": 2027,
+      "height": null,
+      "name": "T.J. Moore",
+      "position": "WR",
+      "rank": 65,
+      "school": "Clemson",
+      "weight": null
+    },
+    {
+      "college_slug": "lsu",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Ty Benefield",
+      "position": "S",
+      "rank": 66,
+      "school": "LSU",
+      "weight": null
+    },
+    {
+      "college_slug": "clemson",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Bryant Wesco Jr.",
+      "position": "WR",
+      "rank": 67,
+      "school": "Clemson",
+      "weight": null
+    },
+    {
+      "college_slug": "michigan",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Blake Frazier",
+      "position": "OT",
+      "rank": 68,
+      "school": "Michigan",
+      "weight": null
+    },
+    {
+      "college_slug": "texas-tech",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Brice Pollock",
+      "position": "CB",
+      "rank": 69,
+      "school": "Texas Tech",
+      "weight": null
+    },
+    {
+      "college_slug": "usc",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jayden Maiava",
+      "position": "QB",
+      "rank": 70,
+      "school": "USC",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Iapani Laloulu",
+      "position": "IOL",
+      "rank": 71,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "penn-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Marcus Neal Jr.",
+      "position": "S",
+      "rank": 72,
+      "school": "Penn State",
+      "weight": null
+    },
+    {
+      "college_slug": "indiana",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Jamari Sharpe",
+      "position": "CB",
+      "rank": 73,
+      "school": "Indiana",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Teitum Tuioti",
+      "position": "EDGE",
+      "rank": 74,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "alabama",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Bray Hubbard",
+      "position": "S",
+      "rank": 75,
+      "school": "Alabama",
+      "weight": null
+    },
+    {
+      "college_slug": "georgia",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Chris Cole",
+      "position": "LB",
+      "rank": 76,
+      "school": "Georgia",
+      "weight": null
+    },
+    {
+      "college_slug": "south-carolina",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Nyck Harbor",
+      "position": "WR",
+      "rank": 77,
+      "school": "South Carolina",
+      "weight": null
+    },
+    {
+      "college_slug": "texas-tech",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Terrance Carter Jr.",
+      "position": "TE",
+      "rank": 78,
+      "school": "Texas Tech",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Mark Fletcher Jr.",
+      "position": "RB",
+      "rank": 79,
+      "school": "Miami",
+      "weight": null
+    },
+    {
+      "college_slug": "lsu",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Sam Leavitt",
+      "position": "QB",
+      "rank": 80,
+      "school": "LSU",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Justin Scott",
+      "position": "DL",
+      "rank": 81,
+      "school": "Miami",
+      "weight": null
+    },
+    {
+      "college_slug": "notre-dame",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Anthonie Knapp",
+      "position": "IOL",
+      "rank": 82,
+      "school": "Notre Dame",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Bear Alexander",
+      "position": "DL",
+      "rank": 83,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "ohio-state",
+      "draft_year": 2027,
+      "height": null,
+      "name": "Kenyatta Jackson Jr.",
+      "position": "EDGE",
+      "rank": 84,
+      "school": "Ohio State",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2028,
+      "height": null,
+      "name": "Brandon Finney Jr.",
+      "position": "CB",
+      "rank": -1,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "georgia",
+      "draft_year": 2028,
+      "height": null,
+      "name": "Elijah Griffin",
+      "position": "DL",
+      "rank": -1,
+      "school": "Georgia",
+      "weight": null
+    },
+    {
+      "college_slug": "ohio-state",
+      "draft_year": 2028,
+      "height": null,
+      "name": "Bo Jackson",
+      "position": "RB",
+      "rank": -1,
+      "school": "Ohio State",
+      "weight": null
+    },
+    {
+      "college_slug": "oregon",
+      "draft_year": 2028,
+      "height": null,
+      "name": "Dakorien Moore",
+      "position": "WR",
+      "rank": -1,
+      "school": "Oregon",
+      "weight": null
+    },
+    {
+      "college_slug": "california",
+      "draft_year": 2028,
+      "height": null,
+      "name": "Jaron-Kea. Sagapolutele",
+      "position": "QB",
+      "rank": -1,
+      "school": "California",
+      "weight": null
+    },
+    {
+      "college_slug": "tennessee",
+      "draft_year": 2028,
+      "height": null,
+      "name": "David Sanders Jr.",
+      "position": "OT",
+      "rank": -1,
+      "school": "Tennessee",
+      "weight": null
+    },
+    {
+      "college_slug": "miami",
+      "draft_year": 2028,
+      "height": null,
+      "name": "Malachi Toney",
+      "position": "WR",
+      "rank": -1,
+      "school": "Miami",
+      "weight": null
+    }
+  ],
+  "source": "tankathon",
+  "totals": {
+    "all": 89,
+    "skill": 36
+  }
+}

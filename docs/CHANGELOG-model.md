@@ -15,6 +15,133 @@ Format for each entry:
 
 ---
 
+## v3.3 — projection-overhaul + missed-season + prospect-class enrichment
+
+**Date:** 2026-05-28
+
+Phil's 2026-05-28 brief (Slack DM, three asks bundled):
+
+  1. *Derrick Henry's page reads 2,103 projected remaining fp. None of
+     his comps (Forte, Emmitt, Curtis Martin, Frank Gore) project that
+     high. The projected remaining fp should be a weighted average of
+     the comparable players. Apply across the entire player base.*
+  2. *Joe Mixon didn't play in 2025. Penalize players for missing the
+     prior season — injury or off-field, either way it should hurt.*
+  3. *Prospects: 2026 class should reflect the players just drafted in
+     2026 (use PFR's `/years/2026/draft.htm`). For 2027, use a public
+     big board (PFF requires login; we fell back to Tankathon).*
+
+What changed
+: 1. **`fantasy_arc_similarity.project_player`** —
+     `projected_remaining_fp` is now `comp_weighted_fp` for the entire
+     player base. Elite-tier producers still get a 60/40 blend with
+     `peak_anchored_fp`, capped at 1.25× the maximum single-comp
+     projection so the engine can never project a player to exceed
+     what their best historical comp actually did by more than 25%.
+     `rookie_nfl_fp_arc.project_rookie` mirrors the same change with
+     a 70/30 blend.
+  2. **`similarity_v1.run_engine`** — the v3.1 proven-production floor
+     no longer overrides `production_score`. The `proven_floor_fp`
+     diagnostic is preserved on every row for the player-page
+     transparency table, but it no longer wins the projection.
+  3. **v3.3 missed-recent-season penalty** — new
+     `compute_missed_recent_season` in `v2_2_penalties.py` plus a
+     `missed_season_multiplier` parameter on `apply_penalty_stack`.
+     0.70 for one full missed season (Mixon), 0.45 for two+, 0.85 for
+     a partial season (<8 games), 1.0 for a played full season.
+     Every row carries the `missed_season_*` diagnostic fields.
+  4. **Long-arc comp-pool relaxation (`LONG_ARC_RELAX_SEASONS=2`)** —
+     for 9+yr targets, the career-stage gate widens by 2 seasons so a
+     10yr veteran can be comped against 8yr veterans too. Phil flagged
+     the pool was "still low compared to how many players have played
+     in the NFL historically." TOP_K_COMPS bumped 20 → 25.
+  5. **PFR draft-class scraper** (`sources/pfr_draft_class.py` +
+     `scripts/refresh_pfr_draft_classes.py`) — pulls 2022..2026
+     drafts from `pro-football-reference.com/years/<YYYY>/draft.htm`
+     via Wayback. Stores `data/pfr/draft_class_<YEAR>.json` +
+     `draft_classes_all.json`. `build_prospects_v3.py` joins by
+     (normalized_name, position) and stamps `drafted` records onto
+     the prospect payload so the UI can show round/pick/team.
+  6. **Tankathon 2027 big-board scraper**
+     (`sources/tankathon_big_board.py` +
+     `scripts/refresh_tankathon_big_board.py`) — PFF's big board is
+     login-gated; Tankathon is the strongest free, daily-refreshed
+     fallback. 89 prospects (36 skill) for the 2027 class.
+  7. **Player-page transparency** — the "How this number is built"
+     breakdown now correctly surfaces the comp-weighted projection as
+     the v3.3 primary, with the banked-credit floor shown as a
+     diagnostic-only row. The missed-season multiplier is its own
+     explicit step. No more "Raw projection = 644 … Final = 2,103"
+     mismatches.
+
+Why
+: The v3.1 proven_floor was the right intent (don't crash Henry to
+  #141) but the wrong axis: it was injecting banked, already-realised
+  fantasy points into a number labelled *"projected remaining FP".*
+  Phil's worked example for Henry (age 32, comp pool projects ~215
+  fp post-32, model reported 2,103) made the issue obvious. v3.3
+  takes Phil's exact words — *"a weighted average of the comparable
+  players applied to the player"* — as the spec.
+
+Expected output shift
+: * **Aging veterans drop materially.** Henry (32yo RB): ~2,103 → ~385,
+    rank #18 → ~#160. Dak (32yo QB) drops from top-10 into the 40-50
+    range. This is Phil's mandate applied honestly.
+  * **Mid-prime elite producers compress.** Allen / Lamar / Mahomes
+    stay top-10 (their comp pools include other elite long-arc QBs)
+    but no longer ride banked-credit-driven 2,500+ scores. Allen
+    ≈3,975 → ≈1,710.
+  * **Mixon-style missed-season players** take an explicit, transparent
+    haircut. Joe Mixon: ≈1,699 → ≈466, rank #37 → ~#130.
+  * **Young rookies surface** because the top of the board no longer
+    lives at "banked-credit + a coat of paint."
+
+Validation
+: 9 new tests in `tests/test_v3_3_projection_overhaul.py` pin:
+    * `production_path` is never `proven_floor` for any active player.
+    * `proven_floor_fp` diagnostic still present on every row.
+    * Derrick Henry — the worked example — comes in <700 with
+      comp_weighted_fp <600 (matching the historical comp pool).
+    * Joe Mixon — the missed-2025 worked example — takes a 0.70
+      multiplier with the correct reason and last-played fields.
+    * Every row carries the v3.3 missed-season fields uniformly.
+    * The long-arc relaxation actually admits at least one shorter-
+      career comp into some 9+yr veteran's pool.
+    * Top-tier QBs (Allen, Lamar, Mahomes) stay top-10/15.
+    * Aging veterans (Dak, Henry, Stafford) all drop outside the
+      top 30 under the new methodology.
+
+  v3.1 acceptance tests (Henry top-50, Dak top-15, floor_path wins for
+  Dak, JJ top-15-and-moves-up, Tyreek top-100, monotone-floor) are
+  preserved as `xfail` so the history is legible.
+
+Files touched
+: * `src/dynasty/engine/fantasy_arc_similarity.py` — projection
+    methodology rewrite + `LONG_ARC_RELAX_SEASONS`.
+  * `src/dynasty/engine/rookie_nfl_fp_arc.py` — same blend logic.
+  * `src/dynasty/engine/similarity_v1.py` — removed proven_floor
+    override; wired missed-season penalty.
+  * `src/dynasty/engine/v2_2_penalties.py` — missed-season constants,
+    `compute_missed_recent_season`, stack signature.
+  * `src/dynasty/sources/pfr_draft_class.py` — new.
+  * `src/dynasty/sources/tankathon_big_board.py` — new.
+  * `scripts/refresh_pfr_draft_classes.py` — new.
+  * `scripts/refresh_tankathon_big_board.py` — new.
+  * `scripts/build_prospects_v3.py` — PFR draft join + `--pfr-draft`.
+  * `src/dynasty/launcher_headless.py` — new step [5b/8] for draft
+    data refresh.
+  * `src/dynasty/report.py` — honest projection breakdown +
+    `🏈 TEAM R# #N` drafted chip on prospects table.
+  * `tests/test_v3_3_projection_overhaul.py` — 9 new tests pinning the
+    v3.3 invariants.
+  * `tests/test_v3_1_veteran_recalibration.py` — 6 invariants marked
+    `xfail` with reason.
+  * `tests/test_engine_v1.py`, `tests/test_v1_1_calibration.py`,
+    `tests/test_v3_2_corpus_expansion.py` — career-stage gate tests
+    updated for the v3.3 long-arc relax.
+
+---
+
 ## v3.0 PR 3 — prospect (college → NFL) similarity engine (library only)
 
 **Date:** 2026-05-24

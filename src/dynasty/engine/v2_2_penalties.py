@@ -152,6 +152,27 @@ LATE_BREAKOUT_PENALTY_EARLY = 1.00     # breakout_age ≤ 22
 PENALTY_STACK_FLOOR = 0.20             # final multiplier never below this
 PENALTY_STACK_CEILING = 1.00           # … and never above this
 
+# v3.3 — missed-recent-season penalty (Phil's 2026-05-28 brief).
+#
+# Players who DID NOT PLAY in the most recent NFL season (or only got
+# a handful of games) have their projection haircut. Phil:
+#   "Joe Mixon did not play in 2025 (the most recent season). It is
+#    fair to attribute that to injury or off the field issues...
+#    either of which should penalize the player."
+#
+# The penalty looks at the gap between the player's most-recent
+# qualifying season and the corpus's most-recent season. Each missed
+# full season is taxed multiplicatively. A partial-season miss (played
+# <8 games in the most recent season) takes a smaller haircut.
+#
+# NOT applied to rookies (career_arc length 0 — they couldn't have
+# played yet) or to players whose nflverse player_id is missing from
+# the corpus entirely (handled upstream).
+MISSED_FULL_SEASON_MULTIPLIER = 0.70   # one full missed season
+MISSED_TWO_FULL_SEASONS_MULTIPLIER = 0.45  # two+ full missed seasons (effectively out of the league)
+PARTIAL_SEASON_MULTIPLIER = 0.85       # played <8 games in most recent season
+PARTIAL_SEASON_GAME_THRESHOLD = 8       # games below which a season counts as "partial"
+
 
 # ---------------------------------------------------------------------------
 # Survival multiplier
@@ -563,6 +584,81 @@ class PenaltyStackResult:
     confidence: float
     position_tier_baseline: float
     late_breakout_penalty: float
+    # v3.3 — missed-recent-season multiplier applied AFTER the rest of
+    # the stack. 1.0 = full season played; <1.0 = partial / missed.
+    missed_season_multiplier: float = 1.0
+
+
+@dataclass
+class MissedSeasonDiagnostics:
+    """v3.3 missed-recent-season penalty diagnostics (Phil 2026-05-28)."""
+
+    name: str
+    position: str
+    last_played_season: Optional[int]
+    seasons_since_played: int          # >=0; 0 = played last season
+    last_played_games: Optional[int]   # games in their most recent played season
+    missed_season_multiplier: float
+    reason: str                        # human-readable explanation for the UI
+
+
+def compute_missed_recent_season(
+    arc: CareerArc,
+    corpus_last_season: int,
+) -> MissedSeasonDiagnostics:
+    """Apply a multiplicative haircut for missing the most recent season.
+
+    ``corpus_last_season`` is the most recent season represented anywhere
+    in the unified nflverse corpus (e.g. 2025). A player whose latest
+    qualifying-games season is before that is taxed; the further back
+    their last NFL appearance is, the deeper the cut. A player who
+    only saw 1-7 games in the most recent season takes a partial cut.
+
+    Rookies (no career arc at all) and the v2.1 rookie engine path are
+    NOT routed here — this function is only called for the main
+    cumulative-arc engine path.
+    """
+    seasons = [s for s in arc.career_arc if s.games > 0]
+    if not seasons:
+        return MissedSeasonDiagnostics(
+            name=arc.name, position=arc.position,
+            last_played_season=None, seasons_since_played=0,
+            last_played_games=None, missed_season_multiplier=1.0,
+            reason="no-career-arc",
+        )
+    last = max(seasons, key=lambda s: s.season)
+    gap = corpus_last_season - last.season
+    if gap >= 2:
+        return MissedSeasonDiagnostics(
+            name=arc.name, position=arc.position,
+            last_played_season=last.season, seasons_since_played=gap,
+            last_played_games=last.games,
+            missed_season_multiplier=MISSED_TWO_FULL_SEASONS_MULTIPLIER,
+            reason=f"missed {gap} full seasons (last played {last.season})",
+        )
+    if gap == 1:
+        return MissedSeasonDiagnostics(
+            name=arc.name, position=arc.position,
+            last_played_season=last.season, seasons_since_played=gap,
+            last_played_games=last.games,
+            missed_season_multiplier=MISSED_FULL_SEASON_MULTIPLIER,
+            reason=f"missed {corpus_last_season} season entirely (last played {last.season})",
+        )
+    # gap == 0: played the most recent season. Check for partial.
+    if last.games < PARTIAL_SEASON_GAME_THRESHOLD:
+        return MissedSeasonDiagnostics(
+            name=arc.name, position=arc.position,
+            last_played_season=last.season, seasons_since_played=0,
+            last_played_games=last.games,
+            missed_season_multiplier=PARTIAL_SEASON_MULTIPLIER,
+            reason=f"only {last.games} games in {last.season} (partial season)",
+        )
+    return MissedSeasonDiagnostics(
+        name=arc.name, position=arc.position,
+        last_played_season=last.season, seasons_since_played=0,
+        last_played_games=last.games, missed_season_multiplier=1.0,
+        reason="played full most-recent season",
+    )
 
 
 def apply_penalty_stack(
@@ -573,6 +669,7 @@ def apply_penalty_stack(
     late_breakout_penalty: float,
     *,
     is_stale_data: bool = False,
+    missed_season_multiplier: float = 1.0,
 ) -> PenaltyStackResult:
     """Compose the three penalties as documented in the module docstring.
 
@@ -628,7 +725,14 @@ def apply_penalty_stack(
     # (Daniels top 5, Bo Nix drops, late_breakout_penalty=0.88 pin)
     # all hold simultaneously.
     effective_lb_penalty = 1.0 - (1.0 - late_breakout_penalty) * confidence
-    final = after_conf * effective_lb_penalty
+    after_lb = after_conf * effective_lb_penalty
+
+    # v3.3 missed-recent-season penalty — applied AFTER the rest of the
+    # stack so it shows up cleanly as a separate multiplier in the
+    # player-page breakdown. Not gated by confidence (a player who
+    # didn't play didn't play — it's a fact, not a small-sample
+    # inference).
+    final = after_lb * missed_season_multiplier
 
     floor = PENALTY_STACK_FLOOR * projection_raw
     ceiling = PENALTY_STACK_CEILING * projection_raw
@@ -643,4 +747,5 @@ def apply_penalty_stack(
         confidence=confidence,
         position_tier_baseline=position_tier_baseline,
         late_breakout_penalty=late_breakout_penalty,
+        missed_season_multiplier=missed_season_multiplier,
     )

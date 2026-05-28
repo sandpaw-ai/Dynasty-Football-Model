@@ -15,6 +15,135 @@ Format for each entry:
 
 ---
 
+## v3.6 — prospect projection fixes (meaningful-comp threshold + baseline floor + nickname match)
+
+**Date:** 2026-05-28 (same day as v3.3 / v3.4 / v3.5, fourth pass)
+
+Phil's fourth 2026-05-28 brief (Slack DM, three specific complaints):
+
+  > 1. "Look at Jadarian Price. He has no comps that have any NFL
+  >    stats... how is he such a highly rated prospect."
+  > 2. "KC Concepcion - he has no comparable college players on his
+  >    page... why is that? and why is he ranked 1 if he doesnt have
+  >    any?"
+  > 3. "Mendoza isnt even showing up on the 2026 prospects page? He
+  >    has the number 1 draft pick!!!"
+  > 4. "Makai Lemon's page actually looks pretty good!" (the reference
+  >    point for what "good" looks like.)
+
+Diagnosis:
+
+1. **Mendoza** was buried at rank #306 with projection 91.5 fp despite
+   being the 2026 #1 overall pick. Root cause: v3.4 counted ANY comp
+   with NFL career data toward `n_comps_with_nfl`. Mendoza's 10 "NFL
+   comps" included Connor Cook (6 career fp), Brooks Bollinger (121),
+   and other career backups. With 10 ≥ 8 = `FULL_CONFIDENCE_NFL_COMPS`,
+   confidence was 1.0 and the pure comp-weighted projection (91 fp)
+   won outright, smothering the R1_top10 QB baseline (3200).
+
+2. **KC Concepcion** showed up as a stub with no college stats, no
+   comps, and projection = pure pick-tier baseline. Root cause: PFR
+   names him "KC Concepcion" while cfbfastR has him as "Kevin
+   Concepcion". My v3.4 corpus-match-by-name failed because the
+   normalized full names didn't match.
+
+3. **Jadarian Price** appeared high but with zero NFL-career comps,
+   which Phil felt was unjustified. Root cause: he was getting pure
+   pick-tier baseline (R1 RB = 1200) with no transparency that the
+   number was "NFL evaluation only, zero historical-comp signal."
+
+What changed
+: 1. **`scripts/build_prospects_v3.py`:**
+     * `MEANINGFUL_NFL_CAREER_FP = 200` (new constant). A comp only
+       counts toward `n_meaningful_nfl_comps` if its NFL career was
+       ≥1 starter-quality season's worth of fp. Connor Cook (6 fp)
+       no longer counts; Brooks Bollinger (121 fp) doesn't either.
+     * `FULL_CONFIDENCE_NFL_COMPS = 12` (was 8). Slower transition
+       to comp-only so the baseline retains weight further.
+     * `MIN_BASELINE_FRACTION = 0.30` (new). A drafted player can
+       never project below 30% of their pick-tier baseline. Stops
+       the comp-weighted projection from crushing #1 overall picks
+       to ~zero when the college-similarity engine produces a
+       garbage comp pool. The floor is applied AFTER the confidence
+       blend, and only when `pick is not None` (un-drafted players
+       don't get this protection).
+     * `_project_arc` now stamps `n_meaningful_nfl_comps`,
+       `projection_confidence`, `floor_applied`, `comp_only_career_fp`,
+       and `pick_tier_baseline_fp` on every projection so the UI can
+       explain the number transparently.
+     * **Last-name + school fallback match**: in `build_prospect_records`,
+       when the strict full-name match misses, fall back to
+       (last_name + school + position) with loose school containment.
+       Resolves "KC Concepcion" PFR → "Kevin Concepcion" corpus.
+  2. **`src/dynasty/report.py`:**
+     * Prospect page header bumped "v3.4" → "v3.6".
+     * "v3.6 projection methodology" callout explains each prospect's
+       projection in plain language with the correct branch
+       (comp_weighted, pick_tier_baseline, floor_30pct, or
+       blend_<conf>). When `n_meaningful_nfl_comps < 3`, a
+       `low-confidence comp pool` chip is rendered next to the
+       methodology label so the reader sees the model's epistemic
+       honesty at a glance.
+
+Expected output shift
+: * Mendoza: rank #306 / projection 91.5 → model rank #5 in the 2026
+    class / projection 2,682. With n_meaningful=2 his confidence is
+    0.17, the R1_top10 QB baseline (3200) dominates, and the
+    comp-weighted contribution stays small.
+  * Concepcion: corpus_match flips False → True via the new last-name
+    fallback. He's now displayed as "Kevin Concepcion" (the corpus
+    name) with actual college stats and a comp grid. Projection
+    drops from baseline-alone 1250 to blended 696 because we now have
+    6 meaningful NFL comps to feed the projection.
+  * Jadarian Price stays at his pick-tier baseline 1200 (R1 RB),
+    but the methodology callout now explicitly says "No comps with
+    meaningful NFL careers... The pick-tier baseline anchors the
+    number to what players in this position+pick range historically
+    produce" + a low-confidence chip. Transparent honesty about
+    what the model knows and doesn't.
+  * Makai Lemon (Phil's positive reference): unchanged from v3.5 —
+    his comp pool was already strong (n_meaningful=10).
+
+Validation
+: 7 new tests in `tests/test_v3_6_prospect_projection_fixes.py`:
+    * Meaningful threshold: comps with career_fp ≥ 200 count, others
+      don't.
+    * Floor protects high-pick projections from collapse below 30%
+      of pick-tier baseline.
+    * Un-drafted players (`pick=None`) don't get the floor.
+    * High-confidence meaningful comp pool (n=12) yields
+      `comp_weighted` source.
+    * Integration: Mendoza projects ≥2000 in the 2026 class.
+    * Integration: Concepcion now `corpus_match=True` with comps
+      populated.
+    * Integration: Jadarian Price lands near his R1 RB baseline
+      (1200) rather than collapsed or inflated.
+
+  Existing v3.0 PR4 test (`test_project_arc_weighted_average_matches_hand_calc`)
+  updated to use the v3.6 confidence formula (`n_meaningful / 12` instead
+  of `n_with_nfl / 8`).
+
+  Existing v3.4 test (`test_2026_class_only_contains_pfr_drafted_players`)
+  updated to accept records whose display name uses the corpus name
+  rather than the PFR name, when the (last_name, school) pair matches.
+
+  All 438 tests pass. 7 xfailed (intentional v3.1 retired invariants),
+  3 pre-existing test_manager / test_prefetch failures (sqlalchemy
+  dynasty.db pollution) remain unrelated.
+
+Files touched
+: * `scripts/build_prospects_v3.py` — meaningful threshold + confidence
+    transition + baseline floor + last-name+school match fallback.
+  * `src/dynasty/report.py` — prospect page header + v3.6 methodology
+    callout with low-confidence chip.
+  * `tests/test_v3_6_prospect_projection_fixes.py` — new (7 tests).
+  * `tests/test_v3_0_pr4_prospects_build.py` — hand-calc updated.
+  * `tests/test_v3_4_drafted_only_prospects.py` — last-name+school
+    fallback accepted in the drafted-only invariant test.
+  * `tests/test_v3_0_pr6_site.py` — header version bump.
+
+---
+
 ## v3.5 — retired-only comp pool + name-based NFL bridge fallback
 
 **Date:** 2026-05-28 (same day as v3.3 / v3.4, third pass)

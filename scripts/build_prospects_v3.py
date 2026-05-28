@@ -302,6 +302,80 @@ def _summarize_career(pv: ProspectVector) -> Dict[str, float]:
 # Per-position model rank assignment + KTC delta
 # ---------------------------------------------------------------------------
 
+def _normalize_name_for_pfr(name: str) -> str:
+    """v3.3 — fold name for join keys with PFR (lower, strip punctuation,
+    collapse whitespace). Mirrors _normalize_name's intent but is a
+    separate path so future tweaks to either don't break the other.
+    """
+    if not name:
+        return ""
+    s = name.lower()
+    for ch in [".", ",", "'", "’", "-", "—", "–"]:
+        s = s.replace(ch, " ")
+    return " ".join(s.split())
+
+
+def _load_pfr_draft_classes(path: Path) -> Mapping[Tuple[str, str], Dict]:
+    """v3.3 — load PFR NFL draft classes (years 2022..2026) so the
+    prospects tab can mark prospects who were actually drafted, with
+    pick / team / draft-year. Returns a (normalized_name, position)
+    -> draft-pick dict map. The position key uses our skill positions;
+    PFR's defensive positions (OLB, CB, etc.) are filtered out before
+    join — they wouldn't be in the prospects record set anyway.
+    """
+    if not path.exists():
+        log.warning("PFR draft data not found at %s — skip enrichment", path)
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    by_year = payload.get("by_year", {})
+    out: Dict[Tuple[str, str], Dict] = {}
+    for year, picks in by_year.items():
+        for p in picks:
+            pos = (p.get("position") or "").upper()
+            if pos not in SKILL_POSITIONS:
+                continue
+            key = (_normalize_name_for_pfr(p.get("player_name", "")), pos)
+            out[key] = {
+                "year": int(year),
+                "round": p.get("rnd"),
+                "pick": p.get("pick"),
+                "team": p.get("team"),
+                "college": p.get("college"),
+                "pfr_id": p.get("pfr_id"),
+            }
+    log.info("PFR draft picks indexed: %d skill picks across years %s",
+             len(out), sorted(by_year.keys()))
+    return out
+
+
+def _attach_pfr_draft(records: List[Dict],
+                     pfr: Mapping[Tuple[str, str], Dict]) -> None:
+    """Mutate ``records`` in place, adding a ``drafted`` block when the
+    prospect shows up in PFR's draft data for their draft class. The
+    UI uses this to mark drafted prospects (with team + pick) and to
+    filter the 2026 class to actually-drafted players when desired.
+
+    Match key: (normalized_name, position). We also require the PFR
+    draft year to match the prospect's draft_class year; mismatches
+    (e.g. a 2024 prospect with a same-name 2026 draftee) are dropped.
+    """
+    matched = 0
+    for r in records:
+        key = (_normalize_name_for_pfr(r["name"]), r["position"])
+        pick = pfr.get(key)
+        if not pick:
+            r["drafted"] = None
+            continue
+        if pick.get("year") != r.get("draft_class"):
+            r["drafted"] = None
+            continue
+        r["drafted"] = pick
+        matched += 1
+    log.info("PFR draft enrichment: %d of %d records matched",
+             matched, len(records))
+
+
 def _attach_ktc_and_rank(records: List[Dict], ktc: Mapping[Tuple[str, str], Dict]) -> None:
     """Compute per-position model_rank (within the supplied records) and
     join in KTC values + delta. Mutates ``records`` in place.
@@ -498,6 +572,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--bridge", type=Path, default=DEFAULT_BRIDGE_FILE)
     parser.add_argument("--ktc", type=Path,
                         default=Path("data/consensus/ktc_latest.json"))
+    parser.add_argument("--pfr-draft", type=Path,
+                        default=Path("data/pfr/draft_classes_all.json"),
+                        help="PFR NFL draft-class JSON (v3.3, Phil 2026-05-28).")
     parser.add_argument("--nfl", type=Path,
                         default=Path("data/nflverse/player_stats_season.csv.gz"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/engine_v3"))
@@ -522,6 +599,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     nfl_careers = _load_nfl_careers(args.nfl)
     log.info("NFL careers loaded: %d gsis ids", len(nfl_careers))
 
+    pfr_draft = _load_pfr_draft_classes(args.pfr_draft)
+
     by_class = build_prospect_records(
         corpus=corpus,
         resolver=resolver,
@@ -530,6 +609,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         draft_classes=args.classes,
         top_k=args.top_k,
     )
+    # v3.3 — stamp drafted status onto every record (after model rank
+    # / KTC join; doesn't affect rankings, just enriches the UI payload).
+    all_records: List[Dict] = []
+    for rows in by_class.values():
+        all_records.extend(rows)
+    _attach_pfr_draft(all_records, pfr_draft)
     _write_artifacts(by_class, args.out_dir)
     return 0
 

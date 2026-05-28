@@ -128,18 +128,28 @@ def test_puka_nacua_comps_are_retired_greats(engine):
 
 
 def test_v3_2_career_stage_matched_comps(engine):
-    """v3.2 contract (REPLACES v1.1's no-active-short-career rule):
+    """v3.2 contract (REPLACES v1.1's no-active-short-career rule),
+    relaxed in v3.3 for deep-career veterans.
 
-    Every v2.0 cumulative-arc comp must have at least max(target_n,
-    COMP_POOL_MIN_SEASONS=3) completed seasons in its arc. Short-career
-    ACTIVE players are no longer banned from the comp pool — they're
-    the survivorship-bias correction (Phil 2026-05). Instead, the
-    gate is career-stage-matched: comp must have already crossed the
-    same season-count threshold the target has reached.
+    Every v2.0 cumulative-arc comp must have at least:
+        max(target_n, COMP_POOL_MIN_SEASONS=3)                       (target_n < 9)
+        max(target_n - LONG_ARC_RELAX_SEASONS, COMP_POOL_MIN_SEASONS) (target_n >= 9)
+    completed seasons in its arc.
+
+    Short-career ACTIVE players are no longer banned from the comp
+    pool — they're the survivorship-bias correction (Phil 2026-05).
+    For veterans, the gate widens (Phil 2026-05-28) so 9+yr targets
+    can be comped against careers up to LONG_ARC_RELAX_SEASONS shorter,
+    broadening the eligible pool significantly without dragging in
+    early-career busts.
 
     v2.1 EXEMPTION (unchanged): rookie engine uses its own pool.
     """
-    from dynasty.engine.fantasy_arc_similarity import COMP_POOL_MIN_SEASONS
+    from dynasty.engine.fantasy_arc_similarity import (
+        COMP_POOL_MIN_SEASONS,
+        LONG_ARC_RELAX_SEASONS,
+        LONG_ARC_RELAX_TRIGGER_SEASONS,
+    )
     careers = engine.careers
     rookie_pids = {
         row["player_id"] for row in engine.rankings
@@ -153,7 +163,12 @@ def test_v3_2_career_stage_matched_comps(engine):
         if target is None:
             continue
         target_n = len(target.seasons)
-        min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
+        if target_n >= LONG_ARC_RELAX_TRIGGER_SEASONS:
+            min_comp_n = max(
+                target_n - LONG_ARC_RELAX_SEASONS, COMP_POOL_MIN_SEASONS
+            )
+        else:
+            min_comp_n = max(target_n, COMP_POOL_MIN_SEASONS)
         for c in comp_list:
             comp = careers.get(c["player_id"])
             if not comp:
@@ -166,7 +181,7 @@ def test_v3_2_career_stage_matched_comps(engine):
                     (pid, c["name"], comp_n, min_comp_n)
                 )
     assert not violations, (
-        f"{len(violations)} v3.2 career-stage gate violations: {violations[:5]}"
+        f"{len(violations)} v3.2/v3.3 career-stage gate violations: {violations[:5]}"
     )
 
 

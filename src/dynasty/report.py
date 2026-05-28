@@ -1175,6 +1175,21 @@ with per-prospect comp pages.</div>
         delta = p.get("ktc_delta_overall")
         is_te = pos == "TE"
         te_flag = ' <span title="TE engine is experimental — see status banner" class="prospect-te-mini">⚠️</span>' if is_te else ""
+        # v3.3 — PFR-drafted badge (Phil 2026-05-28). If we matched
+        # this prospect to an actual NFL draft pick, surface the round
+        # / pick / team inline so the table answers "is this person
+        # actually a 2026 NFL rookie?" at a glance.
+        drafted = p.get("drafted") or {}
+        if drafted:
+            d_round = drafted.get("round")
+            d_pick = drafted.get("pick")
+            d_team = drafted.get("team") or "?"
+            drafted_html = (
+                f' <span class="draft-chip" title="Drafted {drafted.get("year")} '
+                f'round {d_round} pick {d_pick}, {d_team}">🏈 {d_team} R{d_round} #{d_pick}</span>'
+            )
+        else:
+            drafted_html = ""
         proj = p.get("projection") or {}
         career_fp = proj.get("projected_career_fp")
         peak3 = proj.get("projected_peak3_fp_pg")
@@ -1184,9 +1199,10 @@ with per-prospect comp pages.</div>
             f'data-name="{_esc((p.get("name") or "").lower())}" '
             f'data-position="{_esc(pos)}" '
             f'data-class="{_esc(p.get("draft_class") or "")}" '
+            f'data-drafted="{1 if drafted else 0}" '
             f'onclick="location=\'players/{slug}-prospect.html\'">'
             f'<td class="rank">{_esc(rank)}{te_flag}</td>'
-            f'<td class="name"><a href="players/{slug}-prospect.html">{_esc(p.get("name",""))}</a></td>'
+            f'<td class="name"><a href="players/{slug}-prospect.html">{_esc(p.get("name",""))}</a>{drafted_html}</td>'
             f'<td>{_pos_badge(pos)}</td>'
             f'<td class="years">{_esc(p.get("draft_class") or "—")}</td>'
             f'<td class="team">{_esc(p.get("school") or "—")}</td>'
@@ -1660,12 +1676,18 @@ def _build_player_page(row: Dict, comps: List[Dict], team: str,
     # survival_multiplier, sample_confidence, late_breakout_penalty).
     comp_weighted = float(row.get("comp_weighted_fp", 0.0))
     peak_anchored = float(row.get("peak_anchored_fp", 0.0))
+    proven_floor_diag = float(row.get("proven_floor_fp", 0.0))
     projection_path = row.get("projection_path", "—")
     raw_pre_penalty = float(row.get("projection_raw_pre_penalty",
                                      max(comp_weighted, peak_anchored)))
     survival = float(row.get("survival_multiplier", 1.0))
     confidence = float(row.get("sample_confidence", 1.0))
     late_breakout = float(row.get("late_breakout_penalty", 1.0))
+    # v3.3 missed-recent-season penalty diagnostics
+    missed_mult = float(row.get("missed_season_multiplier", 1.0))
+    missed_reason = row.get("missed_season_reason", "") or ""
+    missed_last_played = row.get("missed_season_last_played")
+    missed_last_played_games = row.get("missed_season_last_played_games")
     final = float(row.get("production_score", 0.0))
     n_comps = int(row.get("n_comps", len(comps)))
     avg_sim = (sum_sim / max(len(comps[:20]), 1)) if comps else 0.0
@@ -1706,18 +1728,30 @@ final production score is <strong>{final:,.0f}</strong>.</p>
 <table style="max-width:780px">
 <thead><tr><th>Step</th><th style="text-align:right">Value</th><th>What it is</th></tr></thead>
 <tbody>
-<tr><td class="name">Comp-weighted projection</td>
-    <td class="score" style="text-align:right">{comp_weighted:,.0f}</td>
+<tr><td class="name"><strong>Comp-weighted projection (v3.3 primary)</strong></td>
+    <td class="score" style="text-align:right"><strong>{comp_weighted:,.0f}</strong></td>
     <td>Σ (sim<sub>i</sub> × post-age-fp<sub>i</sub>) / Σ sim<sub>i</sub>.
-    Sanity check from the top-20 row data on this page: <strong>{recomputed_comp_proj:,.0f}</strong>.</td></tr>
+    Sanity check from the top-20 row data on this page:
+    <strong>{recomputed_comp_proj:,.0f}</strong>. <em>This is the
+    “weighted average of the comparable players’ actual realised
+    post-age fantasy points” — Phil's 2026-05-28 brief.</em></td></tr>
 <tr><td class="name">Peak-anchored projection</td>
     <td class="score" style="text-align:right">{peak_anchored:,.0f}</td>
     <td>The player's own peak-3yr-fp/g × expected games × horizon ×
-    5%/yr time discount. Floors elite producers when their comps
-    happen to be light.</td></tr>
+    5%/yr time discount, capped at 1.25× the top single-comp
+    projection. Used as a soft blend for elite-tier producers
+    (60/40 comp-weighted / capped peak) so a Mahomes / Allen isn't
+    fully dragged to the comp-pool mean.</td></tr>
+<tr><td class="name">Banked-credit floor (diagnostic only)</td>
+    <td class="score" style="text-align:right">{proven_floor_diag:,.0f}</td>
+    <td>The v3.1 “dynasty equity” floor = career_total_fp ×
+    yrs-rem-weight + recent rate × short forward window. <strong>v3.3
+    no longer lets this override the projection</strong> — banked production
+    is already realised, not “remaining.” Shown for transparency.</td></tr>
 <tr><td class="name">Raw projection (pre-penalty)</td>
     <td class="score" style="text-align:right">{raw_pre_penalty:,.0f}</td>
-    <td>The greater of the two paths above is used (“{_esc(projection_path)}”).</td></tr>
+    <td>Blended comp-weighted + capped peak-anchored, per the
+    v3.3 methodology described above.</td></tr>
 <tr><td class="name">× Survival</td>
     <td class="score" style="text-align:right">{survival:.3f}</td>
     <td>Multiplier reflecting how many comps washed out by age 30.
@@ -1730,6 +1764,12 @@ final production score is <strong>{final:,.0f}</strong>.</p>
     <td class="score" style="text-align:right">{late_breakout:.3f}</td>
     <td>QB-only. Scales by confidence so unproven late-breakout rookies
     only pay a fraction of the discount.</td></tr>
+<tr><td class="name">× Missed-season penalty (v3.3)</td>
+    <td class="score" style="text-align:right">{missed_mult:.3f}</td>
+    <td>Multiplicative haircut for players who didn't play (or only
+    played a partial slate) in the most recent NFL season. 0.70 for
+    a full missed season, 0.85 for &lt;8 games, 0.45 for two+ full
+    missed seasons. <em>{_esc(missed_reason)}</em></td></tr>
 <tr><td class="name"><strong>= Final production score</strong></td>
     <td class="score" style="text-align:right"><strong>{final:,.0f}</strong></td>
     <td>Drives the player's rank on the <a href="../rankings.html">Similarity

@@ -90,7 +90,7 @@ from .fantasy_arc import (
 # Configuration
 # ---------------------------------------------------------------------------
 
-TOP_K_COMPS = 20
+TOP_K_COMPS = 25  # v3.3: widened from 20 (Phil 2026-05-28 — comp pool felt thin)
 AGE_WINDOW = 1
 CAREER_STAGE_WINDOW = 1
 DISCOUNT_PER_YEAR = 0.05
@@ -521,6 +521,19 @@ def pre1999_haircut_weight(arc: CareerArc, snapshot_age: int) -> float:
 #     unchanged.
 COMP_POOL_MIN_SEASONS = 3
 
+# v3.3 — long-arc relax-on-veterans. Phil's 2026-05-28 brief noted the
+# long-arc comp pool "is still low compared to how many players have
+# played in the NFL historically." For deep-career targets (9+ seasons),
+# the strict "comp must have ≥ N seasons" gate excludes meaningful
+# comparables who happened to retire one or two seasons earlier than
+# the target. We allow comps to be UP TO ``LONG_ARC_RELAX_SEASONS``
+# shorter than the target so a 9-year vet (Henry) can be comped
+# against 7-year vets too, broadening the eligible pool significantly
+# without dragging in 3-season busts. Floor still respects
+# COMP_POOL_MIN_SEASONS.
+LONG_ARC_RELAX_SEASONS = 2             # how many shorter-career seasons we accept for 9+yr targets
+LONG_ARC_RELAX_TRIGGER_SEASONS = 9     # target career length at which relax kicks in
+
 
 def find_comps(
     target: CareerArc,
@@ -547,7 +560,17 @@ def find_comps(
 
     if target_n_seasons is None:
         target_n_seasons = len(target.career_arc)
-    min_comp_seasons = max(target_n_seasons, COMP_POOL_MIN_SEASONS)
+    # v3.3: for deep-career veterans, relax the lower bound so the
+    # eligible comp pool actually reflects "NFL careers similar in
+    # length to this player" rather than "only players who outlasted
+    # this player."
+    if target_n_seasons >= LONG_ARC_RELAX_TRIGGER_SEASONS:
+        min_comp_seasons = max(
+            target_n_seasons - LONG_ARC_RELAX_SEASONS,
+            COMP_POOL_MIN_SEASONS,
+        )
+    else:
+        min_comp_seasons = max(target_n_seasons, COMP_POOL_MIN_SEASONS)
 
     candidates: List[CompMatch] = []
     for comp in long_arc_corpus:
@@ -1015,18 +1038,43 @@ def project_player(
     else:
         peak_anchored = 0.0
 
-    # Only elite-tier producers get the peak-anchored boost (gated on
-    # ALL-TIME peak, not the anchor rate — a one-time elite peak still
-    # gets you in the elite bucket even if you've declined). Below the
-    # threshold the projection falls back to comp-weighted.
+    # v3.3 PROJECTION METHODOLOGY (Phil's brief, 2026-05-28):
+    # "The projected remaining fantasy points should be some sort of
+    #  weighted average of the comparable players applied to the player.
+    #  Apply the new methodology across the entire player base."
+    #
+    # Comp-weighted is now the PRIMARY projection across all positions and
+    # career stages. Peak-anchored is a SOFT BLEND for elite-tier producers
+    # (so a Mahomes / Allen / Henry isn't dragged all the way to the
+    # comp-pool average), and the blend itself is CAPPED at 1.25× the
+    # highest single-comp projected pts — i.e. the engine cannot project
+    # a player to exceed what their best historical comp actually did by
+    # more than 25%. This directly fixes the Henry case where the player
+    # page reported 2,103 remaining fp despite no comp exceeding ~445.
     threshold = ELITE_PEAK_THRESHOLDS.get(target.position, 0.0)
-    if target_peak >= threshold:
-        projected_fp = max(weighted_pts, peak_anchored)
-    elif target_peak >= threshold - SOFT_BAND:
+    # Soft top-cap on peak-anchored: don't let the engine extrapolate
+    # beyond what comps actually produced post-snapshot.
+    comp_projected_pts = []
+    for c in comps:
+        pts, _n = project_remaining(
+            c.arc, age_floor=c.snapshot_age, league_format=league_format,
+        )
+        comp_projected_pts.append(pts)
+    top_comp_proj = max(comp_projected_pts) if comp_projected_pts else 0.0
+    peak_anchored_capped = min(peak_anchored, 1.25 * top_comp_proj) if top_comp_proj > 0 else peak_anchored
+
+    if target_peak >= threshold and peak_anchored_capped > weighted_pts:
+        # Elite-tier producer with a viable peak anchor: blend 60% comps
+        # + 40% capped peak (was: max() of both, which silently dropped
+        # comp signal entirely for elite producers).
+        projected_fp = 0.60 * weighted_pts + 0.40 * peak_anchored_capped
+    elif target_peak >= threshold - SOFT_BAND and peak_anchored_capped > weighted_pts:
+        # Soft-band: linearly fade from pure comp-weighted to the 60/40 blend.
         t = (target_peak - (threshold - SOFT_BAND)) / SOFT_BAND
-        blended = (1 - t) * weighted_pts + t * max(weighted_pts, peak_anchored)
-        projected_fp = blended
+        blended_anchor = 0.60 * weighted_pts + 0.40 * peak_anchored_capped
+        projected_fp = (1 - t) * weighted_pts + t * blended_anchor
     else:
+        # Default for everyone else: pure comp-weighted (Phil's mandate).
         projected_fp = weighted_pts
 
     # ------------------------------------------------------------------

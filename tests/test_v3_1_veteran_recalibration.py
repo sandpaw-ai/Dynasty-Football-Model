@@ -264,9 +264,17 @@ def test_proven_floor_recency_window_is_capped_at_three_years():
 # Acceptance-case integration tests — engine-level invariants.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(
+    reason="v3.3 (Phil 2026-05-28) removed proven_floor as a winning "
+    "path. Dak's ranking is now driven by comp-weighted projected fp "
+    "remaining, not banked credit. This v3.1 acceptance test is "
+    "preserved as historical context.",
+    strict=False,
+)
 def test_dak_above_watson_fields_kyler(engine):
-    """ACCEPTANCE #1: Dak Prescott (2598 banked) must rank above
-    Deshaun Watson, Justin Fields, and Kyler Murray."""
+    """ACCEPTANCE #1 (v3.1, retired in v3.3): Dak Prescott (2598 banked)
+    must rank above Deshaun Watson, Justin Fields, and Kyler Murray.
+    Phil's 2026-05-28 brief removed banked credit as a winning path."""
     dak = _rank(engine, "Dak Prescott")
     watson = _rank(engine, "Deshaun Watson")
     fields = _rank(engine, "Justin Fields")
@@ -277,26 +285,46 @@ def test_dak_above_watson_fields_kyler(engine):
     assert dak < kyler, f"Dak ({dak}) should rank above Kyler ({kyler})"
 
 
+@pytest.mark.xfail(
+    reason="v3.3 (Phil 2026-05-28) removed proven_floor as a winning "
+    "path. Derrick Henry's ranking is now driven by comp-weighted "
+    "projected fp remaining (~215 from 32yo RB comps), which places "
+    "him deep in the standings as Phil explicitly requested for the "
+    "player base. Preserved as historical context.",
+    strict=False,
+)
 def test_derrick_henry_top_50(engine):
-    """ACCEPTANCE #2: Derrick Henry — banked 2447 + currently top-5 RB
-    production — must land inside the top 50."""
+    """ACCEPTANCE #2 (v3.1, retired in v3.3): Derrick Henry — banked
+    2447 + currently top-5 RB production — must land inside the top 50.
+    Phil's 2026-05-28 brief used Henry as the EXAMPLE of why proven_floor
+    was wrong (2,103 projected remaining fp at age 32 vs his comp pool's
+    actual ~215 average). The brief explicitly accepted the rank drop."""
     henry = _rank(engine, "Derrick Henry")
     assert henry is not None
     assert henry <= 50, f"Henry should be top-50, got #{henry}"
 
 
+@pytest.mark.xfail(
+    reason="v3.3 (Phil 2026-05-28) projection methodology change: "
+    "comp-weighted only. Jefferson's banked credit no longer lifts "
+    "him; his rank now reflects comp-weighted post-26 WR production.",
+    strict=False,
+)
 def test_justin_jefferson_top_15_and_moves_up(engine):
-    """ACCEPTANCE #3: Justin Jefferson moves up materially. Phil's
-    brief said 'likely top-10' with 'Maybe' qualifier; we pin top-15
-    so the test is robust to small calibration drift, but the
-    real-world target is top-10."""
+    """ACCEPTANCE #3 (v3.1, retired in v3.3): Justin Jefferson moves up
+    materially under proven_floor. v3.3 no longer uses that path."""
     jj = _rank(engine, "Justin Jefferson")
     assert jj is not None
     assert jj <= 15, f"JJ should be top-15, got #{jj}"
 
 
+@pytest.mark.xfail(
+    reason="v3.3 removed banked credit from the winning projection path.",
+    strict=False,
+)
 def test_dak_top_15_overall(engine):
-    """ACCEPTANCE #4: Banked production deserves Dak in the top-15."""
+    """ACCEPTANCE #4 (v3.1, retired in v3.3): Banked production deserves
+    Dak in the top-15. v3.3 ranks Dak by comp-weighted forward fp only."""
     dak = _rank(engine, "Dak Prescott")
     assert dak is not None
     assert dak <= 15, f"Dak should be top-15, got #{dak}"
@@ -357,6 +385,12 @@ def test_bijan_above_saquon(engine):
     )
 
 
+@pytest.mark.xfail(
+    reason="v3.3 projection methodology change. Tyreek's age-32 WR comp "
+    "pool projects modest forward fp, which under Phil's mandate is the "
+    "correct signal.",
+    strict=False,
+)
 def test_tyreek_hill_stays_top_100(engine):
     """ACCEPTANCE #10: Tyreek (age 32, banked 2492) — the late-career
     WR case must stay inside the top 100. If he plummets we've broken
@@ -411,9 +445,13 @@ def test_rb_late_career_boost_fires_for_henry(engine):
     assert r.get("rb_late_career_boost_applied") is True
 
 
+@pytest.mark.xfail(
+    reason="v3.3 retired the proven_floor production_path. The field is "
+    "still computed as a diagnostic, but does not win the projection.",
+    strict=False,
+)
 def test_floor_path_wins_for_dak(engine):
-    """Dak's banked production drives his rank — the production_path
-    should resolve to 'proven_floor'."""
+    """v3.1 invariant retired in v3.3."""
     r = _row(engine, "Dak Prescott")
     assert r is not None
     assert r["production_path"] == "proven_floor"
@@ -438,10 +476,13 @@ def test_floor_does_not_inflate_thin_sample_young_qb_into_top_30(engine):
     )
 
 
+@pytest.mark.xfail(
+    reason="v3.3 retired the proven_floor as a winning path — it no longer "
+    "applies any monotone-increase guarantee to production_score.",
+    strict=False,
+)
 def test_proven_floor_never_decreases_production_score(engine):
-    """The floor is monotone — it can only move a score UP. For every
-    fantasy-arc-v2 row, production_score >= production_score_pre_floor
-    (within rounding)."""
+    """v3.1 invariant retired in v3.3."""
     for r in engine.rankings:
         if r.get("engine") != "fantasy_arc_v2":
             continue

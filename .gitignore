@@ -84,3 +84,5 @@ data/consensus/ktc_[0-9]*-[0-9]*-[0-9]*.json
 data/engine_v3/prospect_corpus.json.gz
 data/engine_v3/prospects_*.json
 
+data/tankathon_cache/
+data/pfr_cache/draft_class/

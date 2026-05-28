@@ -112,14 +112,18 @@ def test_long_arc_corpus_size(engine):
     assert len(engine.long_arc_corpus) > 1431
 
 
-def test_long_arc_includes_modern_veterans(engine):
-    """Active QB veterans with 8+ seasons should be in the long-arc corpus."""
-    names = {c.name for c in engine.long_arc_corpus}
-    for name in (
-        "Aaron Rodgers", "Matthew Stafford", "Russell Wilson",
-        "Kirk Cousins", "Derek Carr", "Ryan Tannehill", "Andy Dalton",
-    ):
-        assert name in names, f"{name} should be in long-arc corpus"
+def test_long_arc_excludes_currently_active_veterans(engine):
+    """v3.5 (Phil 2026-05-28): currently-active veterans — even with
+    8+ seasons — are EXCLUDED from the long-arc comp corpus so they
+    don't truncate younger players' projections with still-in-progress
+    careers. Structural invariant: every member of long_arc_corpus
+    has last_season < current_season - 1 (=2024 here).
+    """
+    for c in engine.long_arc_corpus:
+        assert c.last_season is None or c.last_season < 2024, (
+            f"{c.name} (last_season={c.last_season}) leaked into the "
+            f"long-arc corpus despite v3.5's active-player exclusion"
+        )
 
 
 def test_long_arc_excludes_short_career_active(engine):
@@ -131,19 +135,19 @@ def test_long_arc_excludes_short_career_active(engine):
         assert name not in names, f"{name} should NOT be in long-arc corpus"
 
 
+@pytest.mark.xfail(
+    reason="v3.5 (Phil 2026-05-28) removed active players from the "
+    "long-arc corpus entirely. The 'active vet contributes only "
+    "completed seasons' invariant is retired — active vets are no "
+    "longer in the corpus at all.",
+    strict=False,
+)
 def test_active_player_in_corpus_only_completed_seasons(engine):
-    """Long-arc-but-active veterans contribute only their completed seasons
-    (i.e. seasons \u2264 current_season=2024)."""
-    # Aaron Rodgers: meta says last_season 2026, but his contribution to the
-    # corpus must stop at 2024 (the latest completed season in our dataset
-    # window).
-    by_id = {c.player_id: c for c in engine.long_arc_corpus}
+    """v3.4 invariant retired in v3.5."""
     rodgers = next((c for c in engine.long_arc_corpus if c.name == "Aaron Rodgers"), None)
     assert rodgers is not None
     max_season = max(s.season for s in rodgers.seasons)
-    assert max_season <= 2025, (
-        f"Rodgers' long-arc copy has season {max_season} > 2025 — in-progress leak"
-    )
+    assert max_season <= 2025
 
 
 def test_retired_greats_still_in_corpus(engine):

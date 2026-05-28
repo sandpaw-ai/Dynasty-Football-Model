@@ -385,12 +385,6 @@ def test_bijan_above_saquon(engine):
     )
 
 
-@pytest.mark.xfail(
-    reason="v3.3 projection methodology change. Tyreek's age-32 WR comp "
-    "pool projects modest forward fp, which under Phil's mandate is the "
-    "correct signal.",
-    strict=False,
-)
 def test_tyreek_hill_stays_top_100(engine):
     """ACCEPTANCE #10: Tyreek (age 32, banked 2492) — the late-career
     WR case must stay inside the top 100. If he plummets we've broken

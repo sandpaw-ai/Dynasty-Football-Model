@@ -1226,13 +1226,19 @@ with per-prospect comp pages.</div>
 
     body = f"""<div class="container">
 
-<h2>Prospect <span class="accent">Rankings — v3.0</span></h2>
-<p class="lede">Skill-position prospects ranked by projected career fantasy
-points under {_esc(league_label)}. Each prospect is comped against the
-v3.0 college→NFL similarity corpus (PR 3) and projected via the v3.0
-projection layer (PR 4). KTC delta shows where the model differs from the
-current consensus dynasty board — positive (green) = model bullish,
-negative (red) = model bearish.</p>
+<h2>Prospect <span class="accent">Rankings — v3.4</span></h2>
+<p class="lede">Skill-position prospects who were <strong>actually drafted</strong>
+in each class (per <a href="https://www.pro-football-reference.com/years/2026/draft.htm">Pro-Football-Reference</a>
+for 2022–2026; <a href="https://www.tankathon.com/nfl/big_board">Tankathon</a>
+big-board for the upcoming 2027 class). Each player is comped against
+the v3.0 college→NFL similarity corpus (PR 3) and projected via the v3.0
+projection layer, blended with a draft-pick-tier baseline (v3.4) so a
+first-overall pick can't read 1.4 projected career fp just because his
+college-fp comp pool happened to be undrafted small-school backups.
+KTC delta surfaces where the model disagrees with the current consensus
+dynasty board — positive (green) = model bullish, negative (red) = model
+bearish. Default sort is by NFL draft pick within each class; click any
+column to re-sort.</p>
 
 <div class="prospect-status-row">
   <span class="status-pill status-pill-ok">✅ QB · RB · WR engine validated
@@ -1447,6 +1453,60 @@ def _build_prospect_page(prospect: Dict, label: str, latest_ts: datetime,
             'No delta available.</div>'
         )
 
+    # ---- v3.4 drafted info + projection-source callout ------------------
+    drafted = prospect.get("drafted") or {}
+    drafted_callout = ""
+    if drafted and drafted.get("pick"):
+        d_round = drafted.get("round") or "?"
+        d_pick = drafted.get("pick")
+        d_team = drafted.get("team") or "?"
+        d_year = drafted.get("year") or draft_class
+        source = drafted.get("source") or "pfr"
+        if source == "tankathon_big_board":
+            label_word = f"Tankathon 2027 big-board rank"
+            value_word = f"#{d_pick}"
+        else:
+            label_word = f"NFL Draft {d_year}"
+            value_word = f"Round {d_round}, Pick #{d_pick} — {d_team}"
+        drafted_callout = (
+            '<div class="callout" style="margin-top:14px">'
+            f'<strong>🏈 {_esc(label_word)}:</strong> {_esc(value_word)}'
+            '</div>'
+        )
+    proj_source = proj.get("projection_source")
+    proj_callout = ""
+    if proj_source:
+        comp_only = proj.get("comp_only_career_fp")
+        baseline = proj.get("pick_tier_baseline_fp")
+        confidence = proj.get("projection_confidence")
+        if proj_source == "comp_weighted":
+            proj_desc = (
+                "Projection is purely comp-weighted (\u22658 comps with NFL careers)."
+            )
+        elif proj_source.startswith("pick_tier_baseline"):
+            proj_desc = (
+                f"Projection is the pick-tier baseline for this position. "
+                f"No comps with NFL data — the historical college players "
+                f"most similar to this prospect either didn't reach the NFL "
+                f"or aren't in our bridge file. The pick-tier baseline anchors "
+                f"the number to what players in this position+pick range "
+                f"historically produce."
+            )
+        else:
+            proj_desc = (
+                f"Projection is a confidence-blend (“{_esc(proj_source)}”). "
+                f"With <strong>{proj.get('n_comps_with_nfl', 0)}</strong> comps "
+                f"that have NFL careers (confidence "
+                f"<strong>{confidence:.2f}</strong>), we blend the comp-only "
+                f"projection (<strong>{comp_only:,.0f}</strong>) with the "
+                f"pick-tier baseline (<strong>{baseline:,.0f}</strong>)."
+            )
+        proj_callout = (
+            '<div class="callout" style="margin-top:8px">'
+            f'<strong>v3.4 projection methodology.</strong> {proj_desc}'
+            '</div>'
+        )
+
     # ---- Production panel (college) -------------------------------------
     prod_html = (
         f'<div class="controls" style="margin:14px 0 8px;flex-wrap:wrap;gap:14px">'
@@ -1503,7 +1563,9 @@ def _build_prospect_page(prospect: Dict, label: str, latest_ts: datetime,
     body = f"""{header_html}
 <div class="container">
 
+{drafted_callout}
 {ktc_callout}
+{proj_callout}
 
 <h2>Projection <span class="accent">Inputs</span></h2>
 <p class="lede">College production summary feeding the v3.0 similarity

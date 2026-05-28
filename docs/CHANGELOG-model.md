@@ -15,6 +15,129 @@ Format for each entry:
 
 ---
 
+## v3.4 — drafted-only prospects + pick-tier baseline projection
+
+**Date:** 2026-05-28 (same day as v3.3, second pass)
+
+Phil's second 2026-05-28 brief (Slack DM, frustration tone):
+
+  > "The prospect page is still a total mess.
+  >  Just pull the classes from pro-football-reference and use the
+  >  link as a guide for the 2026 class. No players should appear in
+  >  the 2026 tab unless they are on this link… not that difficult.
+  >  And for all of those players in each draft class, navigate to
+  >  that same player's page on sports-reference and pull similarity
+  >  production scores by comparing to historical college players.
+  >  You should measure prospects up against historically similar
+  >  players (build a database just like we have for NFL player
+  >  similarity scores) and then project NFL fantasy points… also —
+  >  not that difficult of a concept.
+  >  please fix all of this and combine versions and give me something
+  >  to test. I am getting frustrated… If I can do it by the back of
+  >  my hand, you should be able to do it and scale it."
+
+Diagnosis: the v3.0 prospects pipeline emitted ~5,081 rows per class —
+*every* college player in our corpus whose last college season fell in
+the class year, drafted or not. Sam Howell (NFL backup), Jaquarii
+Roberson and Jerreth Sterns (undrafted small-school WRs) ranked above
+actual NFL #1 picks because their college-fp comp profile happened to
+include long-career NFL comps. Meanwhile Fernando Mendoza (2026 #1
+overall pick) didn't even appear on the page — his college-fp comp
+pool was UNC/Iowa/WSU backups, NONE of whom played in the NFL, so the
+projection collapsed to 1.4 and his row was buried in the tail.
+
+What changed
+: 1. **`build_prospects_v3.build_prospect_records`** is now
+     **drafted-only by default**. PFR's draft.htm is the authoritative
+     source for who is in classes 2022–2026; Tankathon's big board is
+     the source for the upcoming 2027 class (PFF is login-gated).
+     A prospect appears on the page if and only if a matching PFR /
+     Tankathon pick exists for that (name, position, year).
+     `--all-corpus` flag preserves the legacy behavior for back-tests.
+  2. **PFR picks with no corpus match** still get a stub record so the
+     drafted player appears on the page. The stub uses the pick-tier
+     baseline projection and surfaces `corpus_match: False` on the row.
+  3. **`_project_arc` now confidence-blends** the comp-weighted
+     projection with the **draft-pick-tier baseline** when fewer than
+     `FULL_CONFIDENCE_NFL_COMPS = 8` comps have NFL career data. The
+     baseline (`PICK_TIER_BASELINES_SF_PPR`) is per-(position, pick
+     tier) projected career fp — R1_top10 QB = 3200, R3 RB = 500, R7
+     WR = 85, UDFA = 30-55. With zero NFL comps, the projection is the
+     pure baseline (was 0.0 pre-v3.4). With 8+, the comp number wins.
+  4. **Default sort** within each class is now **ascending NFL pick**.
+     Click any column header to re-sort. The model's projected career
+     fp is shown alongside the pick for at-a-glance disagreement.
+  5. **Per-prospect page** now includes a 🏈 drafted callout (year /
+     round / pick / team) and a methodology callout explaining how
+     the projection was assembled (`comp_weighted`, `pick_tier_baseline`,
+     or `blend_<conf>_<tier>`).
+  6. **`DEFAULT_FRESHMAN_AGE` bumped 18.0 → 19.0** in the prospect
+     similarity engine. The age field on every player was reading
+     20.0 because most college players are tagged JR (3) and the
+     calc was `18 + (3 - 1) = 20`. Real-world freshman season starts
+     at age 18-19, so a JR at season end is more like 21, a SR is 22.
+     The age feature carries a weight of 20.0 in the similarity
+     distance, so mis-anchoring everyone two years young was clumping
+     drafted-as-JR'ers with true 18-year-old prospects.
+  7. **Site copy** on `prospects.html` rewritten to make the
+     methodology legible: "actually drafted per PFR for 2022–2026 /
+     Tankathon big-board for upcoming 2027."
+
+Expected output shift
+: * **The 2026 class is now exactly the 80 PFR-drafted 2026 skill
+    players.** Sam Howell, Jaquarii Roberson, Jerreth Sterns and other
+    "in-corpus but not in NFL" names that previously dominated
+    disappear from the prospects board entirely.
+  * **Fernando Mendoza** (2026 #1 overall) projects ~2,000 career fp
+    (was 1.4) via the R1_top10 QB baseline blended with his 38%-confident
+    comp pool. He's now the first row of the 2026 class.
+  * **2027 class shows the 32 Tankathon big-board skill players** —
+    Arch Manning, Jeremiah Smith, Dante Moore, Julian Sayin all
+    surface with R1-tier baseline projections.
+  * **PFR picks with no corpus match** (KC Concepcion who shows up as
+    "kevin-concepcion" in cfbfastR slug; Nate Boerkircher; etc.) still
+    appear, with `corpus_match: False` and a pick-tier baseline
+    projection so the page list is complete.
+
+Validation
+: 8 new tests in `tests/test_v3_4_drafted_only_prospects.py`:
+    * Pick-tier bucket boundaries.
+    * `_baseline_projection` returns the right pick-tier values.
+    * `_project_arc` blends correctly with thin NFL comp pools.
+    * `_project_arc` falls back to baseline (not 0.0) when no comps
+      have NFL careers.
+    * The 2026 class contains exactly the PFR-drafted 2026 skill
+      players (no extras, no omissions).
+    * Mendoza appears in the 2026 class with projection ≥1000.
+    * Default sort within each class is ascending NFL pick.
+    * Stub records for PFR picks without corpus matches carry the
+      `corpus_match: False` flag + a baseline projection.
+
+  Existing `_project_arc` tests in `test_v3_0_pr4_prospects_build.py`
+  updated to test both `comp_only_career_fp` (the pure weighted average
+  preserved as a diagnostic) and the v3.4 blended `projected_career_fp`
+  with explicit position+pick inputs. Legacy `drafted_only=False` mode
+  preserved so back-tests and synthetic tests can opt into the old
+  corpus-wide behavior.
+
+  All 423 tests pass. 3 pre-existing test_manager / test_prefetch
+  failures (sqlalchemy dynasty.db pollution) remain unrelated.
+
+Files touched
+: * `scripts/build_prospects_v3.py` — PICK_TIER_BASELINES_SF_PPR +
+    `_pick_tier` + `_baseline_projection` + drafted-only loop +
+    Tankathon-2027 integration + `--all-corpus` escape hatch.
+  * `src/dynasty/engine/prospect_similarity.py` — freshman age 18→19.
+  * `src/dynasty/report.py` — v3.4 page header copy + drafted
+    callout + projection-methodology callout on prospect pages.
+  * `tests/test_v3_4_drafted_only_prospects.py` — new (8 tests).
+  * `tests/test_v3_0_pr4_prospects_build.py` — `_project_arc` tests
+    updated; synthetic build_prospect_records tests pass
+    `drafted_only=False` to keep their semantics.
+  * `tests/test_v3_0_pr6_site.py` — header version bump v3.0 → v3.4.
+
+---
+
 ## v3.3 — projection-overhaul + missed-season + prospect-class enrichment
 
 **Date:** 2026-05-28

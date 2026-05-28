@@ -214,6 +214,12 @@ def test_hit_label_unknown_for_no_career():
 # ---------------------------------------------------------------------------
 
 def test_project_arc_weighted_average_matches_hand_calc():
+    """v3.4: the comp-only weighted average is still computed (now
+    surfaced as ``comp_only_career_fp``) and matches the hand calc.
+    The returned ``projected_career_fp`` is a confidence-blend of the
+    comp number with the pick-tier baseline; we test that here with
+    a thin sample (n_with_nfl=3 < FULL_CONFIDENCE_NFL_COMPS=8).
+    """
     comps = [
         {"distance": 0.0, "nfl_career": {"career_fp": 1000.0, "peak3_fp_pg": 20.0,
                                           "seasons_played": 5}},
@@ -223,28 +229,43 @@ def test_project_arc_weighted_average_matches_hand_calc():
                                           "seasons_played": 1}},
     ]
     # weights: 1/(1+0)=1.0, 1/(1+1)=0.5, 1/(1+3)=0.25; tot=1.75
-    # career: (1*1000 + 0.5*500 + 0.25*100)/1.75 = 1275/1.75 = 728.57
+    # comp_only career: (1*1000 + 0.5*500 + 0.25*100)/1.75 = 728.57
+    # No position/pick supplied — baseline defaults to UDFA tier (low).
     out = bp._project_arc(comps)
-    assert out["projected_career_fp"] == pytest.approx(728.6, rel=1e-2)
-    # peak3: (1*20 + 0.5*10 + 0.25*4)/1.75 = 26/1.75 ≈ 14.857
-    assert out["projected_peak3_fp_pg"] == pytest.approx(14.86, rel=1e-2)
+    assert out["comp_only_career_fp"] == pytest.approx(728.6, rel=1e-2)
     assert out["n_comps_with_nfl"] == 3
+    # With known position+pick we can pin the blended output exactly.
+    out_r1 = bp._project_arc(comps, position="RB", pick=10)  # R1_top10
+    # confidence = 3/8 = 0.375; baseline R1_top10 RB = 1600
+    # blended = 0.375*728.57 + 0.625*1600 = 273.21 + 1000 = 1273.21
+    expected = 0.375 * 728.57 + 0.625 * 1600.0
+    assert out_r1["projected_career_fp"] == pytest.approx(expected, rel=1e-2)
+    assert out_r1["projection_confidence"] == pytest.approx(0.375, rel=1e-2)
 
 
 def test_project_arc_no_nfl_careers():
+    """v3.4: zero NFL careers in the comp pool → fall back to the
+    pick-tier baseline (was: 0.0 pre-v3.4, which buried real draftees
+    like Fernando Mendoza below undrafted small-school WRs)."""
     comps = [
         {"distance": 0.0, "nfl_career": None},
         {"distance": 1.0, "nfl_career": None},
     ]
-    out = bp._project_arc(comps)
-    assert out["projected_career_fp"] == 0.0
-    assert out["projected_peak3_fp_pg"] == 0.0
+    out = bp._project_arc(comps, position="QB", pick=1)  # R1_top10
+    # confidence = 0/8 = 0; baseline R1_top10 QB = 3200
+    assert out["projected_career_fp"] == pytest.approx(3200.0)
     assert out["n_comps_with_nfl"] == 0
+    assert out["projection_source"].startswith("blend_0.00") or out["projection_source"].endswith("R1_top10")
+    # Unknown position/pick falls back to a low UDFA baseline.
+    out_u = bp._project_arc(comps)
+    assert out_u["n_comps_with_nfl"] == 0
+    assert out_u["projected_career_fp"] < 200  # UDFA-ish
 
 
 def test_project_arc_empty():
-    out = bp._project_arc([])
-    assert out["projected_career_fp"] == 0.0
+    """Empty comps + known pick → pure pick-tier baseline."""
+    out = bp._project_arc([], position="WR", pick=20)  # R1
+    assert out["projected_career_fp"] == pytest.approx(1250.0)
     assert out["n_comps_with_nfl"] == 0
 
 
@@ -295,6 +316,7 @@ def test_skill_positions_only_invariant(synthetic_corpus, synthetic_resolver,
         nfl_careers=synthetic_nfl_careers,
         ktc=synthetic_ktc,
         draft_classes=(2024,),
+        drafted_only=False,
     )
     for cls, rows in by_class.items():
         for r in rows:
@@ -309,6 +331,7 @@ def test_draft_class_boundary(synthetic_corpus, synthetic_resolver,
         nfl_careers=synthetic_nfl_careers,
         ktc=synthetic_ktc,
         draft_classes=(2024,),
+        drafted_only=False,
     )
     # last_season=2023 → draft_class=2024 only
     assert 2024 in by_class
@@ -331,6 +354,7 @@ def test_ktc_delta_math(synthetic_corpus, synthetic_resolver,
         nfl_careers=synthetic_nfl_careers,
         ktc=synthetic_ktc,
         draft_classes=(2024,),
+        drafted_only=False,
     )
     caleb = next(r for r in by_class[2024] if r["name"] == "Caleb Williams")
     assert caleb["ktc"] is not None
@@ -350,6 +374,7 @@ def test_ktc_missing_leaves_null_delta(synthetic_corpus, synthetic_resolver,
         nfl_careers=synthetic_nfl_careers,
         ktc={},
         draft_classes=(2024,),
+        drafted_only=False,
     )
     for r in by_class[2024]:
         assert r["ktc"] is None
@@ -369,6 +394,7 @@ def test_aggregated_all_artifact_round_trips(synthetic_corpus, synthetic_resolve
         nfl_careers=synthetic_nfl_careers,
         ktc=synthetic_ktc,
         draft_classes=(2024,),
+        drafted_only=False,
     )
     bp._write_artifacts(by_class, tmp_path)
     all_path = tmp_path / "prospects_all.json"
@@ -388,6 +414,7 @@ def test_idempotency_byte_identical(synthetic_corpus, synthetic_resolver,
         nfl_careers=synthetic_nfl_careers,
         ktc=synthetic_ktc,
         draft_classes=(2024,),
+        drafted_only=False,
     )
     d1 = tmp_path / "run1"
     d2 = tmp_path / "run2"
@@ -399,6 +426,7 @@ def test_idempotency_byte_identical(synthetic_corpus, synthetic_resolver,
         nfl_careers=synthetic_nfl_careers,
         ktc=synthetic_ktc,
         draft_classes=(2024,),
+        drafted_only=False,
     )
     bp._write_artifacts(by_class2, d2)
     a = (d1 / "prospects_all.json").read_bytes()

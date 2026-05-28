@@ -102,7 +102,15 @@ SOS_ADJ_CEIL = 1.10
 #     age = last_season - inferred_freshman_year + 18
 # where ``inferred_freshman_year`` is the player's first season in the
 # corpus. The +18 anchor is the typical age of an incoming freshman.
-DEFAULT_FRESHMAN_AGE = 18.0
+# v3.4: bumped from 18.0 to 19.0 — a typical CFB freshman is 18-19 at
+# season start, and the ProspectVector's age_at_last_season is "age
+# at the END of the final college season" which is generally ~6 months
+# into the calendar year following his birthday. So a freshman lines
+# up at ~19, sophomore 20, junior 21, senior 22. This matters because
+# the similarity engine weights age 20.0 — mis-anchoring everyone at
+# 18 makes drafted-as-juniors (Mendoza, Burrow, Mahomes) cluster with
+# true-18-year-olds when they should cluster with 21-22 yo seniors.
+DEFAULT_FRESHMAN_AGE = 19.0
 
 # Default age when no inference is possible (single-season seniors with
 # no class info). Equal to a typical junior/senior.

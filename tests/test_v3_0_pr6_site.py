@@ -63,7 +63,8 @@ def methodology_html():
 
 def test_prospects_page_renders_with_fixture(prospects_html, fixture_data):
     """Every prospect in the fixture should appear in the table."""
-    assert "<h2>Prospect <span class=\"accent\">Rankings — v3.0</span></h2>" in prospects_html
+    # v3.4: header bumped from v3.0 to v3.4 (Phil 2026-05-28 drafted-only).
+    assert "<h2>Prospect <span class=\"accent\">Rankings — v3.4</span></h2>" in prospects_html
     for p in fixture_data["prospects"]:
         assert p["name"] in prospects_html, f"missing prospect: {p['name']}"
 

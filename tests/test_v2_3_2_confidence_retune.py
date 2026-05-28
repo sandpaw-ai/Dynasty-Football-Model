@@ -196,23 +196,17 @@ def test_established_wr_confidence_unchanged(engine_and_site):
 
 
 def test_one_nfl_season_rookie_engine_unchanged(engine_and_site):
-    """1-NFL-season rookies route through the rookie engine which is
-    exempt from the v2.2 sample_confidence shrinkage. McMillan and
-    Jeanty (both 1-NFL-season rookies with 17 games) must stay in the
-    top tier.
-
-    v3.1 update (2026-05-24): threshold relaxed from top-30 to top-50
-    because the proven-production floor lifts banked veterans into
-    the top 20–40 (Stafford, Goff, Baker, Dak, Burrow, Kyler, Henry,
-    Adams, etc.). 1-NFL-season rookies have zero banked production
-    so the floor doesn't help them; they rank purely on the rookie
-    engine projection. The rookie engine itself is unchanged — the
-    test threshold reflects the reshuffled ABSOLUTE ranks.
+    """1-NFL-season rookies route through the rookie engine. McMillan
+    and Jeanty rank in the top 50 (McMillan) and top 70 (Jeanty)
+    after v3.7's retired-only filter cleaned up the comp pool. The
+    threshold was top-50 in v3.1; v3.7 broadens it for Jeanty because
+    his prior comp pool was inflated by active workhorse-RB rookies
+    (Bijan, Saquon) which are now excluded.
     """
     engine, _ = engine_and_site
     for name, max_rank in (
         ("Tetairoa McMillan", 50),
-        ("Ashton Jeanty", 50),
+        ("Ashton Jeanty", 75),  # v3.7: relaxed from 50
     ):
         rank = _rank(engine, name)
         assert rank is not None and rank <= max_rank, (

@@ -15,6 +15,127 @@ Format for each entry:
 
 ---
 
+## v3.7 — rookie engine retired-only comp pool + scaled missed-season penalty
+
+**Date:** 2026-05-28 (same day as v3.3 / v3.4 / v3.5 / v3.6, fifth pass)
+
+Phil's fifth 2026-05-28 brief:
+
+  > 1. "JJ Mcarthy seems to be ranked much too high. His stats from
+  >    his rookie season are pretty horrible. I think the jj mcarthy
+  >    example is a sign of something bigger. i still think there a
+  >    ton of historical players that are being omitted from the
+  >    database for comparison."
+  > 2. "Elic Ayomanor also seems vastly overrated for this reason."
+  > 3. "similarly to the joe mixon example, Kyler Murray did not put
+  >    up great stats in the last season in part due to injury."
+  > 4. "when i note individual players that are improperly ranked,
+  >    that needs to factor into the overall methodology and update
+  >    across all players."
+
+Diagnosis:
+
+1. **J.J. McCarthy's comp pool was 10-of-15 still-active players** —
+   Trevor Lawrence (active 2026), Tua (active), Lamar Jackson (active),
+   Justin Fields (active), Brock Purdy (active), Matthew Stafford
+   (active), Drake Maye (active), Zach Wilson (active), Sam Darnold
+   (active), Mac Jones (active). These are bust-or-mid careers in
+   progress whose "realised post-rookie career" was being computed
+   from their truncated current-state, inflating JJ's projection.
+   v3.5's retired-only mandate was applied to the cumulative-arc
+   engine but **NOT to the rookie engine** — the rookie engine has
+   its own `build_rookie_corpus` codepath. Elic Ayomanor had the
+   same root cause.
+
+2. **Kyler Murray played only 5 of 17 games in 2025 (injury).** The
+   v3.3 partial-season penalty was a step function: <8 games → 0.85.
+   Phil's intuition: losing 71% of a season warrants a deeper haircut.
+   v3.3 also stepped to 0.70 for a full missed season — a one-game
+   gap between 7 games (0.85) and 0 games (0.70) felt arbitrary.
+
+What changed
+: 1. **`rookie_nfl_fp_arc.build_rookie_corpus`** — new parameter
+     `exclude_active_last_season_at_or_after`. When set, arcs whose
+     `last_season >= threshold` are dropped from the rookie corpus.
+     `similarity_v1.run_engine` now passes `current_season - 1` (i.e.
+     2024 under current_season=2025), which matches the v3.5
+     cumulative-arc engine's exclusion rule exactly. J.J. McCarthy's
+     comp pool now reads: Matt Ryan, Ben Roethlisberger, Mike Vick,
+     Jay Cutler, Donovan McNabb, Tim Couch (washed), Blake Bortles
+     (washed), Ryan Fitzpatrick, David Carr (washed), Sam Bradford
+     (washed), Ryan Tannehill, Shaun King (washed) — the bust signal
+     Phil wanted surfaced.
+
+  2. **`v2_2_penalties.compute_missed_recent_season`** — partial-season
+     penalty is now a linear scale between `MISSED_FULL_SEASON_MULTIPLIER`
+     (0.70 at 0 games) and `PARTIAL_SEASON_MULTIPLIER` (0.95 at 14+
+     games). `PARTIAL_SEASON_GAME_THRESHOLD` raised 8 → 14 so a
+     player who lost more than 3 games to injury still pays a measurable
+     penalty. Reasons rendered on the player page now read
+     "only 5 of 17 games in 2025 (partial season — v3.7 scaled penalty)".
+     Kyler Murray's multiplier moves 0.85 → 0.774; his production
+     score drops appropriately.
+
+Expected output shift
+: * **J.J. McCarthy: rank ~25 → ~227.** His comp pool now leans on
+    Tim Couch / Bortles / David Carr / Bradford / Shaun King (all
+    washed) plus retired vets (Matt Ryan, Big Ben). Phil's mandate.
+  * **Elic Ayomanor: ~30 → ~69.** Same root cause as McCarthy.
+  * **Kyler Murray: rank #10 → #13.** Scaled missed-season penalty
+    (0.85 → 0.774) reflects the 5-of-17 games loss to injury.
+  * **Jaxson Dart: rank ~75 → ~174.** Phil's earlier complaint about
+    Dart's comp pool not reflecting bust risk — v3.7 lets Tebow /
+    Vince Young / Bortles / Andrew Luck (washed) dominate his pool.
+    This is the correct signal even if it lowers his absolute rank.
+  * **Ashton Jeanty: rank ~43 → ~64.** Retired-only filter removes
+    Bijan / Saquon / Najee / Jonathan Taylor / CMC / Kyren as comps,
+    leaving a more conservative pool.
+
+Validation
+: 9 new tests in `tests/test_v3_7_rookie_retired_and_scaled_penalty.py`:
+    * Scaled partial-season penalty at 5, 8, 13, and 14+ games.
+    * Full missed season still pays 0.70.
+    * Kyler Murray scaled multiplier verified on the live engine.
+    * J.J. McCarthy comp pool excludes active players.
+    * J.J. McCarthy drops out of top 100.
+    * Elic Ayomanor drops out of top 60.
+
+  Old v2.1 / v2.3.2 / v2.3.3 rookie-comp invariants were marked `xfail`
+  with explicit v3.7 reasons:
+    * `test_dart_top_50_sf` / `test_dart_comps_are_rookie_QBs` — the
+      pinned set (Burrow, Herbert, Stroud, Daniel Jones, Kyler, Caleb,
+      Maye, Bo Nix) is entirely active and excluded under v3.7.
+    * `test_jeanty_comps_are_rookie_RBs` / `test_mcmillan_comps_are_rookie_WRs`
+      — same root cause.
+    * `test_travis_hunter_top_80` — same.
+    * `test_jaxson_dart_inside_top_75` — v3.7 lets Tebow / Bortles /
+      Vince Young (washed) into Dart's pool, which Phil's mandate
+      explicitly wants.
+    * `test_one_nfl_season_rookie_engine_unchanged` — Jeanty threshold
+      relaxed from top-50 to top-75.
+
+  All 439 tests pass under v3.7. 14 xfailed (intentional retired
+  invariants from v3.1 / v3.5 / v3.7), 4 skipped (env-dependent).
+  The 3 pre-existing test_manager / test_prefetch failures (sqlalchemy
+  dynasty.db pollution) remain unrelated.
+
+Files touched
+: * `src/dynasty/engine/rookie_nfl_fp_arc.py` —
+    `exclude_active_last_season_at_or_after` parameter on
+    `build_rookie_corpus`.
+  * `src/dynasty/engine/similarity_v1.py` — pass the threshold to
+    `build_rookie_corpus`.
+  * `src/dynasty/engine/v2_2_penalties.py` — scaled partial-season
+    penalty + `PARTIAL_SEASON_GAME_THRESHOLD` 8 → 14 + new
+    `FULL_SEASON_GAMES` constant.
+  * `tests/test_v3_7_rookie_retired_and_scaled_penalty.py` — new
+    (9 tests).
+  * `tests/test_v2_1_rookie_nfl.py`, `tests/test_v2_3_2_confidence_retune.py`,
+    `tests/test_v2_3_3_washout_heavy_penalty.py` — retired-rookie
+    invariants xfailed with explicit v3.7 reasons.
+
+---
+
 ## v3.6 — prospect projection fixes (meaningful-comp threshold + baseline floor + nickname match)
 
 **Date:** 2026-05-28 (same day as v3.3 / v3.4 / v3.5, fourth pass)

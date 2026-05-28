@@ -458,11 +458,30 @@ def _hit_label(career: Optional[Mapping]) -> str:
 
 # v3.4: minimum number of NFL-career-bearing comps to FULLY trust the
 # comp-weighted projection. Below this, we blend toward the
-# pick-tier baseline (Phil 2026-05-28: an actual 1st-overall pick like
-# Fernando Mendoza shouldn't show projected_career_fp=1.4 just because
-# his college-fp comp pool happens to be UNC/Iowa backups who never
-# played in the NFL).
-FULL_CONFIDENCE_NFL_COMPS = 8
+# pick-tier baseline.
+#
+# v3.4: counted ANY comp with NFL data (career_fp > 0). v3.6 (Phil
+# 2026-05-28) tightens this: a comp only counts toward confidence if
+# their NFL career was meaningful (>= MEANINGFUL_NFL_CAREER_FP). A guy
+# who threw 6 fp worth of passes (Connor Cook) is not evidence that
+# the target will have an NFL career — it's noise. Without the
+# tightening, Fernando Mendoza (2026 #1 overall pick) projects 91 fp
+# because his comp pool includes 10 historical college QBs who got NFL
+# snaps but no NFL careers, which counts as "full confidence" and
+# overrides the R1_top10 QB baseline of 3,200.
+FULL_CONFIDENCE_NFL_COMPS = 12        # v3.6: raised from 8 (slower transition to comp-only)
+MEANINGFUL_NFL_CAREER_FP = 200.0      # v3.6: ≈1 starter-quality season
+
+# v3.6 (Phil 2026-05-28): a drafted player can never project below
+# this fraction of their pick-tier baseline. The NFL spent a real
+# pick on them; the comp-weighted projection cannot crush them all
+# the way to ~zero just because our college-similarity engine
+# happened to comp them to a bunch of college backups.
+MIN_BASELINE_FRACTION = 0.30          # 30% of pick-tier baseline = floor
+# Same floor concept for the *peak* and *years* fields so the player
+# page numbers stay internally consistent.
+MIN_BASELINE_PEAK3_FRACTION = 0.50
+MIN_BASELINE_YEARS_FRACTION = 0.50
 
 
 def _project_arc(
@@ -504,9 +523,18 @@ def _project_arc(
     proj_years = sum(w * x for w, x in zip(weights, yrs_list)) / tot
     stdev = statistics.pstdev(career_fps) if len(career_fps) > 1 else 0.0
     n_with_nfl = sum(1 for c in comp_records if c.get("nfl_career"))
+    # v3.6 — only count comps with a MEANINGFUL NFL career (≥ ~1 full
+    # starter-quality season) toward confidence. A guy who got 6 fp
+    # as a third-string QB is not evidence that the target will reach
+    # the NFL.
+    n_meaningful = sum(
+        1 for c in comp_records
+        if (c.get("nfl_career") or {}).get("career_fp", 0.0) >= MEANINGFUL_NFL_CAREER_FP
+    )
 
-    # v3.4 — confidence-blend with pick-tier baseline.
-    confidence = min(n_with_nfl / float(FULL_CONFIDENCE_NFL_COMPS), 1.0)
+    # v3.6 — confidence is driven by meaningful comps, with a higher
+    # FULL_CONFIDENCE threshold so the baseline retains weight further.
+    confidence = min(n_meaningful / float(FULL_CONFIDENCE_NFL_COMPS), 1.0)
     baseline = _baseline_projection(position, pick)
     blended_career = (
         confidence * proj_career + (1 - confidence) * baseline["projected_career_fp"]
@@ -518,10 +546,28 @@ def _project_arc(
         confidence * proj_years
         + (1 - confidence) * baseline["projected_years_in_league"]
     )
-    if confidence >= 0.999:
+
+    # v3.6 — hard floor: a drafted player's projection cannot drop
+    # below MIN_BASELINE_FRACTION of the pick-tier baseline. This
+    # prevents the comp-weighted number from crushing a #1 overall
+    # pick to ~zero just because we can't find good college comps.
+    if pick is not None and baseline["projected_career_fp"] > 0:
+        floor_career = MIN_BASELINE_FRACTION * baseline["projected_career_fp"]
+        floor_peak3 = MIN_BASELINE_PEAK3_FRACTION * baseline["projected_peak3_fp_pg"]
+        floor_years = MIN_BASELINE_YEARS_FRACTION * baseline["projected_years_in_league"]
+        floor_applied = blended_career < floor_career
+        blended_career = max(blended_career, floor_career)
+        blended_peak3 = max(blended_peak3, floor_peak3)
+        blended_years = max(blended_years, floor_years)
+    else:
+        floor_applied = False
+
+    if confidence >= 0.999 and not floor_applied:
         projection_source = "comp_weighted"
-    elif confidence <= 0.001:
+    elif confidence <= 0.001 and not floor_applied:
         projection_source = baseline["projection_source"]
+    elif floor_applied:
+        projection_source = f"floor_{int(MIN_BASELINE_FRACTION*100)}pct_{baseline['projection_source']}"
     else:
         projection_source = f"blend_{confidence:.2f}_{baseline['projection_source']}"
     return {
@@ -530,8 +576,10 @@ def _project_arc(
         "projected_years_in_league": round(blended_years, 2),
         "projected_career_fp_stdev": round(stdev, 1),
         "n_comps_with_nfl": n_with_nfl,
+        "n_meaningful_nfl_comps": n_meaningful,   # v3.6
         "projection_confidence": round(confidence, 3),
         "projection_source": projection_source,
+        "floor_applied": bool(floor_applied),     # v3.6
         "comp_only_career_fp": round(proj_career, 1),
         "pick_tier_baseline_fp": baseline["projected_career_fp"],
     }
@@ -947,27 +995,53 @@ def build_prospect_records(
             for pick in picks_for_year:
                 pos = (pick.get("position") or "").upper()
                 pick_name_norm = _normalize_name_for_pfr(pick.get("player_name", ""))
-                # Find the corpus match: same position, matching name
-                # (normalized). Preferred season match is year - 1 for
-                # already-drafted classes; for upcoming classes (e.g.
-                # 2027) we accept any last_season within a 2-year
-                # window (still in college, latest available cfbfastR
-                # season is 2025).
+                # Find the corpus match: same position, matching name.
+                # Preferred season match is year - 1 for already-drafted
+                # classes; for upcoming classes (e.g. 2027) we accept any
+                # last_season within a 2-year window.
+                #
+                # v3.6 (Phil 2026-05-28): when the strict full-name match
+                # misses, fall back to (last_name + school + position).
+                # PFR uses "KC Concepcion" while cfbfastR has
+                # "Kevin Concepcion" — same player, different nickname
+                # used as the first name.
                 match: Optional[ProspectVector] = None
+                pick_school = (pick.get("college") or "").strip().lower()
+                pick_last_name = pick_name_norm.split()[-1] if pick_name_norm else ""
                 same_name = [pv for pv in corpus
                              if pv.position == pos
                              and _normalize_name_for_pfr(pv.player_name) == pick_name_norm]
                 if same_name:
-                    # Prefer the closest last_season to year - 1, falling
-                    # back to the most-recent season available for
-                    # upcoming classes (Tankathon 2027 picks won't have
-                    # 2026 college data yet).
                     same_name.sort(key=lambda pv: (
                         abs(pv.last_season - (year - 1)),
                         -pv.last_season,
                     ))
                     if abs(same_name[0].last_season - (year - 1)) <= 2:
                         match = same_name[0]
+                # v3.6 fallback: last-name + school match (for KC/Kevin
+                # Concepcion-style nickname mismatches).
+                if match is None and pick_last_name and pick_school:
+                    last_name_school_matches = []
+                    for pv in corpus:
+                        if pv.position != pos:
+                            continue
+                        pv_school = (pv.school_last or "").strip().lower()
+                        pv_name_norm = _normalize_name_for_pfr(pv.player_name)
+                        pv_last = pv_name_norm.split()[-1] if pv_name_norm else ""
+                        if pv_last != pick_last_name:
+                            continue
+                        # School must roughly match (substring either way —
+                        # "Texas A&M" in pfr vs "Texas A&M;" in cfbfastR).
+                        if not (pv_school and pick_school and
+                                (pv_school in pick_school or pick_school in pv_school)):
+                            continue
+                        if abs(pv.last_season - (year - 1)) > 2:
+                            continue
+                        last_name_school_matches.append(pv)
+                    if len(last_name_school_matches) == 1:
+                        match = last_name_school_matches[0]
+                        log.info("v3.6 last-name+school match: PFR='%s' → corpus='%s' (school=%s)",
+                                 pick.get("player_name"), match.player_name, match.school_last)
                 if match is not None:
                     rec = build_prospect_record(
                         match, corpus, resolver, nfl_careers,

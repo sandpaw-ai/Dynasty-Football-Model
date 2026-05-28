@@ -132,28 +132,82 @@ def built_prospects():
 
 @_skip_no_data
 def test_2026_class_only_contains_pfr_drafted_players(built_prospects):
+    """v3.4 invariant: only PFR-drafted 2026 skill players appear in 2026.
+
+    v3.6 (Phil 2026-05-28): the corpus match strategy falls back to
+    (last_name + school) when full-name match misses (handles
+    nicknames like "KC Concepcion" PFR vs "Kevin Concepcion" cfbfastR).
+    The record's display name uses the corpus name, so the test has
+    to accept BOTH the PFR pick name AND a (last_name, college) match.
+    """
     with DATA_PFR_PATH.open(encoding="utf-8") as f:
         pfr = json.load(f)
-    drafted_2026_names = {
-        bp._normalize_name_for_pfr(p["player_name"])
-        for p in pfr["by_year"]["2026"]
+    drafted_2026 = [
+        p for p in pfr["by_year"]["2026"]
         if (p.get("position") or "").upper() in bp.SKILL_POSITIONS
+    ]
+    drafted_2026_names = {
+        bp._normalize_name_for_pfr(p["player_name"]) for p in drafted_2026
     }
+    drafted_2026_last_school = {
+        ((bp._normalize_name_for_pfr(p["player_name"]).split() or [""])[-1],
+         (p.get("college") or "").strip().lower())
+        for p in drafted_2026
+    }
+
+    def _is_in_drafted(name: str, school: str) -> bool:
+        norm = bp._normalize_name_for_pfr(name)
+        if norm in drafted_2026_names:
+            return True
+        last = (norm.split() or [""])[-1]
+        school_l = (school or "").strip().lower()
+        for pfr_last, pfr_school in drafted_2026_last_school:
+            if last == pfr_last and school_l and pfr_school and (
+                school_l in pfr_school or pfr_school in school_l
+            ):
+                return True
+        return False
+
     in_2026 = built_prospects.get(2026, [])
     assert in_2026, "no 2026 prospects \u2014 PFR loading broken?"
     leaked = []
     for r in in_2026:
-        norm = bp._normalize_name_for_pfr(r["name"])
-        if norm not in drafted_2026_names:
+        if not _is_in_drafted(r["name"], r.get("school") or ""):
             leaked.append(r["name"])
     assert not leaked, (
         f"Non-drafted players bled into 2026 class: {leaked[:5]} "
         f"(total {len(leaked)})"
     )
-    # And every PFR 2026 drafted skill player must appear in the class.
-    in_2026_names = {bp._normalize_name_for_pfr(r["name"]) for r in in_2026}
-    missing = drafted_2026_names - in_2026_names
-    assert not missing, f"PFR 2026 drafted players missing from class: {sorted(list(missing))[:5]}"
+    # Every PFR 2026 drafted skill player must appear in the class.
+    in_2026_keys = set()
+    for r in in_2026:
+        norm = bp._normalize_name_for_pfr(r["name"])
+        in_2026_keys.add(("name", norm))
+        last = (norm.split() or [""])[-1]
+        school_l = (r.get("school") or "").strip().lower()
+        in_2026_keys.add(("last+school", last, school_l))
+    missing = []
+    for p in drafted_2026:
+        pfr_norm = bp._normalize_name_for_pfr(p["player_name"])
+        if ("name", pfr_norm) in in_2026_keys:
+            continue
+        pfr_last = (pfr_norm.split() or [""])[-1]
+        pfr_school = (p.get("college") or "").strip().lower()
+        # Loose containment match against corpus schools ("Texas A&M"
+        # vs "Texas A&M;").
+        found = False
+        for (kind, *rest) in in_2026_keys:
+            if kind != "last+school":
+                continue
+            corp_last, corp_school = rest
+            if corp_last == pfr_last and pfr_school and corp_school and (
+                pfr_school in corp_school or corp_school in pfr_school
+            ):
+                found = True
+                break
+        if not found:
+            missing.append(p["player_name"])
+    assert not missing, f"PFR 2026 drafted players missing from class: {sorted(missing)[:5]}"
 
 
 @_skip_no_data

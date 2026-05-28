@@ -1226,7 +1226,7 @@ with per-prospect comp pages.</div>
 
     body = f"""<div class="container">
 
-<h2>Prospect <span class="accent">Rankings — v3.4</span></h2>
+<h2>Prospect <span class="accent">Rankings — v3.6</span></h2>
 <p class="lede">Skill-position prospects who were <strong>actually drafted</strong>
 in each class (per <a href="https://www.pro-football-reference.com/years/2026/draft.htm">Pro-Football-Reference</a>
 for 2022–2026; <a href="https://www.tankathon.com/nfl/big_board">Tankathon</a>
@@ -1478,32 +1478,56 @@ def _build_prospect_page(prospect: Dict, label: str, latest_ts: datetime,
     if proj_source:
         comp_only = proj.get("comp_only_career_fp")
         baseline = proj.get("pick_tier_baseline_fp")
-        confidence = proj.get("projection_confidence")
+        confidence = proj.get("projection_confidence") or 0.0
+        n_meaningful = proj.get("n_meaningful_nfl_comps", 0) or 0
+        n_with_nfl = proj.get("n_comps_with_nfl", 0) or 0
+        floor_applied = bool(proj.get("floor_applied"))
+        # v3.6: a low-meaningful-NFL-comp pool warning chip the user
+        # can see at a glance. Phil 2026-05-28: "how is he such a
+        # highly rated prospect [with no NFL comps]?" — we should
+        # SIGNAL low confidence visually, not pretend otherwise.
+        low_conf_warn = (
+            '<span class="hit-chip hit-bust" style="margin-left:6px">low-confidence comp pool</span>'
+            if n_meaningful < 3 else ""
+        )
         if proj_source == "comp_weighted":
             proj_desc = (
-                "Projection is purely comp-weighted (\u22658 comps with NFL careers)."
+                f"Projection is purely comp-weighted (≥{_esc(12)} meaningful comps with "
+                f"NFL careers ≥200 fp)."
             )
         elif proj_source.startswith("pick_tier_baseline"):
             proj_desc = (
                 f"Projection is the pick-tier baseline for this position. "
-                f"No comps with NFL data — the historical college players "
-                f"most similar to this prospect either didn't reach the NFL "
-                f"or aren't in our bridge file. The pick-tier baseline anchors "
-                f"the number to what players in this position+pick range "
-                f"historically produce."
+                f"No comps with meaningful NFL careers — the historical "
+                f"college players most similar to this prospect either "
+                f"didn't reach the NFL or only had cup-of-coffee stints "
+                f"(<200 career fp). The pick-tier baseline anchors the "
+                f"number to what players in this position+pick range "
+                f"historically produce. {low_conf_warn}"
+            )
+        elif proj_source.startswith("floor_"):
+            proj_desc = (
+                f"Projection is the v3.6 baseline FLOOR (30% of the "
+                f"pick-tier baseline). The comp-weighted projection "
+                f"({comp_only:,.0f}) was suppressed because the comp pool "
+                f"is dominated by college players who didn't reach the NFL. "
+                f"The NFL spent a real pick on this player, so the floor "
+                f"protects against an obviously-broken projection collapse. "
+                f"{low_conf_warn}"
             )
         else:
             proj_desc = (
                 f"Projection is a confidence-blend (“{_esc(proj_source)}”). "
-                f"With <strong>{proj.get('n_comps_with_nfl', 0)}</strong> comps "
-                f"that have NFL careers (confidence "
-                f"<strong>{confidence:.2f}</strong>), we blend the comp-only "
+                f"With <strong>{n_meaningful}</strong> meaningful comp NFL careers "
+                f"(≥200 career fp), confidence is "
+                f"<strong>{confidence:.2f}</strong>; we blend the comp-only "
                 f"projection (<strong>{comp_only:,.0f}</strong>) with the "
-                f"pick-tier baseline (<strong>{baseline:,.0f}</strong>)."
+                f"pick-tier baseline (<strong>{baseline:,.0f}</strong>). "
+                f"{low_conf_warn}"
             )
         proj_callout = (
             '<div class="callout" style="margin-top:8px">'
-            f'<strong>v3.4 projection methodology.</strong> {proj_desc}'
+            f'<strong>v3.6 projection methodology.</strong> {proj_desc}'
             '</div>'
         )
 

@@ -217,8 +217,11 @@ def test_project_arc_weighted_average_matches_hand_calc():
     """v3.4: the comp-only weighted average is still computed (now
     surfaced as ``comp_only_career_fp``) and matches the hand calc.
     The returned ``projected_career_fp`` is a confidence-blend of the
-    comp number with the pick-tier baseline; we test that here with
-    a thin sample (n_with_nfl=3 < FULL_CONFIDENCE_NFL_COMPS=8).
+    comp number with the pick-tier baseline.
+
+    v3.6 (Phil 2026-05-28): confidence is now driven by
+    ``n_meaningful_nfl_comps`` (comps with career_fp ≥ 200), not
+    ``n_comps_with_nfl``. FULL_CONFIDENCE_NFL_COMPS bumped 8 → 12.
     """
     comps = [
         {"distance": 0.0, "nfl_career": {"career_fp": 1000.0, "peak3_fp_pg": 20.0,
@@ -228,19 +231,21 @@ def test_project_arc_weighted_average_matches_hand_calc():
         {"distance": 3.0, "nfl_career": {"career_fp": 100.0, "peak3_fp_pg": 4.0,
                                           "seasons_played": 1}},
     ]
-    # weights: 1/(1+0)=1.0, 1/(1+1)=0.5, 1/(1+3)=0.25; tot=1.75
-    # comp_only career: (1*1000 + 0.5*500 + 0.25*100)/1.75 = 728.57
-    # No position/pick supplied — baseline defaults to UDFA tier (low).
+    # comp_only weighted average: (1*1000 + 0.5*500 + 0.25*100)/1.75 = 728.57
     out = bp._project_arc(comps)
     assert out["comp_only_career_fp"] == pytest.approx(728.6, rel=1e-2)
     assert out["n_comps_with_nfl"] == 3
+    # v3.6: only 2 of the 3 comps have career_fp >= MEANINGFUL_NFL_CAREER_FP=200
+    # (the 100-fp one doesn't count).
+    assert out["n_meaningful_nfl_comps"] == 2
     # With known position+pick we can pin the blended output exactly.
     out_r1 = bp._project_arc(comps, position="RB", pick=10)  # R1_top10
-    # confidence = 3/8 = 0.375; baseline R1_top10 RB = 1600
-    # blended = 0.375*728.57 + 0.625*1600 = 273.21 + 1000 = 1273.21
-    expected = 0.375 * 728.57 + 0.625 * 1600.0
+    # v3.6 confidence = n_meaningful / FULL_CONFIDENCE_NFL_COMPS = 2/12 = 0.1667
+    # baseline R1_top10 RB = 1600
+    # blended = 0.1667*728.57 + 0.8333*1600 = 121.43 + 1333.33 = 1454.76
+    expected = (2.0/12.0) * 728.57 + (10.0/12.0) * 1600.0
     assert out_r1["projected_career_fp"] == pytest.approx(expected, rel=1e-2)
-    assert out_r1["projection_confidence"] == pytest.approx(0.375, rel=1e-2)
+    assert out_r1["projection_confidence"] == pytest.approx(2.0/12.0, rel=1e-2)
 
 
 def test_project_arc_no_nfl_careers():

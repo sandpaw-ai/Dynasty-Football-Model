@@ -999,18 +999,37 @@ def run_engine(
     # is the mechanism that punishes the target for having wash-out
     # comps. Removing the busts from the corpus would have hidden
     # exactly the signal Phil wants amplified.
+    # v3.5 (Phil 2026-05-28): EXCLUDE currently-active players from the
+    # long-arc corpus and the broad comp pool. Comping Puka Nacua to
+    # Ja'Marr Chase / CeeDee Lamb / Justin Jefferson / Amon-Ra St. Brown
+    # systematically truncates Puka's projection because those comps'
+    # "careers" are only what they've accumulated through season-N —
+    # they're 25-26 with their best years still ahead. Phil's directive
+    # (verbatim): "if their 'last season' is 2025 or 'the most recent
+    # year of data' then that player should be omitted from the
+    # similarity score or comparison."
+    #
+    # "Active" here = ``last_season >= current_season - 1`` (i.e. played
+    # this year or last year). Anyone who actually retired (or hasn't
+    # played in 2+ seasons) is fair game as a comp. This is
+    # symmetrically more permissive than RETIRED_THROUGH_SEASON=2022,
+    # because the corpus is constantly aging — we don't want to
+    # permanently rule out 2023-and-earlier retirees just because the
+    # hardcoded constant lags.
+    def _is_active_for_comp(career: PlayerCareer) -> bool:
+        if career.last_season is None:
+            return False
+        return career.last_season >= (current_season - 1)
+
     long_arc_corpus: List[PlayerCareer] = []
     for c in careers.values():
         if len(c.seasons) < 2:
             continue
+        if _is_active_for_comp(c):
+            continue  # v3.5 — actives never go into the comp pool
         if not c.is_long_arc(through=retired_through):
             continue
-        if c.is_retired(through=retired_through):
-            long_arc_corpus.append(c)
-        else:
-            trimmed = c.with_completed_seasons_only(current_season)
-            if len(trimmed.seasons) >= 2:
-                long_arc_corpus.append(trimmed)
+        long_arc_corpus.append(c)
 
     # v3.2 — BROAD comp pool (survivorship-bias fix). The "long-arc"
     # corpus above is used as the high-information anchor for the
@@ -1031,12 +1050,9 @@ def run_engine(
             continue
         if len(c.seasons) < 2:
             continue
-        if c.is_retired(through=retired_through):
-            broad_comp_pool.append(c)
-        else:
-            trimmed = c.with_completed_seasons_only(current_season)
-            if len(trimmed.seasons) >= 2:
-                broad_comp_pool.append(trimmed)
+        if _is_active_for_comp(c):
+            continue  # v3.5 — actives never go into the comp pool
+        broad_comp_pool.append(c)
 
     # Career-length era multipliers (corpus-derived). Keep this on the
     # long-arc set — short-career arcs would corrupt the mobile/dual

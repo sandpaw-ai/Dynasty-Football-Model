@@ -15,6 +15,134 @@ Format for each entry:
 
 ---
 
+## v3.5 — retired-only comp pool + name-based NFL bridge fallback
+
+**Date:** 2026-05-28 (same day as v3.3 / v3.4, third pass)
+
+Phil's third 2026-05-28 brief (Slack DM, two distinct fixes):
+
+  > 1. "We are still having an issue on comparing current NFL players
+  >    to other current NFL players. Comparing Puka Nacua to Jamar
+  >    Chase, Justin Jefferson, Ceedee Lamb is actually a fair
+  >    comparison, but you cannot say that their seasons ended in 5
+  >    or 6 seasons for example because they are still playing...
+  >    For puka (and the entire model), we should only be projecting
+  >    their remaining NFL fantasy points remaining using retired
+  >    players... if their 'last season' is 2025 or 'the most recent
+  >    year of data' then that player should be omitted from the
+  >    similarity score or comparison."
+
+  > 2. "you are not connecting the college players being compared to
+  >    their NFL production. For example, you pull up Puka Nacua and
+  >    there are nfl players like boldin whose NFL stats are not
+  >    included. You need to then take that player and look them up
+  >    in pro-football reference using a similar name (because
+  >    remember sometimes there are data limitations like a player
+  >    has a 'Jr.' or the same name, etc.)"
+
+What changed (issue 1 — retired-only comp pool)
+: * `similarity_v1.run_engine` no longer admits currently-active players
+    into the `long_arc_corpus` or `broad_comp_pool`. "Currently active"
+    here = `last_season >= current_season - 1`. Under current_season=2025
+    that means anyone whose last NFL season is 2024 or 2025 is excluded
+    from the comp pool entirely. Trimmed-active-veteran logic
+    (`with_completed_seasons_only`) is gone; the gate is symmetrically
+    permissive of every retired player, including the v3.2
+    survivorship-bias short-career arcs.
+  * Puka Nacua's veteran-page comp grid no longer surfaces Ja'Marr
+    Chase / CeeDee Lamb / Justin Jefferson / Amon-Ra St. Brown as comps.
+    His top 5 is now Julio Jones (13 NFL seasons), Larry Fitzgerald
+    (17), A.J. Green (11), Percy Harvin (6, the lone bust signal),
+    Dez Bryant (9) — all retired players with realised post-age
+    careers, not truncated active careers.
+  * Top-tier QBs (Allen, Lamar, Mahomes) retain top-10/15 ranking
+    because their classic-QB comp pool (Brady, Brees, Manning, Favre,
+    Marino, Steve McNair, Cam Newton) is entirely retired and supports
+    an elite projection.
+
+What changed (issue 2 — name-based NFL bridge fallback)
+: * `scripts/build_prospects_v3.py` now loads a `(normalized_name,
+    position) → [gsis_id]` index from `data/nflverse/players.csv.gz`
+    and uses it as a fallback when the cfb-id-based bridge
+    (`data/bridge/ncaa_to_nfl.json`) doesn't have an entry for a
+    college comp. The cfb-id bridge is built from cfbfastR, which
+    starts in 2014; pre-2014 college players (Boldin, Calvin Johnson,
+    Hakeem Nicks, Kenny Stills, Sammie Stroughter, Demetrius Williams,
+    Justin Gage, Chris Givens) were silently missing NFL career fp.
+  * Tie-breaking: when multiple gsis_ids match the same
+    (name, position), the resolver uses college name as a secondary
+    filter. When still ambiguous, it returns None (don't guess).
+  * The comp row stamps `bridge_strategy: "name_fallback"` so the UI
+    can surface how each NFL match was made (cfb_id, name+college,
+    name+season, name_fallback).
+  * Puka Nacua's prospect-page comp grid now shows real career fp for:
+    Boldin (2,953), Calvin Johnson (2,399), Kenny Stills (1,038),
+    Sammie Stroughter (136), Demetrius Williams (188), etc. Previously
+    these were all blank.
+
+Expected output shift
+: * **Veteran rankings** — elite young players move slightly UP
+    because their projection isn't dragged down by truncated active
+    comps. Puka stays in the same neighborhood (rank ~18 → ~18) because
+    his comp-weighted projection moves modestly: 864 → 950. Bigger
+    shifts on borderline cases that previously had many active comps.
+  * **Prospect tab** — the historical-comp grid is much more complete.
+    Comps like Boldin / Calvin Johnson / Kenny Stills now show their
+    actual NFL careers, which lifts the comp-weighted projection for
+    prospects with strong historical comp profiles (and the
+    `hit_label` colouring — elite / starter / bust — now actually
+    fires for these players instead of defaulting to "unknown").
+
+Validation
+: 7 new tests in `tests/test_v3_5_retired_only_and_name_bridge.py`:
+    * Active players excluded from long_arc_corpus.
+    * Active players excluded from comp_pool_arcs.
+    * Puka Nacua's top-10 comp grid contains zero last_season>=2024
+      players, and Chase/Lamb/JJ/St. Brown don't appear in his top 25.
+    * Top QBs (Allen, Lamar, Mahomes) still anchor top-10/15.
+    * Name normalizer strips Jr./Sr./II/III/IV/V correctly.
+    * `_resolve_nfl_via_name` resolves Boldin → gsis 00-0022084 and
+      Calvin Johnson → gsis 00-0025389.
+    * Name-collision resolution falls back to college tie-breaker.
+
+  Existing v3.1/v3.2/v3.3 tests updated for the v3.5 reality:
+    * `test_long_arc_includes_modern_veterans` →
+      `test_long_arc_excludes_currently_active_veterans` (invariant
+      flipped).
+    * `test_active_player_in_corpus_only_completed_seasons` xfailed
+      with v3.5 reason.
+    * `test_clean_comp_pools_top5_busts_zero` relaxed to allow up to
+      1 bust in the top 5 (Percy Harvin showing up as Chase's comp
+      is a real injury-prone-WR signal the old corpus hid).
+    * `test_comp_pool_strictly_broader_than_long_arc` delta floor
+      lowered to 40 (was 400) because many of the v3.2 survivorship-
+      correction short-career players (Heinicke, Siemian, Brandon
+      Allen, Driskel, Damien Williams, Logan Thomas, C.J. Uzomah)
+      are still recently-active and now excluded by v3.5.
+    * `test_tyreek_hill_stays_top_100` un-xfailed — retired-only
+      comp pool restored him to the top 100.
+
+  All 431 tests pass under v3.5. 7 xfailed (intentional v3.1 retired
+  invariants + 1 new v3.4 invariant). 3 pre-existing test_manager /
+  test_prefetch failures (sqlalchemy dynasty.db pollution) remain
+  unrelated.
+
+Files touched
+: * `src/dynasty/engine/similarity_v1.py` — active-player exclusion
+    in long_arc_corpus + broad_comp_pool construction.
+  * `scripts/build_prospects_v3.py` — `_normalize_player_name` +
+    `_load_nfl_name_to_gsis` + `_resolve_nfl_via_name` +
+    `_load_nfl_players_meta` + name-fallback wiring in
+    `build_prospect_record`.
+  * `tests/test_v3_5_retired_only_and_name_bridge.py` — new (7 tests).
+  * `tests/test_v1_1_calibration.py` — invariant flipped + xfail.
+  * `tests/test_v3_2_corpus_expansion.py` — floor relaxed for v3.5.
+  * `tests/test_v2_3_3_washout_heavy_penalty.py` — top5_bust_count
+    bound relaxed.
+  * `tests/test_v3_1_veteran_recalibration.py` — Tyreek un-xfailed.
+
+---
+
 ## v3.4 — drafted-only prospects + pick-tier baseline projection
 
 **Date:** 2026-05-28 (same day as v3.3, second pass)

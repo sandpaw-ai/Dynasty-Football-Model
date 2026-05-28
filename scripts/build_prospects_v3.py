@@ -278,6 +278,118 @@ def _load_ktc(path: Path) -> Dict[Tuple[str, str], Dict]:
     return out
 
 
+def _normalize_player_name(name: str) -> str:
+    """Fold a player name for name-based bridge matching. Lowercase,
+    strip punctuation, drop suffixes (Jr/III/IV), collapse whitespace.
+    """
+    if not name:
+        return ""
+    n = name.lower().strip()
+    for ch in (".", ",", "'", "’"):
+        n = n.replace(ch, " ")
+    n = " ".join(n.split())
+    for suf in (" jr", " sr", " ii", " iii", " iv", " v"):
+        if n.endswith(suf):
+            n = n[: -len(suf)].rstrip()
+    return n
+
+
+def _load_nfl_name_to_gsis(players_path: Path) -> Dict[Tuple[str, str], List[str]]:
+    """v3.5 (Phil 2026-05-28) — name-based NFL bridge fallback.
+
+    Phil's brief: "you are not connecting the college players being
+    compared to their NFL production. For example, you pull up Puka
+    Nacua and there are nfl players like boldin whose NFL stats are
+    not included. You need to then take that player and look them up
+    in pro-football reference using a similar name (because remember
+    sometimes there are data limitations like a player has a 'Jr.' or
+    the same name, etc.)"
+
+    The cfb-id-based bridge (data/bridge/ncaa_to_nfl.json) was built
+    from cfbfastR + nflverse, which starts in 2014. Pre-2014 college
+    players (Boldin, Calvin Johnson, Hakeem Nicks, etc.) have no
+    cfb_player_id linkage. This lookup uses nflverse's players.csv.gz
+    — the full 1999+ NFL player roster — to fall back to a
+    (normalized_name, position) match when the cfb-id bridge misses.
+
+    Returns {(normalized_name, position): [gsis_id, ...]}. Lists allow
+    collision detection (e.g. two distinct "Adrian Peterson" RBs);
+    callers should use college-name as a tie-breaker when there are
+    multiple matches.
+    """
+    out: Dict[Tuple[str, str], List[str]] = {}
+    if not players_path.exists():
+        log.warning("nflverse players.csv.gz not found at %s — name bridge will be empty", players_path)
+        return out
+    with gzip.open(players_path, "rt", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            gsis = row.get("gsis_id")
+            pos = (row.get("position") or row.get("position_group") or "").upper()
+            display = row.get("display_name") or ""
+            if not gsis or pos not in ("QB", "RB", "WR", "TE"):
+                continue
+            key = (_normalize_player_name(display), pos)
+            if not key[0]:
+                continue
+            bucket = out.setdefault(key, [])
+            if gsis not in bucket:
+                bucket.append(gsis)
+    log.info("NFL name bridge indexed: %d (name, position) keys", len(out))
+    return out
+
+
+def _resolve_nfl_via_name(
+    comp_name: str,
+    comp_position: str,
+    comp_school: str,
+    name_index: Mapping[Tuple[str, str], List[str]],
+    players_meta: Mapping[str, Dict],
+) -> Optional[Tuple[str, str]]:
+    """Return ``(gsis_id, display_name)`` for the best name-bridge match,
+    or None. When multiple gsis_ids match the same (name, position),
+    we tie-break by college (case-insensitive substring) and fall back
+    to None when ambiguous.
+    """
+    key = (_normalize_player_name(comp_name), (comp_position or "").upper())
+    bucket = name_index.get(key)
+    if not bucket:
+        return None
+    if len(bucket) == 1:
+        gsis = bucket[0]
+        return (gsis, players_meta.get(gsis, {}).get("display_name") or comp_name)
+    # Multiple matches — tie-break by college.
+    if comp_school:
+        sc = comp_school.lower().strip()
+        for gsis in bucket:
+            meta = players_meta.get(gsis) or {}
+            c_meta = (meta.get("college_name") or "").lower().strip()
+            if c_meta and (sc in c_meta or c_meta in sc):
+                return (gsis, meta.get("display_name") or comp_name)
+    # Ambiguous — don't guess.
+    return None
+
+
+def _load_nfl_players_meta(players_path: Path) -> Dict[str, Dict]:
+    """Load nflverse players.csv.gz into {gsis_id: {display_name,
+    position, college_name, last_season}} for tie-breaking name matches."""
+    out: Dict[str, Dict] = {}
+    if not players_path.exists():
+        return out
+    with gzip.open(players_path, "rt", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            gsis = row.get("gsis_id")
+            if not gsis:
+                continue
+            out[gsis] = {
+                "display_name": row.get("display_name"),
+                "position": (row.get("position") or "").upper(),
+                "college_name": row.get("college_name"),
+                "last_season": row.get("last_season"),
+            }
+    return out
+
+
 def _load_nfl_careers(path: Path) -> Dict[str, Dict]:
     """Aggregate nflverse player_stats_season into per-gsis career summary.
 
@@ -589,19 +701,54 @@ def build_prospect_record(
     nfl_careers: Mapping[str, Dict],
     top_k: int = DEFAULT_TOP_K,
     pfr_pick: Optional[Mapping] = None,
+    name_to_gsis: Optional[Mapping[Tuple[str, str], List[str]]] = None,
+    players_meta: Optional[Mapping[str, Dict]] = None,
 ) -> Dict:
     """Build the full prospect dict for ``target``.
 
     ``pfr_pick`` is the matching PFR draft entry (round/pick/team), used
     by v3.4 to anchor the projection on a pick-tier baseline when the
     comp pool has few NFL careers. Pass ``None`` for un-drafted prospects.
+
+    ``name_to_gsis`` / ``players_meta`` (v3.5, Phil 2026-05-28) supply
+    the name-based NFL bridge fallback. When the cfb-id bridge doesn't
+    have an entry for a college comp (typically pre-2014 cfbfastR
+    gaps), we look the comp up by normalized name + position. This
+    fills in NFL career data for Boldin, Calvin Johnson, Hakeem Nicks,
+    Kenny Stills, etc. — comps that previously showed "unknown / —"
+    on the prospect page even though they had real NFL careers.
     """
     comps = find_similar_prospects(target, corpus, top_k=top_k, resolver=resolver)
     comp_records: List[Dict] = []
+    name_to_gsis = name_to_gsis or {}
+    players_meta = players_meta or {}
     for c in comps:
         nfl_career = None
-        if c.nfl_gsis_id:
-            nfl_career = nfl_careers.get(c.nfl_gsis_id)
+        nfl_gsis_id = c.nfl_gsis_id
+        nfl_display_name = c.nfl_display_name
+        bridge_strategy = c.bridge_match_strategy
+        if nfl_gsis_id:
+            nfl_career = nfl_careers.get(nfl_gsis_id)
+        # v3.5 name-fallback: when the cfb-id bridge missed OR returned
+        # a gsis without a career record (e.g. retired pre-1999 and
+        # absent from the main nflverse stats file), try matching by
+        # name + position against nflverse players.csv.gz.
+        if (not nfl_gsis_id or not nfl_career) and name_to_gsis:
+            resolved = _resolve_nfl_via_name(
+                comp_name=c.comp_player_name,
+                comp_position=c.comp_position or target.position,
+                comp_school=c.comp_school_last or "",
+                name_index=name_to_gsis,
+                players_meta=players_meta,
+            )
+            if resolved is not None:
+                cand_gsis, cand_display = resolved
+                cand_career = nfl_careers.get(cand_gsis)
+                if cand_career:
+                    nfl_gsis_id = cand_gsis
+                    nfl_display_name = cand_display
+                    nfl_career = cand_career
+                    bridge_strategy = "name_fallback"
         rec = {
             "name": c.comp_player_name,
             "slug": _slugify(c.comp_player_name, c.comp_cfb_player_id),
@@ -610,10 +757,11 @@ def build_prospect_record(
             "class_year": c.comp_last_season + 1,
             "similarity": c.similarity,
             "distance": c.distance,
-            "nfl_gsis_id": c.nfl_gsis_id,
-            "nfl_display_name": c.nfl_display_name,
+            "nfl_gsis_id": nfl_gsis_id,
+            "nfl_display_name": nfl_display_name,
             "nfl_career": nfl_career,
             "hit_label": _hit_label(nfl_career),
+            "bridge_strategy": bridge_strategy,
         }
         comp_records.append(rec)
 
@@ -764,6 +912,8 @@ def build_prospect_records(
     top_k: int = DEFAULT_TOP_K,
     pfr_path: Optional[Path] = None,
     drafted_only: bool = True,
+    name_to_gsis: Optional[Mapping[Tuple[str, str], List[str]]] = None,
+    players_meta: Optional[Mapping[str, Dict]] = None,
 ) -> Dict[int, List[Dict]]:
     """Return {draft_class: [prospect_record, ...]}.
 
@@ -822,6 +972,8 @@ def build_prospect_records(
                     rec = build_prospect_record(
                         match, corpus, resolver, nfl_careers,
                         top_k=top_k, pfr_pick=pick,
+                        name_to_gsis=name_to_gsis,
+                        players_meta=players_meta,
                     )
                     rec["corpus_match"] = True
                 else:
@@ -847,8 +999,12 @@ def build_prospect_records(
         log.info("legacy mode: %d corpus targets across classes %s",
                  len(targets), sorted(draft_classes))
         for pv in targets:
-            rec = build_prospect_record(pv, corpus, resolver, nfl_careers,
-                                        top_k=top_k)
+            rec = build_prospect_record(
+                pv, corpus, resolver, nfl_careers,
+                top_k=top_k,
+                name_to_gsis=name_to_gsis,
+                players_meta=players_meta,
+            )
             rec["drafted"] = None
             rec["corpus_match"] = True
             records.append(rec)
@@ -947,6 +1103,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     log.info("KTC entries loaded: %d", len(ktc))
     nfl_careers = _load_nfl_careers(args.nfl)
     log.info("NFL careers loaded: %d gsis ids", len(nfl_careers))
+    # v3.5 (Phil 2026-05-28): name-based NFL bridge fallback for college
+    # comps where the cfb-id bridge missed (typically pre-2014 cfbfastR
+    # gaps — Boldin, Calvin Johnson, Hakeem Nicks, etc.).
+    players_csv = Path("data/nflverse/players.csv.gz")
+    name_to_gsis = _load_nfl_name_to_gsis(players_csv)
+    players_meta = _load_nfl_players_meta(players_csv)
 
     by_class = build_prospect_records(
         corpus=corpus,
@@ -957,6 +1119,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         top_k=args.top_k,
         pfr_path=args.pfr_draft,
         drafted_only=not args.all_corpus,
+        name_to_gsis=name_to_gsis,
+        players_meta=players_meta,
     )
     _write_artifacts(by_class, args.out_dir)
     return 0

@@ -87,8 +87,17 @@ def test_richardson_has_top5_busts(engine):
 
 
 def test_clean_comp_pools_top5_busts_zero(engine):
-    """Players whose top-5 comps are all long-tenure NFL careers must
-    have top5_bust_count == 0 and survival near 1.0.
+    """Players whose top-5 comps are predominantly long-tenure NFL
+    careers should have low top5_bust_count.
+
+    v3.5 (Phil 2026-05-28) removed active players from the comp pool
+    entirely, which slightly increased the surface area of retired
+    short-career comps (e.g. Percy Harvin showing up as a Ja'Marr
+    Chase comp — a real injury-prone-WR signal that the old corpus
+    was hiding by including still-playing Chase / Lamb / JJ /
+    St. Brown as truncated comps). We allow up to 1 bust in the
+    top 5; survival multiplier should still stay reasonably high
+    (>= 0.80) because the rest of the pool is clean.
     """
     for name in (
         "Josh Allen", "Patrick Mahomes", "Lamar Jackson",
@@ -97,13 +106,13 @@ def test_clean_comp_pools_top5_busts_zero(engine):
         row = _row(engine, name)
         if row is None:
             continue
-        assert row["top5_bust_count"] == 0, (
-            f"{name} top5_bust_count {row['top5_bust_count']} - "
-            f"clean comp pool should be 0"
+        assert row["top5_bust_count"] <= 1, (
+            f"{name} top5_bust_count {row['top5_bust_count']} — "
+            f"clean comp pool should have ≤1 bust"
         )
-        assert row["survival_multiplier"] >= 0.93, (
-            f"{name} survival {row['survival_multiplier']} - "
-            f"clean comp pool should keep survival near 1.0"
+        assert row["survival_multiplier"] >= 0.80, (
+            f"{name} survival {row['survival_multiplier']} — "
+            f"clean comp pool should keep survival reasonably high"
         )
 
 

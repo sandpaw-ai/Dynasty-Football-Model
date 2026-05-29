@@ -453,6 +453,7 @@ def build_rookie_corpus(
     require_post_rookie_season: bool = False,
     min_total_seasons: int = 0,
     bust_aware: bool = True,
+    exclude_active_last_season_at_or_after: Optional[int] = None,
 ) -> List[RookieProfile]:
     """Walk the full arc set, snapshot each player's rookie-year vector.
 
@@ -495,6 +496,16 @@ def build_rookie_corpus(
             v2.3.3 wash-out penalty in ``v2_2_penalties.compute_survival``
             is the mechanism that punishes targets with bust-heavy
             comp pools).
+      exclude_active_last_season_at_or_after: v3.7 (Phil 2026-05-28).
+            Drop any arc whose last_season is >= this value. Used to
+            implement the v3.5 "retired-only comp pool" mandate for
+            the rookie engine path (which was missed when v3.5 only
+            touched the cumulative-arc engine). Set to ``current_season``
+            in production so any player who played in 2024 or 2025
+            (with current_season=2025) is excluded from the rookie
+            comp pool. Phil's worked example: J.J. McCarthy was being
+            comped to Lawrence / Tua / Lamar / Fields / Purdy / etc. —
+            all 2025-active QBs whose careers haven't played out.
       bust_aware: v2.3.5. When True (default), the corpus explicitly
             includes year-1-only busts (players with no realised year 2+).
             The projection layer naturally contributes zero from these
@@ -518,6 +529,15 @@ def build_rookie_corpus(
         if arc.position not in POSITION_ENCODING:
             continue
         if not arc.career_arc:
+            continue
+        # v3.7 (Phil 2026-05-28): retired-only filter for the rookie
+        # comp pool. An arc whose last_season is at or after the
+        # current season threshold is currently active and gets
+        # excluded so they don't appear as truncated-career comps
+        # (Phil's J.J. McCarthy worked example).
+        if (exclude_active_last_season_at_or_after is not None
+                and arc.last_season is not None
+                and arc.last_season >= exclude_active_last_season_at_or_after):
             continue
         # Resolve actual rookie season.
         actual_rookie_year = rs_map.get(arc.player_id)

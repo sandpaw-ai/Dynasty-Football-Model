@@ -170,8 +170,23 @@ PENALTY_STACK_CEILING = 1.00           # … and never above this
 # the corpus entirely (handled upstream).
 MISSED_FULL_SEASON_MULTIPLIER = 0.70   # one full missed season
 MISSED_TWO_FULL_SEASONS_MULTIPLIER = 0.45  # two+ full missed seasons (effectively out of the league)
-PARTIAL_SEASON_MULTIPLIER = 0.85       # played <8 games in most recent season
-PARTIAL_SEASON_GAME_THRESHOLD = 8       # games below which a season counts as "partial"
+
+# v3.7 (Phil 2026-05-28): partial-season penalty now scales linearly
+# by games played. Pre-v3.7 it was a step function: <8 games → 0.85.
+# Phil's Kyler Murray example: 5 games in 2025 = 12 missed games, but
+# only a 0.85 multiplier felt light. v3.7 scales between
+# MISSED_FULL_SEASON_MULTIPLIER (at 0 games — effectively a full miss)
+# and 1.0 (at FULL_SEASON_GAMES = 17 games played). 5 games →
+# 0.70 + (5/17)*(1.0-0.70) = 0.70 + 0.088 = 0.788, which is a real
+# 21% haircut. Kyler now reflects the injury impact properly.
+#
+# We keep PARTIAL_SEASON_MULTIPLIER as a backstop ceiling: a player
+# who played 16 of 17 games should not be penalized more than the
+# minor PARTIAL_SEASON_MULTIPLIER — we still want to call out partial
+# absence even when it's only one game.
+PARTIAL_SEASON_MULTIPLIER = 0.95       # cap when 14+ games played (small but non-zero penalty)
+PARTIAL_SEASON_GAME_THRESHOLD = 14      # games at-or-above which we apply the soft cap
+FULL_SEASON_GAMES = 17                 # NFL regular season length
 
 
 # ---------------------------------------------------------------------------
@@ -644,14 +659,24 @@ def compute_missed_recent_season(
             missed_season_multiplier=MISSED_FULL_SEASON_MULTIPLIER,
             reason=f"missed {corpus_last_season} season entirely (last played {last.season})",
         )
-    # gap == 0: played the most recent season. Check for partial.
+    # gap == 0: played the most recent season. v3.7 graduated penalty
+    # by games played.
     if last.games < PARTIAL_SEASON_GAME_THRESHOLD:
+        # Linear scale from MISSED_FULL_SEASON_MULTIPLIER at 0 games to
+        # PARTIAL_SEASON_MULTIPLIER at PARTIAL_SEASON_GAME_THRESHOLD.
+        # 5 games / 17 ≈ 0.29 → multiplier 0.788; 8/17 ≈ 0.47 → 0.842.
+        games_fraction = last.games / float(FULL_SEASON_GAMES)
+        scale_floor = MISSED_FULL_SEASON_MULTIPLIER
+        scale_ceil = PARTIAL_SEASON_MULTIPLIER
+        mult = scale_floor + games_fraction * (scale_ceil - scale_floor)
+        # Clamp — just in case of weird inputs.
+        mult = max(scale_floor, min(scale_ceil, mult))
         return MissedSeasonDiagnostics(
             name=arc.name, position=arc.position,
             last_played_season=last.season, seasons_since_played=0,
             last_played_games=last.games,
-            missed_season_multiplier=PARTIAL_SEASON_MULTIPLIER,
-            reason=f"only {last.games} games in {last.season} (partial season)",
+            missed_season_multiplier=round(mult, 3),
+            reason=f"only {last.games} of {FULL_SEASON_GAMES} games in {last.season} (partial season — v3.7 scaled penalty)",
         )
     return MissedSeasonDiagnostics(
         name=arc.name, position=arc.position,

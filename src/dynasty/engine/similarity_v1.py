@@ -1142,6 +1142,15 @@ def run_engine(
         rookie_season_by_pid=rookie_season_by_pid,
         league_format=BASE_FORMAT,
         exclude_rookie_seasons={current_season},
+        # v3.7 (Phil 2026-05-28): apply the v3.5 retired-only mandate
+        # to the rookie engine path too. Without this, J.J. McCarthy's
+        # rookie-corpus comps were dominated by Lawrence / Tua / Lamar /
+        # Fields / Purdy / Stafford / Maye / Zach Wilson / etc. — all
+        # 2025-active QBs whose careers haven't played out. Phil's
+        # mandate: "if their 'last season' is 2025 or 'the most recent
+        # year of data' then that player should be omitted from the
+        # similarity score or comparison."
+        exclude_active_last_season_at_or_after=current_season - 1,
     )
 
     rankings: List[Dict] = []
